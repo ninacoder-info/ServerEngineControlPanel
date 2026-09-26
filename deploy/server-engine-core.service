@@ -1,0 +1,16 @@
+[Unit]
+Description=Server Engine Python control plane
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/server-engine/core
+ExecStart=/opt/server-engine/core/run.sh
+Restart=on-failure
+RestartSec=3
+User=serverengine
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

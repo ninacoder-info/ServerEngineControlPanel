@@ -1,0 +1,41 @@
+services:
+  installer-test:
+    build:
+      context: .
+      dockerfile: docker/test-installer.Dockerfile
+    image: server-engine-installer-test
+    volumes:
+      - .:/src
+      - installer-pip-cache:/root/.cache/pip
+      - installer-npm-cache:/root/.npm
+
+  panel-live:
+    build:
+      context: .
+      dockerfile: docker/test-installer.Dockerfile
+    image: server-engine-installer-test
+    volumes:
+      - .:/src
+      - installer-pip-cache:/root/.cache/pip
+      - installer-npm-cache:/root/.npm
+      - installer-live-state:/var/lib/server-engine-test
+      - installer-live-logs:/var/log/server-engine
+    ports:
+      - "18888:18888"
+      - "18000:18000"
+    environment:
+      SE_ADMIN_USER: admin
+      SE_ADMIN_PASSWORD: change-me-now
+      SE_DB_PATH: /var/lib/server-engine-test/control.db
+    command:
+      - bash
+      - -lc
+      - >-
+        chmod +x /src/docker/panel-supervisor.sh &&
+        exec /src/docker/panel-supervisor.sh
+
+volumes:
+  installer-pip-cache:
+  installer-npm-cache:
+  installer-live-state:
+  installer-live-logs:

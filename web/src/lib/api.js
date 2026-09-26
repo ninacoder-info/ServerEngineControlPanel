@@ -1,0 +1,2 @@
+export async function apiRequest(url, options={}){return fetch(url,{...options,credentials:'include',headers:{'content-type':'application/json',...(options.headers||{})}})}
+export async function readApiError(response,fallback='Request failed'){try{const body=await response.json();const detail=body.detail;return typeof detail==='string'?detail:detail?.message||JSON.stringify(detail)||fallback}catch{return fallback}}

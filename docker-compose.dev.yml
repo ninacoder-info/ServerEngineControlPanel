@@ -1,0 +1,40 @@
+services:
+  core-dev:
+    image: python:3.12-slim
+    working_dir: /app
+    ports:
+      - "18000:8000"
+    environment:
+      SE_DB_PATH: /var/lib/server-engine/control.db
+      SE_ADMIN_USER: admin
+      SE_ADMIN_PASSWORD: change-me-now
+    volumes:
+      - ./core:/app
+      - core-dev-pip-cache:/root/.cache/pip
+      - core-dev-state:/var/lib/server-engine
+    command: >-
+      sh -c "pip install -e . &&
+      uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+
+  web-dev:
+    image: node:22-bookworm
+    working_dir: /app
+    volumes:
+      - ./web:/app
+      - web-dev-node-modules:/app/node_modules
+      - web-dev-npm-cache:/root/.npm
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:18000
+    depends_on:
+      - core-dev
+    command: >-
+      bash -lc "npm install &&
+      npm run dev -- --host 0.0.0.0"
+
+volumes:
+  core-dev-pip-cache:
+  core-dev-state:
+  web-dev-node-modules:
+  web-dev-npm-cache:

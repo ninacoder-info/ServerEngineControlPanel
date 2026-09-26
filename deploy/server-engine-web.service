@@ -1,0 +1,16 @@
+[Unit]
+Description=Server Engine web control panel
+After=server-engine-core.service
+Requires=server-engine-core.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/server-engine/web
+ExecStart=/opt/server-engine/web/run.sh
+Restart=on-failure
+RestartSec=3
+User=serverengine
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

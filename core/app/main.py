@@ -1,0 +1,33 @@
+import os
+import secrets
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+
+from app.api.routes import auth, file_manager, jobs, servers, services, settings, system, websites
+from app.auth import AuthStore
+from app.services.auth_service import AuthService
+
+DB_PATH = os.getenv("SE_DB_PATH", "/var/lib/server-engine/control.db")
+BOOTSTRAP_USER = os.getenv("SE_ADMIN_USER", "admin")
+BOOTSTRAP_PASSWORD = os.getenv("SE_ADMIN_PASSWORD") or secrets.token_urlsafe(18)
+
+
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    store = AuthStore(DB_PATH, BOOTSTRAP_USER, BOOTSTRAP_PASSWORD)
+    application.state.auth_service = AuthService(store)
+    if not os.getenv("SE_ADMIN_PASSWORD"):
+        print(f"Server Engine bootstrap password for {BOOTSTRAP_USER}: {BOOTSTRAP_PASSWORD}", flush=True)
+    yield
+
+
+app = FastAPI(title="Server Engine Core API", version="0.1.0", lifespan=lifespan)
+app.include_router(auth.router)
+app.include_router(system.router)
+app.include_router(servers.router)
+app.include_router(jobs.router)
+app.include_router(services.router)
+app.include_router(file_manager.router)
+app.include_router(settings.router)
+app.include_router(websites.router)

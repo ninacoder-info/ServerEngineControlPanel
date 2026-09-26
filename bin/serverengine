@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+native_prefix="/opt/server-engine"
+test_compose=(docker compose -f "$repo_dir/docker-compose.test.yml")
+dev_compose=(docker compose -f "$repo_dir/docker-compose.dev.yml")
+
+usage() {
+  cat <<'EOF'
+Usage: serverengine <command> [target]
+
+Commands:
+  start [dev|panel]     Start the development stack or live test panel
+  restart [dev|panel]   Restart running services without rebuilding
+  update [panel]        Recreate panel and run the current installer/code
+  stop [dev|panel]      Stop the selected environment
+  logs [dev|panel]      Follow service logs
+  status [dev|panel]    Show service status
+  watch [dev|panel]     Automatically reload after source changes
+  native-restart        Restart native systemd services
+  native-status         Show native systemd status
+EOF
+}
+
+target="${2:-dev}"
+case "${1:-help}" in
+  start)
+    if [ "$target" = panel ]; then "${test_compose[@]}" up -d panel-live; else "${dev_compose[@]}" up -d; fi
+    ;;
+  restart)
+    if [ "$target" = panel ]; then "${test_compose[@]}" restart panel-live; else "${dev_compose[@]}" restart; fi
+    ;;
+  update)
+    if [ "$target" != panel ]; then echo "Use 'serverengine update panel' for the installer-backed panel." >&2; exit 2; fi
+    if "${test_compose[@]}" ps --status running --services | grep -qx panel-live; then
+      "${test_compose[@]}" exec -T panel-live bash -lc 'pkill -TERM -x node || true'
+    else
+      "${test_compose[@]}" up -d panel-live
+    fi
+    echo "--- current panel log ---"
+    "${test_compose[@]}" logs --tail=120 panel-live
+    ;;
+  stop)
+    if [ "$target" = panel ]; then "${test_compose[@]}" stop panel-live; else "${dev_compose[@]}" stop; fi
+    ;;
+  logs)
+    if [ "$target" = panel ]; then "${test_compose[@]}" logs -f panel-live; else "${dev_compose[@]}" logs -f; fi
+    ;;
+  watch)
+    node "$repo_dir/bin/watch-serverengine.mjs" "$target"
+    ;;
+  status)
+    if [ "$target" = panel ]; then "${test_compose[@]}" ps; else "${dev_compose[@]}" ps; fi
+    ;;
+  native-restart) systemctl restart server-engine-core server-engine-web ;;
+  native-status) systemctl status server-engine-core server-engine-web --no-pager ;;
+  -h|--help|help) usage ;;
+  *) echo "Unknown command: $1" >&2; usage >&2; exit 2 ;;
+esac
