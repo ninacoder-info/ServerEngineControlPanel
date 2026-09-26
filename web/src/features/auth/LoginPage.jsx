@@ -1,3 +1,56 @@
-import React from 'react'
-import { Server } from 'lucide-react'
-export default function LoginPage({onLogin,error:authError}){const[username,setUsername]=React.useState('admin');const[password,setPassword]=React.useState('');const[error,setError]=React.useState('');const[busy,setBusy]=React.useState(false);async function submit(e){e.preventDefault();setBusy(true);setError('');const ok=await onLogin({username,password});setBusy(false);if(!ok)setError(authError||'Invalid username or password')}return <div className="login-page"><div className="login-card"><div className="brand-mark"><Server size={22}/></div><p className="eyebrow">SERVER ENGINE</p><h1>Sign in to your control panel</h1><p className="login-copy">Manage your infrastructure from one secure place.</p><form onSubmit={submit} className="mt-8 space-y-4"><label>Username<input value={username} onChange={e=>setUsername(e.target.value)} autoComplete="username"/></label><label>Password<input type="password" value={password} onChange={e=>setPassword(e.target.value)} autoComplete="current-password" autoFocus/></label>{(error||authError)&&<p className="error-text">{error||authError}</p>}<button className="login-button" disabled={busy}>{busy?'Signing in…':'Sign in'}</button></form></div></div>}
+import React from "react";
+import { Server } from "lucide-react";
+export default function LoginPage({ onLogin, error: authError }) {
+  const [username, setUsername] = React.useState("admin");
+  const [password, setPassword] = React.useState("");
+  const [error, setError] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  async function submit(e) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    const ok = await onLogin({ username, password });
+    setBusy(false);
+    if (!ok) setError(authError || "Invalid username or password");
+  }
+  return (
+    <div className="login-page">
+      <div className="login-card">
+        <div className="brand-mark">
+          <Server size={22} />
+        </div>
+        <p className="eyebrow">SERVER ENGINE</p>
+        <h1>Sign in to your control panel</h1>
+        <p className="login-copy">
+          Manage your infrastructure from one secure place.
+        </p>
+        <form onSubmit={submit} className="mt-8 space-y-4">
+          <label>
+            Username
+            <input
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoComplete="username"
+            />
+          </label>
+          <label>
+            Password
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              autoFocus
+            />
+          </label>
+          {(error || authError) && (
+            <p className="error-text">{error || authError}</p>
+          )}
+          <button className="login-button" disabled={busy}>
+            {busy ? "Signing in…" : "Sign in"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}

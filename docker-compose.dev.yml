@@ -13,7 +13,8 @@ services:
       - core-dev-pip-cache:/root/.cache/pip
       - core-dev-state:/var/lib/server-engine
     command: >-
-      sh -c "pip install -e . &&
+      sh -c "apt-get update && apt-get install -y --no-install-recommends openssh-client &&
+      pip install -e . &&
       uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 
   web-dev:

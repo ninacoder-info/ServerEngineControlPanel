@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+script_path="${BASH_SOURCE[0]}"
+if command -v readlink >/dev/null 2>&1 && readlink -f "$script_path" >/dev/null 2>&1; then
+  script_path="$(readlink -f "$script_path")"
+fi
+repo_dir="$(cd -- "$(dirname -- "$script_path")/.." && pwd)"
 native_prefix="/opt/server-engine"
 test_compose=(docker compose -f "$repo_dir/docker-compose.test.yml")
 dev_compose=(docker compose -f "$repo_dir/docker-compose.dev.yml")
@@ -20,8 +24,20 @@ Commands:
   watch [dev|panel]     Automatically reload after source changes
   native-restart        Restart native systemd services
   native-status         Show native systemd status
+  panel <action>        Manage the native panel (start|stop|restart|status|logs)
+  service <name> <action>
+                         Manage nginx, mysql, or php services
+  mysql <action>         Shortcut for service mysql <action>
+  nginx <action>         Shortcut for service nginx <action>
+  php <action>           Shortcut for service php <action>
 EOF
 }
+
+case "${1:-help}" in
+  panel|service|mysql|nginx|php)
+    exec "$repo_dir/core/.venv/bin/python" -m app.cli "$@"
+    ;;
+esac
 
 target="${2:-dev}"
 case "${1:-help}" in

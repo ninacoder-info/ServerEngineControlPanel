@@ -1,9 +1,110 @@
-import React from 'react'
-import { AlertTriangle, X } from 'lucide-react'
-import { apiRequest, readApiError } from '../../lib/api'
+import React from "react";
+import { X } from "lucide-react";
+import { apiRequest, readApiError } from "../../lib/api";
 
-export default function InstallServiceModal({ service, initialVersion, onClose }) {
-  const [version, setVersion] = React.useState(initialVersion || service.versions[0]?.version || ''); const [confirmed, setConfirmed] = React.useState(false); const [message, setMessage] = React.useState(''); const [busy, setBusy] = React.useState(false)
-  async function submit(event) { event.preventDefault(); setBusy(true); const response = await apiRequest(`/api/v1/services/${service.id}/install`, { method: 'POST', body: JSON.stringify({ version, confirmed }) }); const body = response.ok ? await response.json() : { message: await readApiError(response) }; setMessage(body.message || (body.status === 'queued' ? `Install job ${body.job_id} queued.` : 'Confirmation is required.')); setBusy(false) }
-  return <div className="modal-backdrop" onMouseDown={event => event.target === event.currentTarget && onClose()}><section className="modal-card"><div className="modal-header"><div><p className="eyebrow">SERVICE INSTALLER</p><h2>{service.name}</h2></div><button className="icon-button" onClick={onClose}><X size={18}/></button></div><p className="modal-description">Choose a supported version. The host agent will later preview packages, conflicts, ports, and configuration changes before execution.</p><form onSubmit={submit}><label>Version<select value={version} onChange={event => setVersion(event.target.value)}>{service.versions.map(item => <option key={item.version} value={item.version}>{item.version} · {item.channel}</option>)}</select></label><div className="warning-box"><AlertTriangle size={17}/><span>This is currently a preview job. No host package will be changed until the privileged agent is connected.</span></div><label className="confirm-row"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)}/>I understand this will install or change a system service.</label>{message && <p className="modal-result">{message}</p>}<div className="modal-actions"><button type="button" className="button-secondary" onClick={onClose}>Cancel</button><button className="button-primary" disabled={!confirmed || busy}>{busy ? 'Queueing…' : 'Queue install job'}</button></div></form></section></div>
+export default function InstallServiceModal({
+  service,
+  initialVersion,
+  onClose,
+}) {
+  const [version, setVersion] = React.useState(
+    initialVersion || service.versions[0]?.version || "",
+  );
+  const [message, setMessage] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+
+  async function submit(event) {
+    event.preventDefault();
+    setBusy(true);
+    const response = await apiRequest(
+      `/api/v1/services/${service.id}/install`,
+      { method: "POST", body: JSON.stringify({ version, confirmed: true }) },
+    );
+    const body = response.ok
+      ? await response.json()
+      : { message: await readApiError(response) };
+    if (response.ok && body.status === "queued") {
+      onClose();
+      return;
+    }
+    setMessage(body.message || "The installation request could not be queued.");
+    setBusy(false);
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4"
+      onMouseDown={(event) => event.target === event.currentTarget && onClose()}
+    >
+      <section
+        className="max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-6 shadow-xl dark:bg-slate-900"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="install-service-title"
+      >
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h2
+              id="install-service-title"
+              className="text-lg font-semibold text-slate-900 dark:text-slate-100"
+            >
+              Install {service.name}
+            </h2>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              Choose the release to install on this server.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close installer"
+            className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <form onSubmit={submit} className="mt-6 space-y-5">
+          <label className="block text-sm font-medium text-slate-800 dark:text-slate-200">
+            Version
+            <select
+              value={version}
+              onChange={(event) => setVersion(event.target.value)}
+              className="mt-2 block min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+            >
+              {service.versions.map((item) => (
+                <option key={item.version} value={item.version}>
+                  {item.version} · {item.channel}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="text-sm leading-6 text-slate-500 dark:text-slate-400">
+            The service will be installed in Server Engine service area. The
+            global system package database will not be changed.
+          </p>
+          {message && (
+            <p className="text-sm text-rose-600 dark:text-rose-400">
+              {message}
+            </p>
+          )}
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg px-4 py-2 text-sm text-slate-600 dark:text-slate-300"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={busy}
+            >
+              {busy ? "Installing…" : "Install"}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
 }

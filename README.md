@@ -206,6 +206,19 @@ journalctl -u server-engine-core -u server-engine-web -f
 systemctl restart server-engine-core server-engine-web
 ```
 
+The native installer also provides the shorter `se` command for SSH administration:
+
+```bash
+se panel status
+se panel restart
+se mysql restart
+se nginx logs --lines 100
+se php status
+se php restart --version 8.3
+```
+
+PHP-FPM commands require `--version` for start, stop, restart, and logs because each installed PHP version has its own process, socket, and configuration. The `se` command is installed at `/usr/local/bin/se` and is available after a native installation or update.
+
 The installer also installs:
 
 ```bash

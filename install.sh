@@ -240,6 +240,7 @@ activate_release() {
   if [ -n "$OLD_RELEASE" ] && [ -d "$OLD_RELEASE" ]; then cp -a "$OLD_RELEASE" "$BACKUP_ROOT/$RELEASE_ID-previous"; fi
   ln -sfn "$RELEASE_DIR" "$PREFIX/current"
   ln -sfn "$PREFIX/current/bin/serverengine" /usr/local/bin/serverengine
+  ln -sfn "$PREFIX/current/bin/serverengine" /usr/local/bin/se
   chown -R "$RUN_USER:$RUN_GROUP" "$RELEASE_DIR" 2>/dev/null || true
 }
 

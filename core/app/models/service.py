@@ -20,6 +20,10 @@ class ServiceDefinition(BaseModel):
     versions: list[ServiceVersion]
     default_port: int | None = None
     requires_confirmation: bool = True
+    mode: Literal["service", "feature", "integration"] = "service"
+    installable: bool = True
+    management_path: str | None = None
+    management_label: str | None = None
 
 
 class InstalledService(BaseModel):

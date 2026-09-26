@@ -1,37 +1,767 @@
-import React from 'react'
-import { Archive, ArchiveRestore, ArrowUp, Copy, Download, Edit3, File, Folder, FolderOpen, FolderPlus, MoreVertical, Pencil, RefreshCw, Trash2, Upload, X } from 'lucide-react'
-import { Tree } from 'react-arborist'
-import ActionDialog from '../../components/ActionDialog'
-import ConfigEditor from '../services/ConfigEditor'
-import { apiRequest, readApiError } from '../../lib/api'
+import React from "react";
+import {
+  Archive,
+  ArchiveRestore,
+  ArrowUp,
+  Copy,
+  Download,
+  Edit3,
+  File,
+  Folder,
+  FolderOpen,
+  FolderPlus,
+  MoreVertical,
+  Pencil,
+  RefreshCw,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
+import { Tree } from "react-arborist";
+import ActionDialog from "../../components/ActionDialog";
+import ConfigEditor from "../services/ConfigEditor";
+import { apiRequest, readApiError } from "../../lib/api";
 
-const formatBytes = value => { if (value < 1024) return `${value} B`; if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`; return `${(value / (1024 * 1024)).toFixed(1)} MB` }
-function TreeNode({ node, style }) { const folder = node.data.kind === 'folder'; return <div className={`file-tree-node ${node.isSelected ? 'file-tree-node-selected' : ''}`} style={style} onClick={() => { if (folder) node.toggle(); node.select() }}><span className="file-tree-chevron">{folder && (node.isOpen ? '▾' : '▸')}</span>{folder ? (node.isOpen ? <FolderOpen size={16}/> : <Folder size={16}/>) : <File size={16}/>}<span>{node.data.name}</span></div> }
+const formatBytes = (value) => {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+};
+function TreeNode({ node, style }) {
+  const folder = node.data.kind === "folder";
+  return (
+    <div
+      className={`file-tree-node ${node.isSelected ? "file-tree-node-selected" : ""}`}
+      style={style}
+      onClick={() => {
+        if (folder) node.toggle();
+        node.select();
+      }}
+    >
+      <span className="file-tree-chevron">
+        {folder && (node.isOpen ? "▾" : "▸")}
+      </span>
+      {folder ? (
+        node.isOpen ? (
+          <FolderOpen size={16} />
+        ) : (
+          <Folder size={16} />
+        )
+      ) : (
+        <File size={16} />
+      )}
+      <span>{node.data.name}</span>
+    </div>
+  );
+}
 
 export default function FileManagerPage() {
-  const [tree, setTree] = React.useState(null); const [entries, setEntries] = React.useState([]); const [currentPath, setCurrentPath] = React.useState('/server-engine/www'); const [rootPath, setRootPath] = React.useState('/'); const [pathInput, setPathInput] = React.useState('/server-engine/www'); const [selectedPaths, setSelectedPaths] = React.useState([]); const [clipboard, setClipboard] = React.useState([]); const [message, setMessage] = React.useState(''); const [contextMenu, setContextMenu] = React.useState(null); const [editor, setEditor] = React.useState(null); const [uploadProgress, setUploadProgress] = React.useState(null); const [dialog, setDialog] = React.useState(null); const uploadInput = React.useRef(null); const folderInput = React.useRef(null)
-  const selectedEntries = entries.filter(entry => selectedPaths.includes(entry.path)); const selected = selectedEntries[0]
-  const loadTree = React.useCallback((path = '/') => apiRequest(`/api/v1/file-manager/tree?path=${encodeURIComponent(path)}&depth=1`).then(response => response.ok ? response.json() : null), [])
-  const loadTreeRoot = React.useCallback(() => loadTree('/').then(setTree).catch(() => {}), [loadTree])
-  const expandTree = React.useCallback(path => loadTree(path).then(branch => { if (!branch) return; setTree(current => { const update = node => node.path === path ? { ...node, children: branch.children || [] } : { ...node, children: (node.children || []).map(update) }; return current ? update(current) : current }) }).catch(() => {}), [loadTree])
-  const loadEntries = React.useCallback((path = '/') => { const nextPath = path || '/'; setCurrentPath(nextPath); setPathInput(nextPath); setSelectedPaths([]); setContextMenu(null); return apiRequest(`/api/v1/file-manager/entries?path=${encodeURIComponent(nextPath)}`).then(async response => { if (!response.ok) throw new Error(await readApiError(response)); return response.json() }).then(value => setEntries(value.entries || [])).catch(error => { setEntries([]); setDialog({ kind: 'error', title: 'Path not found', message: error.message || 'The folder could not be opened.' }) }) }, [])
-  React.useEffect(() => { apiRequest('/api/v1/file-manager/root').then(response => response.ok ? response.json() : null).then(value => { const defaultPath = value?.default_path || '/server-engine/www'; setRootPath(value?.root_path || '/'); setPathInput(defaultPath); loadEntries(defaultPath) }).catch(() => loadEntries('/server-engine/www')); loadTreeRoot() }, [loadTreeRoot, loadEntries])
-  React.useEffect(() => { const close = () => setContextMenu(null); window.addEventListener('click', close); return () => window.removeEventListener('click', close) }, [])
-  const refresh = () => Promise.all([loadTreeRoot(), loadEntries(currentPath)])
-  const openPath = event => { event.preventDefault(); loadEntries(pathInput.trim() || '/') }
-  const toggleSelected = (path, checked) => setSelectedPaths(paths => checked ? [...new Set([...paths, path])] : paths.filter(item => item !== path))
-  const askForm = (title, label, value, submitLabel, callback, hint = '') => { const state = { kind: 'form', title, label, value, submitLabel, hint }; state.onChange = next => { state.value = next; setDialog(current => ({ ...current, value: next })) }; state.onSubmit = next => { const submitted = next || state.value; if (submitted?.trim()) { setDialog(null); callback(submitted.trim()) } }; setDialog(state) }
-  function createFolder() { askForm('Create folder', 'Folder name', '', 'Create folder', async name => { const response = await apiRequest('/api/v1/file-manager/folders', { method: 'POST', body: JSON.stringify({ path: currentPath, name }) }); setMessage(response.ok ? 'Folder created.' : await readApiError(response)); await refresh() }) }
-  function renameItem() { if (!selected) return; askForm('Rename item', 'New name', selected.name, 'Rename', async name => { const response = await apiRequest('/api/v1/file-manager/rename', { method: 'POST', body: JSON.stringify({ path: selected.path, name }) }); setMessage(response.ok ? 'Renamed.' : await readApiError(response)); await refresh() }) }
-  function deleteItems() { if (!selectedPaths.length) return; setDialog({ kind: 'confirm', title: 'Delete selected items?', message: `This will permanently delete ${selectedPaths.length} selected item(s).`, submitLabel: 'Delete', onSubmit: async () => { setDialog(null); for (const path of selectedPaths) await apiRequest('/api/v1/file-manager/item', { method: 'DELETE', body: JSON.stringify({ path }) }); setMessage('Deleted.'); await refresh() } }) }
-  function copyItems() { setClipboard(selectedPaths); setMessage(`${selectedPaths.length} item(s) copied. Choose Paste in another folder.`); setContextMenu(null) }
-  async function pasteItems() { const response = await apiRequest('/api/v1/file-manager/copy', { method: 'POST', body: JSON.stringify({ paths: clipboard, destination: currentPath }) }); setMessage(response.ok ? 'Pasted.' : await readApiError(response)); await refresh() }
-  function makeArchive() { if (!selectedPaths.length) return; askForm('Create ZIP archive', 'ZIP filename', 'archive.zip', 'Create archive', async name => { const response = await apiRequest('/api/v1/file-manager/archive', { method: 'POST', body: JSON.stringify({ paths: selectedPaths, destination: currentPath, name }) }); setMessage(response.ok ? 'ZIP archive created.' : await readApiError(response)); await refresh() }, 'The .zip extension is added automatically when omitted.') }
-  async function extractArchive() { if (!selected || selected.kind !== 'file' || !selected.name.toLowerCase().endsWith('.zip')) return; const response = await apiRequest('/api/v1/file-manager/extract', { method: 'POST', body: JSON.stringify({ path: selected.path }) }); setMessage(response.ok ? 'Archive extracted.' : await readApiError(response)); await refresh() }
-  async function editFile(entry = selected) { if (!entry || entry.kind !== 'file') return; const response = await apiRequest(`/api/v1/file-manager/content?path=${encodeURIComponent(entry.path)}`); if (!response.ok) { setDialog({ kind: 'error', title: 'Cannot edit file', message: await readApiError(response) }); return }; const value = await response.json(); setEditor({ path: entry.path, name: entry.name, content: value.content }) }
-  async function saveFile() { const response = await apiRequest(`/api/v1/file-manager/content?path=${encodeURIComponent(editor.path)}`, { method: 'PUT', body: JSON.stringify({ content: editor.content }) }); setMessage(response.ok ? 'File saved. A backup was created.' : await readApiError(response)); if (response.ok) setEditor(null); await loadEntries(currentPath) }
-  function restoreFile() { setDialog({ kind: 'confirm', title: 'Restore backup?', message: 'The backup created before the last save will replace the current file.', submitLabel: 'Restore', onSubmit: async () => { setDialog(null); const response = await apiRequest('/api/v1/file-manager/restore', { method: 'POST', body: JSON.stringify({ path: editor.path }) }); setMessage(response.ok ? 'Backup restored.' : await readApiError(response)); if (response.ok) { setEditor(null); await loadEntries(currentPath) } } }) }
-  async function uploadSelection(event) { const files = [...(event.target.files || [])]; event.target.value = ''; if (!files.length) return; const paths = files.map(file => file.webkitRelativePath || file.name); const check = await apiRequest('/api/v1/file-manager/upload/check', { method: 'POST', body: JSON.stringify({ destination: currentPath, paths }) }); if (!check.ok) { setDialog({ kind: 'error', title: 'Upload check failed', message: await readApiError(check) }); return } const result = await check.json(); const conflicts = result.conflicts || []; const proceed = conflicts.length ? await new Promise(resolve => setDialog({ kind: 'confirm', title: `${conflicts.length} file(s) already exist`, message: conflicts.slice(0, 12).join(', ') + (conflicts.length > 12 ? ` and ${conflicts.length - 12} more…` : ''), submitLabel: 'Overwrite existing', onSubmit: () => { setDialog(null); resolve(true) }, onCancel: () => { setDialog(null); resolve('skip') } })) : true; if (!proceed) return; setUploadProgress(0); for (let index = 0; index < files.length; index += 1) { const file = files[index]; const relativePath = file.webkitRelativePath || file.name; const xhr = new XMLHttpRequest(); xhr.open('POST', `/api/v1/file-manager/upload?path=${encodeURIComponent(currentPath)}&relative_path=${encodeURIComponent(relativePath)}&overwrite=${proceed === true && conflicts.includes(relativePath)}`); xhr.withCredentials = true; await new Promise(resolve => { xhr.upload.onprogress = progress => { if (progress.lengthComputable) setUploadProgress(Math.round(((index + progress.loaded / progress.total) / files.length) * 100)) }; xhr.onload = resolve; xhr.onerror = resolve; const form = new FormData(); form.append('file', file, file.name); xhr.send(form) }) } setUploadProgress(null); setMessage(`${files.length} item(s) uploaded.`); await refresh() }
-  const breadcrumbs = currentPath.split('/').filter(Boolean); const parentPath = currentPath === '/' ? '/' : currentPath.split('/').slice(0, -1).join('/') || '/'; const downloadUrl = selected?.kind === 'file' ? `/api/v1/file-manager/download?path=${encodeURIComponent(selected.path)}` : ''
-  return <div className="file-manager-page space-y-7" onClick={() => setContextMenu(null)}><div className="file-manager-heading"><div><p className="text-sm text-cyan-300">Storage</p><h2 className="mt-1 text-3xl font-semibold tracking-tight">File Manager</h2><p className="mt-2 text-slate-400">Browse the server filesystem. Website files default to the shared web root.</p><form className="file-path-form" onSubmit={openPath}><input value={pathInput} onChange={event => setPathInput(event.target.value)} aria-label="Filesystem path"/><button className="button-primary">Go</button></form><small className="file-root-path">Filesystem root: {rootPath}</small></div><div className="file-manager-actions"><button className="button-secondary" onClick={createFolder}><FolderPlus size={15}/>New folder</button><button className="button-primary" onClick={() => uploadInput.current?.click()}><Upload size={15}/>Upload files</button><button className="button-secondary" onClick={() => folderInput.current?.click()}><FolderOpen size={15}/>Upload folder</button><input ref={uploadInput} hidden multiple type="file" onChange={uploadSelection}/><input ref={folderInput} hidden multiple webkitdirectory="" directory="" type="file" onChange={uploadSelection}/></div></div><section className="file-manager-shell">{uploadProgress !== null && <div className="upload-progress-line"><span style={{ width: `${uploadProgress}%` }}/></div>}<aside className="file-tree-pane"><div className="file-pane-title"><strong>Filesystem</strong><button className="icon-button" onClick={loadTreeRoot} title="Refresh folders"><RefreshCw size={15}/></button></div><div className="file-tree"><Tree data={tree ? [tree] : []} width="100%" height={560} rowHeight={34} indent={18} openByDefault onToggle={(id, open) => open && expandTree(id)} onSelect={nodes => nodes[0] && loadEntries(nodes[0].data.path)}>{TreeNode}</Tree></div></aside><main className="file-list-pane"><div className="file-list-toolbar"><div className="file-breadcrumbs"><button onClick={() => loadEntries('/')}><Folder size={14}/>root</button>{breadcrumbs.map((part, index) => { const path = `/${breadcrumbs.slice(0, index + 1).join('/')}`; return <React.Fragment key={path}><span>/</span><button onClick={() => loadEntries(path)}>{part}</button></React.Fragment>})}</div><div className="file-selection-actions"><button className="button-secondary file-up-button" disabled={currentPath === '/'} onClick={() => loadEntries(parentPath)} title="Up one folder"><ArrowUp size={15}/>Up</button><button className="icon-button" disabled={!selected} onClick={() => editFile()} title="Edit"><Edit3 size={15}/></button><button className="icon-button" disabled={!selected} onClick={renameItem} title="Rename"><Pencil size={15}/></button><button className="icon-button" disabled={!selectedPaths.length} onClick={deleteItems} title="Delete"><Trash2 size={15}/></button>{downloadUrl && <a className="icon-button" href={downloadUrl} title="Download"><Download size={15}/></a>}<button className="icon-button" disabled={!selectedPaths.length} onClick={makeArchive} title="Create ZIP"><Archive size={15}/></button><button className="icon-button" disabled={!selected || !selected.name.toLowerCase().endsWith('.zip')} onClick={extractArchive} title="Extract ZIP"><ArchiveRestore size={15}/></button><button className="icon-button" disabled={!clipboard.length} onClick={pasteItems} title="Paste"><Copy size={15}/></button><button className="icon-button" onClick={() => loadEntries(currentPath)} title="Refresh files"><RefreshCw size={15}/></button></div></div>{message && <div className="file-manager-message">{message}</div>}<div className="file-list-header"><span /><span>Name</span><span>Type</span><span>Owner</span><span>Size</span><span>Modified</span><span /></div><div className="file-entries">{entries.length ? entries.map(entry => <div key={entry.path} className={`file-entry ${selectedPaths.includes(entry.path) ? 'file-entry-selected' : ''}`} onClick={() => toggleSelected(entry.path, !selectedPaths.includes(entry.path))} onDoubleClick={() => entry.kind === 'folder' ? loadEntries(entry.path) : editFile(entry)} onContextMenu={event => { event.preventDefault(); if (!selectedPaths.includes(entry.path)) setSelectedPaths([entry.path]); setContextMenu({ x: event.clientX, y: event.clientY }) }}><input type="checkbox" checked={selectedPaths.includes(entry.path)} onChange={event => toggleSelected(entry.path, event.target.checked)} onClick={event => event.stopPropagation()}/><span className="file-entry-name">{entry.kind === 'folder' ? <Folder size={17}/> : <File size={17}/>}<strong>{entry.name}</strong></span><span>{entry.kind}</span><span>{entry.owner}</span><span>{entry.kind === 'folder' ? '—' : formatBytes(entry.size)}</span><span>{new Date(entry.modified_at * 1000).toLocaleString()}</span><MoreVertical size={15}/></div>) : <div className="file-empty">This folder is empty.</div>}</div>{contextMenu && <div className="file-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onClick={event => event.stopPropagation()}><button onClick={copyItems}><Copy size={14}/>Copy</button><button onClick={() => editFile()} disabled={!selected || selected.kind !== 'file'}><Edit3 size={14}/>Edit</button><button onClick={renameItem}><Pencil size={14}/>Rename</button><button onClick={makeArchive}><Archive size={14}/>Create ZIP</button><button onClick={extractArchive} disabled={!selected?.name.toLowerCase().endsWith('.zip')}><ArchiveRestore size={14}/>Extract ZIP</button><button onClick={deleteItems}><Trash2 size={14}/>Delete</button></div>}</main></section>{editor && <div className="modal-backdrop" onMouseDown={event => event.target === event.currentTarget && setEditor(null)}><section className="modal-card file-editor-modal"><div className="modal-header"><div><p className="eyebrow">FILE EDITOR</p><h2>{editor.name}</h2><code>{editor.path}</code></div><button className="icon-button" onClick={() => setEditor(null)}><X size={18}/></button></div><ConfigEditor path={editor.path} value={editor.content} onChange={value => setEditor(current => ({ ...current, content: value }))}/><div className="config-actions"><button className="button-secondary" onClick={() => setEditor(null)}>Cancel</button><button className="button-secondary" onClick={restoreFile}>Restore backup</button><button className="button-primary" onClick={saveFile}>Save file</button></div></section></div>}<ActionDialog dialog={dialog} onClose={() => setDialog(null)} onSubmit={() => dialog?.onSubmit?.()}/></div>
+  const [tree, setTree] = React.useState(null);
+  const [entries, setEntries] = React.useState([]);
+  const [currentPath, setCurrentPath] = React.useState("/server-engine/www");
+  const [rootPath, setRootPath] = React.useState("/");
+  const [pathInput, setPathInput] = React.useState("/server-engine/www");
+  const [selectedPaths, setSelectedPaths] = React.useState([]);
+  const [clipboard, setClipboard] = React.useState([]);
+  const [message, setMessage] = React.useState("");
+  const [contextMenu, setContextMenu] = React.useState(null);
+  const [editor, setEditor] = React.useState(null);
+  const [uploadProgress, setUploadProgress] = React.useState(null);
+  const [dialog, setDialog] = React.useState(null);
+  const uploadInput = React.useRef(null);
+  const folderInput = React.useRef(null);
+  const selectedEntries = entries.filter((entry) =>
+    selectedPaths.includes(entry.path),
+  );
+  const selected = selectedEntries[0];
+  const loadTree = React.useCallback(
+    (path = "/") =>
+      apiRequest(
+        `/api/v1/file-manager/tree?path=${encodeURIComponent(path)}&depth=1`,
+      ).then((response) => (response.ok ? response.json() : null)),
+    [],
+  );
+  const loadTreeRoot = React.useCallback(
+    () =>
+      loadTree("/")
+        .then(setTree)
+        .catch(() => {}),
+    [loadTree],
+  );
+  const expandTree = React.useCallback(
+    (path) =>
+      loadTree(path)
+        .then((branch) => {
+          if (!branch) return;
+          setTree((current) => {
+            const update = (node) =>
+              node.path === path
+                ? { ...node, children: branch.children || [] }
+                : { ...node, children: (node.children || []).map(update) };
+            return current ? update(current) : current;
+          });
+        })
+        .catch(() => {}),
+    [loadTree],
+  );
+  const loadEntries = React.useCallback((path = "/") => {
+    const nextPath = path || "/";
+    setCurrentPath(nextPath);
+    setPathInput(nextPath);
+    setSelectedPaths([]);
+    setContextMenu(null);
+    return apiRequest(
+      `/api/v1/file-manager/entries?path=${encodeURIComponent(nextPath)}`,
+    )
+      .then(async (response) => {
+        if (!response.ok) throw new Error(await readApiError(response));
+        return response.json();
+      })
+      .then((value) => setEntries(value.entries || []))
+      .catch((error) => {
+        setEntries([]);
+        setDialog({
+          kind: "error",
+          title: "Path not found",
+          message: error.message || "The folder could not be opened.",
+        });
+      });
+  }, []);
+  React.useEffect(() => {
+    apiRequest("/api/v1/file-manager/root")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((value) => {
+        const defaultPath = value?.default_path || "/server-engine/www";
+        setRootPath(value?.root_path || "/");
+        setPathInput(defaultPath);
+        loadEntries(defaultPath);
+      })
+      .catch(() => loadEntries("/server-engine/www"));
+    loadTreeRoot();
+  }, [loadTreeRoot, loadEntries]);
+  React.useEffect(() => {
+    const close = () => setContextMenu(null);
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, []);
+  const refresh = () => Promise.all([loadTreeRoot(), loadEntries(currentPath)]);
+  const openPath = (event) => {
+    event.preventDefault();
+    loadEntries(pathInput.trim() || "/");
+  };
+  const toggleSelected = (path, checked) =>
+    setSelectedPaths((paths) =>
+      checked
+        ? [...new Set([...paths, path])]
+        : paths.filter((item) => item !== path),
+    );
+  const askForm = (title, label, value, submitLabel, callback, hint = "") => {
+    const state = { kind: "form", title, label, value, submitLabel, hint };
+    state.onChange = (next) => {
+      state.value = next;
+      setDialog((current) => ({ ...current, value: next }));
+    };
+    state.onSubmit = (next) => {
+      const submitted = next || state.value;
+      if (submitted?.trim()) {
+        setDialog(null);
+        callback(submitted.trim());
+      }
+    };
+    setDialog(state);
+  };
+  function createFolder() {
+    askForm(
+      "Create folder",
+      "Folder name",
+      "",
+      "Create folder",
+      async (name) => {
+        const response = await apiRequest("/api/v1/file-manager/folders", {
+          method: "POST",
+          body: JSON.stringify({ path: currentPath, name }),
+        });
+        setMessage(
+          response.ok ? "Folder created." : await readApiError(response),
+        );
+        await refresh();
+      },
+    );
+  }
+  function renameItem() {
+    if (!selected) return;
+    askForm(
+      "Rename item",
+      "New name",
+      selected.name,
+      "Rename",
+      async (name) => {
+        const response = await apiRequest("/api/v1/file-manager/rename", {
+          method: "POST",
+          body: JSON.stringify({ path: selected.path, name }),
+        });
+        setMessage(response.ok ? "Renamed." : await readApiError(response));
+        await refresh();
+      },
+    );
+  }
+  function deleteItems() {
+    if (!selectedPaths.length) return;
+    setDialog({
+      kind: "confirm",
+      title: "Delete selected items?",
+      message: `This will permanently delete ${selectedPaths.length} selected item(s).`,
+      submitLabel: "Delete",
+      onSubmit: async () => {
+        setDialog(null);
+        for (const path of selectedPaths)
+          await apiRequest("/api/v1/file-manager/item", {
+            method: "DELETE",
+            body: JSON.stringify({ path }),
+          });
+        setMessage("Deleted.");
+        await refresh();
+      },
+    });
+  }
+  function copyItems() {
+    setClipboard(selectedPaths);
+    setMessage(
+      `${selectedPaths.length} item(s) copied. Choose Paste in another folder.`,
+    );
+    setContextMenu(null);
+  }
+  async function pasteItems() {
+    const response = await apiRequest("/api/v1/file-manager/copy", {
+      method: "POST",
+      body: JSON.stringify({ paths: clipboard, destination: currentPath }),
+    });
+    setMessage(response.ok ? "Pasted." : await readApiError(response));
+    await refresh();
+  }
+  function makeArchive() {
+    if (!selectedPaths.length) return;
+    askForm(
+      "Create ZIP archive",
+      "ZIP filename",
+      "archive.zip",
+      "Create archive",
+      async (name) => {
+        const response = await apiRequest("/api/v1/file-manager/archive", {
+          method: "POST",
+          body: JSON.stringify({
+            paths: selectedPaths,
+            destination: currentPath,
+            name,
+          }),
+        });
+        setMessage(
+          response.ok ? "ZIP archive created." : await readApiError(response),
+        );
+        await refresh();
+      },
+      "The .zip extension is added automatically when omitted.",
+    );
+  }
+  async function extractArchive() {
+    if (
+      !selected ||
+      selected.kind !== "file" ||
+      !selected.name.toLowerCase().endsWith(".zip")
+    )
+      return;
+    const response = await apiRequest("/api/v1/file-manager/extract", {
+      method: "POST",
+      body: JSON.stringify({ path: selected.path }),
+    });
+    setMessage(
+      response.ok ? "Archive extracted." : await readApiError(response),
+    );
+    await refresh();
+  }
+  async function editFile(entry = selected) {
+    if (!entry || entry.kind !== "file") return;
+    const response = await apiRequest(
+      `/api/v1/file-manager/content?path=${encodeURIComponent(entry.path)}`,
+    );
+    if (!response.ok) {
+      setDialog({
+        kind: "error",
+        title: "Cannot edit file",
+        message: await readApiError(response),
+      });
+      return;
+    }
+    const value = await response.json();
+    setEditor({ path: entry.path, name: entry.name, content: value.content });
+  }
+  async function saveFile() {
+    const response = await apiRequest(
+      `/api/v1/file-manager/content?path=${encodeURIComponent(editor.path)}`,
+      { method: "PUT", body: JSON.stringify({ content: editor.content }) },
+    );
+    setMessage(
+      response.ok
+        ? "File saved. A backup was created."
+        : await readApiError(response),
+    );
+    if (response.ok) setEditor(null);
+    await loadEntries(currentPath);
+  }
+  function restoreFile() {
+    setDialog({
+      kind: "confirm",
+      title: "Restore backup?",
+      message:
+        "The backup created before the last save will replace the current file.",
+      submitLabel: "Restore",
+      onSubmit: async () => {
+        setDialog(null);
+        const response = await apiRequest("/api/v1/file-manager/restore", {
+          method: "POST",
+          body: JSON.stringify({ path: editor.path }),
+        });
+        setMessage(
+          response.ok ? "Backup restored." : await readApiError(response),
+        );
+        if (response.ok) {
+          setEditor(null);
+          await loadEntries(currentPath);
+        }
+      },
+    });
+  }
+  async function uploadSelection(event) {
+    const files = [...(event.target.files || [])];
+    event.target.value = "";
+    if (!files.length) return;
+    const paths = files.map((file) => file.webkitRelativePath || file.name);
+    const check = await apiRequest("/api/v1/file-manager/upload/check", {
+      method: "POST",
+      body: JSON.stringify({ destination: currentPath, paths }),
+    });
+    if (!check.ok) {
+      setDialog({
+        kind: "error",
+        title: "Upload check failed",
+        message: await readApiError(check),
+      });
+      return;
+    }
+    const result = await check.json();
+    const conflicts = result.conflicts || [];
+    const proceed = conflicts.length
+      ? await new Promise((resolve) =>
+          setDialog({
+            kind: "confirm",
+            title: `${conflicts.length} file(s) already exist`,
+            message:
+              conflicts.slice(0, 12).join(", ") +
+              (conflicts.length > 12
+                ? ` and ${conflicts.length - 12} more…`
+                : ""),
+            submitLabel: "Overwrite existing",
+            onSubmit: () => {
+              setDialog(null);
+              resolve(true);
+            },
+            onCancel: () => {
+              setDialog(null);
+              resolve("skip");
+            },
+          }),
+        )
+      : true;
+    if (!proceed) return;
+    setUploadProgress(0);
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index];
+      const relativePath = file.webkitRelativePath || file.name;
+      const xhr = new XMLHttpRequest();
+      xhr.open(
+        "POST",
+        `/api/v1/file-manager/upload?path=${encodeURIComponent(currentPath)}&relative_path=${encodeURIComponent(relativePath)}&overwrite=${proceed === true && conflicts.includes(relativePath)}`,
+      );
+      xhr.withCredentials = true;
+      await new Promise((resolve) => {
+        xhr.upload.onprogress = (progress) => {
+          if (progress.lengthComputable)
+            setUploadProgress(
+              Math.round(
+                ((index + progress.loaded / progress.total) / files.length) *
+                  100,
+              ),
+            );
+        };
+        xhr.onload = resolve;
+        xhr.onerror = resolve;
+        const form = new FormData();
+        form.append("file", file, file.name);
+        xhr.send(form);
+      });
+    }
+    setUploadProgress(null);
+    setMessage(`${files.length} item(s) uploaded.`);
+    await refresh();
+  }
+  const breadcrumbs = currentPath.split("/").filter(Boolean);
+  const parentPath =
+    currentPath === "/"
+      ? "/"
+      : currentPath.split("/").slice(0, -1).join("/") || "/";
+  const downloadUrl =
+    selected?.kind === "file"
+      ? `/api/v1/file-manager/download?path=${encodeURIComponent(selected.path)}`
+      : "";
+  return (
+    <div
+      className="file-manager-page space-y-7"
+      onClick={() => setContextMenu(null)}
+    >
+      <div className="file-manager-heading">
+        <div>
+          <p className="text-sm text-cyan-300">Storage</p>
+          <h2 className="mt-1 text-3xl font-semibold tracking-tight">
+            File Manager
+          </h2>
+          <p className="mt-2 text-slate-400">
+            Browse the server filesystem. Website files default to the shared
+            web root.
+          </p>
+          <form className="file-path-form" onSubmit={openPath}>
+            <input
+              value={pathInput}
+              onChange={(event) => setPathInput(event.target.value)}
+              aria-label="Filesystem path"
+            />
+            <button className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+              Go
+            </button>
+          </form>
+          <small className="file-root-path">Filesystem root: {rootPath}</small>
+        </div>
+        <div className="file-manager-actions">
+          <button
+            className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+            onClick={createFolder}
+          >
+            <FolderPlus size={15} />
+            New folder
+          </button>
+          <button
+            className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+            onClick={() => uploadInput.current?.click()}
+          >
+            <Upload size={15} />
+            Upload files
+          </button>
+          <button
+            className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+            onClick={() => folderInput.current?.click()}
+          >
+            <FolderOpen size={15} />
+            Upload folder
+          </button>
+          <input
+            ref={uploadInput}
+            hidden
+            multiple
+            type="file"
+            onChange={uploadSelection}
+          />
+          <input
+            ref={folderInput}
+            hidden
+            multiple
+            webkitdirectory=""
+            directory=""
+            type="file"
+            onChange={uploadSelection}
+          />
+        </div>
+      </div>
+      <section className="file-manager-shell">
+        {uploadProgress !== null && (
+          <div className="upload-progress-line">
+            <span style={{ width: `${uploadProgress}%` }} />
+          </div>
+        )}
+        <aside className="file-tree-pane">
+          <div className="file-pane-title">
+            <strong>Filesystem</strong>
+            <button
+              className="icon-button"
+              onClick={loadTreeRoot}
+              title="Refresh folders"
+            >
+              <RefreshCw size={15} />
+            </button>
+          </div>
+          <div className="file-tree">
+            <Tree
+              data={tree ? [tree] : []}
+              width="100%"
+              height={560}
+              rowHeight={34}
+              indent={18}
+              openByDefault
+              onToggle={(id, open) => open && expandTree(id)}
+              onSelect={(nodes) => nodes[0] && loadEntries(nodes[0].data.path)}
+            >
+              {TreeNode}
+            </Tree>
+          </div>
+        </aside>
+        <main className="file-list-pane">
+          <div className="file-list-toolbar">
+            <div className="file-breadcrumbs">
+              <button onClick={() => loadEntries("/")}>
+                <Folder size={14} />
+                root
+              </button>
+              {breadcrumbs.map((part, index) => {
+                const path = `/${breadcrumbs.slice(0, index + 1).join("/")}`;
+                return (
+                  <React.Fragment key={path}>
+                    <span>/</span>
+                    <button onClick={() => loadEntries(path)}>{part}</button>
+                  </React.Fragment>
+                );
+              })}
+            </div>
+            <div className="file-selection-actions">
+              <button
+                className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 file-up-button"
+                disabled={currentPath === "/"}
+                onClick={() => loadEntries(parentPath)}
+                title="Up one folder"
+              >
+                <ArrowUp size={15} />
+                Up
+              </button>
+              <button
+                className="icon-button"
+                disabled={!selected}
+                onClick={() => editFile()}
+                title="Edit"
+              >
+                <Edit3 size={15} />
+              </button>
+              <button
+                className="icon-button"
+                disabled={!selected}
+                onClick={renameItem}
+                title="Rename"
+              >
+                <Pencil size={15} />
+              </button>
+              <button
+                className="icon-button"
+                disabled={!selectedPaths.length}
+                onClick={deleteItems}
+                title="Delete"
+              >
+                <Trash2 size={15} />
+              </button>
+              {downloadUrl && (
+                <a className="icon-button" href={downloadUrl} title="Download">
+                  <Download size={15} />
+                </a>
+              )}
+              <button
+                className="icon-button"
+                disabled={!selectedPaths.length}
+                onClick={makeArchive}
+                title="Create ZIP"
+              >
+                <Archive size={15} />
+              </button>
+              <button
+                className="icon-button"
+                disabled={
+                  !selected || !selected.name.toLowerCase().endsWith(".zip")
+                }
+                onClick={extractArchive}
+                title="Extract ZIP"
+              >
+                <ArchiveRestore size={15} />
+              </button>
+              <button
+                className="icon-button"
+                disabled={!clipboard.length}
+                onClick={pasteItems}
+                title="Paste"
+              >
+                <Copy size={15} />
+              </button>
+              <button
+                className="icon-button"
+                onClick={() => loadEntries(currentPath)}
+                title="Refresh files"
+              >
+                <RefreshCw size={15} />
+              </button>
+            </div>
+          </div>
+          {message && <div className="file-manager-message">{message}</div>}
+          <div className="file-list-header">
+            <span />
+            <span>Name</span>
+            <span>Type</span>
+            <span>Owner</span>
+            <span>Size</span>
+            <span>Modified</span>
+            <span />
+          </div>
+          <div className="file-entries">
+            {entries.length ? (
+              entries.map((entry) => (
+                <div
+                  key={entry.path}
+                  className={`file-entry ${selectedPaths.includes(entry.path) ? "file-entry-selected" : ""}`}
+                  onClick={() =>
+                    toggleSelected(
+                      entry.path,
+                      !selectedPaths.includes(entry.path),
+                    )
+                  }
+                  onDoubleClick={() =>
+                    entry.kind === "folder"
+                      ? loadEntries(entry.path)
+                      : editFile(entry)
+                  }
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    if (!selectedPaths.includes(entry.path))
+                      setSelectedPaths([entry.path]);
+                    setContextMenu({ x: event.clientX, y: event.clientY });
+                  }}
+                >
+                  <input
+                    className="h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 dark:border-slate-600 dark:bg-slate-800 dark:focus:ring-offset-slate-900"
+                    type="checkbox"
+                    checked={selectedPaths.includes(entry.path)}
+                    onChange={(event) =>
+                      toggleSelected(entry.path, event.target.checked)
+                    }
+                    onClick={(event) => event.stopPropagation()}
+                  />
+                  <span className="file-entry-name">
+                    {entry.kind === "folder" ? (
+                      <Folder size={17} />
+                    ) : (
+                      <File size={17} />
+                    )}
+                    <strong>{entry.name}</strong>
+                  </span>
+                  <span>{entry.kind}</span>
+                  <span>{entry.owner}</span>
+                  <span>
+                    {entry.kind === "folder" ? "—" : formatBytes(entry.size)}
+                  </span>
+                  <span>
+                    {new Date(entry.modified_at * 1000).toLocaleString()}
+                  </span>
+                  <MoreVertical size={15} />
+                </div>
+              ))
+            ) : (
+              <div className="file-empty">This folder is empty.</div>
+            )}
+          </div>
+          {contextMenu && (
+            <div
+              className="file-context-menu"
+              style={{ left: contextMenu.x, top: contextMenu.y }}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <button onClick={copyItems}>
+                <Copy size={14} />
+                Copy
+              </button>
+              <button
+                onClick={() => editFile()}
+                disabled={!selected || selected.kind !== "file"}
+              >
+                <Edit3 size={14} />
+                Edit
+              </button>
+              <button onClick={renameItem}>
+                <Pencil size={14} />
+                Rename
+              </button>
+              <button onClick={makeArchive}>
+                <Archive size={14} />
+                Create ZIP
+              </button>
+              <button
+                onClick={extractArchive}
+                disabled={!selected?.name.toLowerCase().endsWith(".zip")}
+              >
+                <ArchiveRestore size={14} />
+                Extract ZIP
+              </button>
+              <button onClick={deleteItems}>
+                <Trash2 size={14} />
+                Delete
+              </button>
+            </div>
+          )}
+        </main>
+      </section>
+      {editor && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={(event) =>
+            event.target === event.currentTarget && setEditor(null)
+          }
+        >
+          <section className="modal-card file-editor-modal">
+            <div className="modal-header">
+              <div>
+                <p className="eyebrow">FILE EDITOR</p>
+                <h2>{editor.name}</h2>
+                <code>{editor.path}</code>
+              </div>
+              <button className="icon-button" onClick={() => setEditor(null)}>
+                <X size={18} />
+              </button>
+            </div>
+            <ConfigEditor
+              path={editor.path}
+              value={editor.content}
+              onChange={(value) =>
+                setEditor((current) => ({ ...current, content: value }))
+              }
+            />
+            <div className="config-actions">
+              <button
+                className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                onClick={() => setEditor(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                onClick={restoreFile}
+              >
+                Restore backup
+              </button>
+              <button
+                className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                onClick={saveFile}
+              >
+                Save file
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+      <ActionDialog
+        dialog={dialog}
+        onClose={() => setDialog(null)}
+        onSubmit={() => dialog?.onSubmit?.()}
+      />
+    </div>
+  );
 }

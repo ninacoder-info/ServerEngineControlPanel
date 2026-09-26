@@ -11,4 +11,5 @@ class JobSummary(BaseModel):
     created_at: datetime
     updated_at: datetime | None = None
     message: str | None = None
+    progress: int | None = Field(default=None, ge=0, le=100)
     log: list[str] = Field(default_factory=list)
