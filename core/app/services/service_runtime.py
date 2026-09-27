@@ -10,6 +10,9 @@ def service_root(service_id: str, version: str | None = None) -> Path:
     if service_id == "php" and version:
         safe_version = version.replace("/", "-").replace("\\", "-")
         return Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / "php" / "versions" / safe_version
+    if service_id == "nodejs" and version:
+        safe_version = version.replace("/", "-").replace("\\", "-")
+        return Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / "nodejs" / "versions" / safe_version
     return Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / service_id
 
 
@@ -19,6 +22,10 @@ def package_for(service_id: str) -> str | None:
 
 def binary_path(service_id: str, version: str | None = None) -> Path:
     root = service_root(service_id, version)
+    if service_id == "nodejs":
+        current = root / "bin/node"
+        legacy = root / "usr/bin/node"
+        return current if current.exists() or not legacy.exists() else legacy
     if service_id == "certbot":
         return root / "venv/bin/certbot"
     if service_id == "php" and version:
@@ -27,11 +34,111 @@ def binary_path(service_id: str, version: str | None = None) -> Path:
     return root / SERVICE_BINARIES.get(service_id, f"usr/bin/{service_id}")
 
 
+def ensure_node_runtime(root: Path) -> None:
+    node = root / "bin/node"
+    real_node = root / "bin/node.bin"
+    if not node.exists() or node.is_symlink():
+        return
+    if not real_node.exists():
+        node.rename(real_node)
+    library_paths = [root / "lib", root / "usr/lib", root / "lib/aarch64-linux-gnu", root / "usr/lib/aarch64-linux-gnu", root / "lib/x86_64-linux-gnu", root / "usr/lib/x86_64-linux-gnu"]
+    paths = ":".join(str(item) for item in library_paths if item.exists())
+    node.write_text(f"#!/bin/sh\nexport LD_LIBRARY_PATH=\"{paths}:$LD_LIBRARY_PATH\"\nexec \"{real_node}\" \"$@\"\n")
+    node.chmod(0o755)
+    npm_root = root / "lib/node_modules/npm/bin"
+    for command, script in (("npm", "npm-cli.js"), ("npx", "npx-cli.js")):
+        launcher = root / f"bin/{command}"
+        target = npm_root / script
+        if target.exists():
+            launcher.write_text(f"#!/bin/sh\nexec \"{node}\" \"{target}\" \"$@\"\n")
+            launcher.chmod(0o755)
+
+
 def php_cli_path(version: str) -> Path:
     root = service_root("php", version)
-    candidates = [root / f"usr/bin/php{version}", root / "usr/bin/php"]
+    candidates = [
+        root / f"usr/bin/php{version}",
+        root / "usr/bin/php",
+        root / f"bin/php{version}",
+        root / "bin/php",
+    ]
     candidates.extend(sorted(root.glob("usr/bin/php8.*")))
+    candidates.extend(sorted(root.glob("bin/php8.*")))
     return next((candidate for candidate in candidates if candidate.exists()), root / f"usr/bin/php{version}")
+
+
+def ensure_php_terminal_launcher(version: str) -> Path:
+    """Create the isolated version's `php` command without touching the host PATH."""
+    root = service_root("php", version)
+    cli = php_cli_path(version)
+    launcher = root / "usr/bin/php"
+    if not cli.exists():
+        return launcher
+    launcher.parent.mkdir(parents=True, exist_ok=True)
+    launcher_is_script = launcher.exists() and not launcher.is_symlink() and launcher.is_file() and launcher.read_bytes()[:2] == b"#!"
+    if not launcher.exists() or launcher.is_symlink() or launcher_is_script:
+        library_paths = {root / "lib", root / "lib64", root / "usr/lib", root / "usr/lib64"}
+        for library in root.rglob("*.so*"):
+            if library.is_file() or library.is_symlink():
+                library_paths.add(library.parent)
+        libraries = ":".join(str(path) for path in library_paths if path.exists())
+        launcher.write_text(
+            "#!/bin/sh\n"
+            f"export LD_LIBRARY_PATH=\"{libraries}:$LD_LIBRARY_PATH\"\n"
+            f"exec \"{cli}\" -c \"{root / 'conf/php.ini'}\" \"$@\"\n"
+        )
+        launcher.chmod(0o755)
+    return launcher
+
+
+def composer_path() -> Path:
+    root = service_root("composer") / "versions"
+    candidates = sorted(root.glob("*/bin/composer"), reverse=True)
+    return candidates[0] if candidates else root / "current/bin/composer"
+
+
+def ensure_composer_cache() -> Path:
+    cache = Path(os.getenv("SE_STATE_DIR", "/var/lib/server-engine")) / "composer"
+    cache.mkdir(parents=True, exist_ok=True)
+    try:
+        owner = pwd.getpwnam("serverengine")
+        for current, directories, files in os.walk(cache):
+            os.chown(current, owner.pw_uid, owner.pw_gid)
+            for name in [*directories, *files]:
+                with_path = Path(current) / name
+                try:
+                    os.chown(with_path, owner.pw_uid, owner.pw_gid)
+                except OSError:
+                    pass
+    except (KeyError, OSError):
+        pass
+    return cache
+
+
+def ensure_composer_launcher() -> Path:
+    """Refresh the Composer launcher so it always loads the managed PHP config."""
+    versions_root = service_root("php") / "versions"
+    php_versions = sorted((item for item in versions_root.iterdir() if item.is_dir()), reverse=True) if versions_root.exists() else []
+    php_version = next((item.name for item in php_versions if php_cli_path(item.name).exists()), None)
+    launcher = composer_path()
+    if not php_version or not launcher.exists():
+        return launcher
+    php_root = service_root("php", php_version)
+    php = php_cli_path(php_version)
+    ensure_php_fpm_layout(php_version)
+    library_paths = {php_root / "lib", php_root / "lib64", php_root / "usr/lib", php_root / "usr/lib64"}
+    library_paths.update(library.parent for library in php_root.rglob("*.so*") if library.is_file() or library.is_symlink())
+    libraries = ":".join(str(path) for path in library_paths if path.exists())
+    extension_dir = next(iter(sorted(php_root.glob("usr/lib/php/*"))), None)
+    extensions = [module for module in ("phar.so", "iconv.so") if extension_dir and (extension_dir / module).exists()]
+    extension_flags = " ".join(f'-d extension="{extension_dir / module}"' for module in extensions)
+    extension_options = f' -d extension_dir="{extension_dir}" {extension_flags}' if extension_dir else ""
+    archive = launcher.parent.parent / "composer.phar"
+    php_ini = php_root / "conf/php.ini"
+    composer_home = ensure_composer_cache()
+    launcher.write_text(f'#!/bin/sh\nexport LD_LIBRARY_PATH="{libraries}:$LD_LIBRARY_PATH"\nexport COMPOSER_HOME="{composer_home}"\nexec "{php}" -c "{php_ini}"{extension_options} "{archive}" "$@"\n')
+    launcher.chmod(0o755)
+    return launcher
 
 
 def php_fpm_paths(version: str) -> dict[str, Path]:
@@ -44,9 +151,10 @@ PHP_BASELINE_MODULES = {
     "gd": ("gd",),
     "intl": ("intl",),
     "mbstring": ("mbstring",),
-    "mysql": ("mysqli", "pdo_mysql"),
+    "mysql": ("mysqlnd", "mysqli", "pdo_mysql"),
     "opcache": ("opcache",),
     "pgsql": ("pgsql", "pdo_pgsql"),
+    "igbinary": ("igbinary",),
     "redis": ("redis",),
     "xml": ("dom", "simplexml", "xml", "xmlreader", "xmlwriter", "xsl"),
     "zip": ("zip",),

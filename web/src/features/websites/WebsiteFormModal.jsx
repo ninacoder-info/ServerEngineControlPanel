@@ -1,234 +1,160 @@
 import React from "react";
-import { Save, X } from "lucide-react";
+import { Ban, Check, ChevronLeft, Code2, Construction, CornerUpRight, Database, FileText, Folder, FolderCog, GitBranch, Globe2, Lock, LockKeyhole, Package, Save, ScrollText, Server, Settings2, Shield, ShieldCheck, Waypoints, WandSparkles, X } from "lucide-react";
 import { apiRequest, readApiError } from "../../lib/api";
+import ConfigEditor from "../services/ConfigEditor";
 
-const empty = {
-  name: "",
-  domain: "",
-  aliases: "",
-  project_path: "/server-engine/www/",
-  web_root: ".",
-  php_version: "",
-  framework: "generic_php",
-  server_type: "nginx",
-  ssl_enabled: false,
-  ssl_enforce_tls: false,
-  ssl_allow_http: true,
-  database_enabled: false,
-  database_name: "",
-  database_user: "",
-  notes: "",
-  tags: "",
+const empty = { name: "", domain: "", aliases: "", project_path: "/server-engine/www/", web_root: ".", php_version: "", framework: "generic_php", server_type: "nginx", ssl_enabled: false, ssl_enforce_tls: false, ssl_allow_http: true, database_enabled: false, database_name: "", database_user: "", notes: "", tags: "" };
+const tabs = [["site", "Website", Globe2], ["runtime", "Runtime", Server], ["security", "TLS & redirects", ShieldCheck], ["database", "Database", Database]];
+const editTabs = [["site", "Domain manager", Globe2], ["access", "Limit access", Lock], ["rewrite", "URL rewrite", WandSparkles], ["config", "Server config", Settings2], ["ssl", "SSL", Shield], ["php", "PHP version", Code2], ["git", "Git manager", GitBranch], ["redirect", "Redirects", CornerUpRight], ["proxy", "Proxy", Waypoints], ["hotlink", "Hotlink", Ban], ["maintenance", "Maintenance", Construction], ["logs", "Response log", ScrollText]];
+const domainPattern = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
+const sanitizeDomainList = (value) => value.split(",").map((item) => item.replace(/[^a-zA-Z0-9.-]/g, "").toLowerCase()).join(", ");
+const buttonClass = "inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 py-2 text-sm font-semibold";
+const rewritePresets = {
+  "React SPA": "location / {\n    try_files $uri $uri/ /index.html;\n}\n\nlocation ~* \\.(?:css|js|mjs|json|map|png|jpg|jpeg|gif|svg|ico|webp|woff2?)$ {\n    try_files $uri =404;\n    expires 7d;\n    add_header Cache-Control \"public, immutable\";\n}",
+  WordPress: "location / {\n    try_files $uri $uri/ /index.php?$query_string;\n}\n\nlocation ~ \\.php$ {\n    try_files $uri =404;\n    include fastcgi_params;\n    fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n    fastcgi_pass unix:/opt/server-engine/services/php/versions/8.3/run/php-fpm.sock;\n}",
+  Laravel: "location / {\n    try_files $uri $uri/ /index.php?$query_string;\n}\n\nlocation ~ \\.php$ {\n    try_files $uri =404;\n    include fastcgi_params;\n    fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n    fastcgi_pass unix:/opt/server-engine/services/php/versions/8.3/run/php-fpm.sock;\n}\n\nlocation ~ /\\. {\n    deny all;\n}",
+  Symfony: "location / {\n    try_files $uri /index.php$is_args$args;\n}\n\nlocation ~ ^/index\\.php(/|$) {\n    include fastcgi_params;\n    fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n    fastcgi_pass unix:/opt/server-engine/services/php/versions/8.3/run/php-fpm.sock;\n}\n\nlocation ~ \\.php {\n    return 404;\n}",
+  CodeIgniter: "location / {\n    try_files $uri $uri/ /index.php?/$uri$is_args$args;\n}\n\nlocation ~ \\.php$ {\n    include fastcgi_params;\n    fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n    fastcgi_pass unix:/opt/server-engine/services/php/versions/8.3/run/php-fpm.sock;\n}",
+  "Static / PHP": "location / {\n    try_files $uri $uri/ =404;\n}\n\nlocation ~ \\.php$ {\n    include fastcgi_params;\n    fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n    fastcgi_pass unix:/opt/server-engine/services/php/versions/8.3/run/php-fpm.sock;\n}",
 };
 
-export default function WebsiteFormModal({
-  site,
-  defaultRoot,
-  phpVersions,
-  onClose,
-  onSaved,
-}) {
+function Field({ label, value, onChange, error, placeholder, children }) {
+  return <label className="block text-sm font-medium text-slate-700 dark:text-slate-300"><span className={error ? "text-rose-600 dark:text-rose-400" : ""}>{label}</span>{children || <input className={`mt-1.5 w-full rounded-md border bg-transparent px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:ring-1 dark:text-slate-100 ${error ? "border-rose-500 focus:border-rose-500 focus:ring-rose-500" : "border-slate-300 focus:border-blue-500 focus:ring-blue-500 dark:border-slate-700"}`} value={value ?? ""} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} />}{error && <span className="mt-1 block text-xs font-normal text-rose-600 dark:text-rose-400">{error}</span>}</label>;
+}
+function SelectField({ label, value, onChange, children }) {
+  return <Field label={label}><select className="mt-1.5 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" value={value} onChange={(event) => onChange(event.target.value)}>{children}</select></Field>;
+}
+function CheckRow({ checked, onChange, label, description, divided = true }) {
+  return <label className={`flex cursor-pointer items-start gap-3 py-2 ${divided ? "border-b border-slate-200 last:border-b-0 dark:border-slate-800" : ""}`}><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-blue-600" /><span><span className="block text-sm font-medium text-slate-900 dark:text-slate-100">{label}</span><span className="mt-0.5 block text-xs leading-4 text-slate-500 dark:text-slate-400">{description}</span></span></label>;
+}
+function Summary({ icon: Icon, title, children }) {
+  return <div className="flex items-start gap-3 border-b border-slate-200 py-3 last:border-b-0 dark:border-slate-800"><Icon size={17} className="mt-0.5 shrink-0 text-blue-600" /><div><p className="text-sm font-medium text-slate-900 dark:text-slate-100">{title}</p><p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">{children}</p></div></div>;
+}
+
+function WebsiteServerConfig({ siteId, serverType }) {
+  const [config, setConfig] = React.useState(null);
+  React.useEffect(() => {
+    let active = true;
+    apiRequest(`/api/v1/websites/${siteId}/configuration`).then((response) => response.ok ? response.json() : null).then((value) => { if (active) setConfig(value); }).catch(() => { if (active) setConfig(null); });
+    return () => { active = false; };
+  }, [siteId]);
+  return <div className="space-y-5"><div><h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">{serverType === "apache" ? "Apache virtual host" : "Nginx server block"}</h3><code className="mt-2 block break-all text-xs text-slate-500 dark:text-slate-400">{config?.config_path || "Loading configuration path…"}</code></div><ConfigEditor path={serverType === "apache" ? "httpd.conf" : "nginx.conf"} value={config?.content || "Loading website configuration…"} onChange={() => {}} readOnly /></div>;
+}
+
+function EditWebsiteTab({ tab, form, change, serverType, siteId }) {
+  const [rewrite, setRewrite] = React.useState("try_files $uri $uri/ /index.php?$query_string;");
+  const [indexFiles, setIndexFiles] = React.useState("index.php, index.html, index.htm");
+  const [proxyTarget, setProxyTarget] = React.useState("");
+  const [proxyPath, setProxyPath] = React.useState("/");
+  const [proxyWebSockets, setProxyWebSockets] = React.useState(true);
+  const [proxyBuffering, setProxyBuffering] = React.useState(true);
+  const [proxyTimeout, setProxyTimeout] = React.useState("60");
+  const [redirectSource, setRedirectSource] = React.useState("/");
+  const [redirectTarget, setRedirectTarget] = React.useState("");
+  const [redirectCode, setRedirectCode] = React.useState("301");
+  const [redirectKeepPath, setRedirectKeepPath] = React.useState(true);
+  const [certificateMethod, setCertificateMethod] = React.useState("acme");
+  const [certificateAutoRenew, setCertificateAutoRenew] = React.useState(true);
+  const [certificateHsts, setCertificateHsts] = React.useState(false);
+  const [certificateOcsp, setCertificateOcsp] = React.useState(true);
+  const [tlsProfile, setTlsProfile] = React.useState("modern");
+  const [maintenance, setMaintenance] = React.useState(false);
+  const [maintenanceMessage, setMaintenanceMessage] = React.useState("We’ll be back shortly.");
+  const [maintenanceBypass, setMaintenanceBypass] = React.useState("");
+  const [maintenanceStart, setMaintenanceStart] = React.useState("");
+  const [maintenanceEnd, setMaintenanceEnd] = React.useState("");
+  const [hotlinkEnabled, setHotlinkEnabled] = React.useState(false);
+  const [hotlinkExtensions, setHotlinkExtensions] = React.useState("jpg, jpeg, png, gif, webp, svg");
+  const [hotlinkDomains, setHotlinkDomains] = React.useState("");
+  const [hotlinkAllowEmpty, setHotlinkAllowEmpty] = React.useState(true);
+  const [hotlinkAction, setHotlinkAction] = React.useState("403");
+  const [hotlinkRedirect, setHotlinkRedirect] = React.useState("");
+  const applyRewritePreset = (name) => setRewrite(rewritePresets[name].replaceAll("/8.3/", `/${form.php_version || "8.3"}/`));
+  if (tab === "access") return <div className="space-y-5"><div><h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Access restrictions</h3><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Protect this website before exposing private areas or staging content.</p></div><Field label="Allowed IP addresses"><input className="mt-1.5 w-full rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm dark:border-slate-700 dark:text-slate-100" placeholder="203.0.113.10, 198.51.100.0/24" /></Field><CheckRow checked={false} onChange={() => {}} label="Require HTTP authentication" description="Protect the website with a username and password before serving content." /><CheckRow checked={false} onChange={() => {}} label="Block hidden files" description="Prevent access to .env, .git, and other dotfiles." /></div>;
+  if (tab === "rewrite") return <div className="space-y-5"><div><h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">URL rewrite rules</h3><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Choose a starting configuration for your application, then review it before applying.</p></div><div><p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Application preset</p><div className="flex flex-wrap gap-2">{Object.keys(rewritePresets).map((name) => <button type="button" key={name} className="inline-flex cursor-pointer items-center rounded-full border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:border-blue-500 hover:text-blue-600 dark:border-slate-700 dark:text-slate-300 dark:hover:border-blue-400 dark:hover:text-blue-400" onClick={() => applyRewritePreset(name)}>{name}</button>)}</div></div><ConfigEditor path="nginx.conf" value={rewrite} onChange={setRewrite} /></div>;
+  if (tab === "config") return <WebsiteServerConfig siteId={siteId} serverType={serverType} />;
+  if (tab === "ssl") return <div className="space-y-3"><div><h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">SSL and certificates</h3><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Secure this website and all configured domain aliases with HTTPS.</p></div><div className="flex items-center justify-between gap-4 rounded-md bg-slate-50 px-4 py-3 dark:bg-slate-800"><div><p className="text-sm font-medium text-slate-900 dark:text-slate-100">Certificate status</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">No certificate has been issued for this website yet.</p></div><span className="text-sm font-semibold text-amber-600 dark:text-amber-400">Not issued</span></div><CheckRow divided={false} checked={form.ssl_enabled} onChange={(value) => change("ssl_enabled", value)} label="Enable HTTPS" description="Serve this website over TLS when the certificate is ready." /><CheckRow divided={false} checked={form.ssl_enforce_tls} onChange={(value) => change("ssl_enforce_tls", value)} label="Force HTTPS redirect" description="Redirect every HTTP request to the secure URL with a permanent redirect." /><div className="space-y-4"><div><p className="text-sm font-medium text-slate-900 dark:text-slate-100">Certificate coverage</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">The certificate will cover the primary domain and configured aliases.</p></div><div className="flex flex-wrap gap-2">{[form.domain, ...form.aliases.split(",").map((item) => item.trim()).filter(Boolean)].filter(Boolean).map((domain) => <span key={domain} className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200">{domain}</span>)}</div></div><div className="space-y-4"><p className="text-sm font-medium text-slate-900 dark:text-slate-100">Issuance and renewal</p><div className="grid gap-4 sm:grid-cols-2"><SelectField label="Certificate method" value={certificateMethod} onChange={setCertificateMethod}><option value="acme">Let’s Encrypt · automatic</option><option value="manual">Upload certificate</option></SelectField><SelectField label="TLS profile" value={tlsProfile} onChange={setTlsProfile}><option value="modern">Modern · TLS 1.2 and 1.3</option><option value="compatible">Compatible · broader clients</option></SelectField></div><CheckRow divided={false} checked={certificateAutoRenew} onChange={setCertificateAutoRenew} label="Automatic renewal" description="Renew before expiry and reload the active web server after validation." /></div><div className="space-y-3"><p className="text-sm font-medium text-slate-900 dark:text-slate-100">Advanced TLS</p><CheckRow divided={false} checked={certificateHsts} onChange={setCertificateHsts} label="HSTS" description="Tell browsers to use HTTPS for future visits. Enable only after HTTPS is confirmed." /><CheckRow divided={false} checked={certificateOcsp} onChange={setCertificateOcsp} label="OCSP stapling" description="Improve certificate validation performance when supported by the web server." /></div><div className="flex flex-wrap gap-3"><button type="button" className={`${buttonClass} bg-blue-600 text-white hover:bg-blue-700`} onClick={() => change("ssl_enabled", true)}>Issue certificate</button><button type="button" className="inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap px-1 py-2 text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400">View certificate details</button></div></div>;
+  if (tab === "php") return <div className="space-y-5"><div><h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">PHP runtime</h3><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Choose the PHP-FPM version used by this website.</p></div><SelectField label="PHP-FPM version" value={form.php_version} onChange={(value) => change("php_version", value)}><option value="">Static site / no PHP</option></SelectField><CheckRow checked={true} onChange={() => {}} label="OPcache enabled" description="Keep compiled PHP scripts in memory for faster requests." /></div>;
+  if (tab === "webserver") return <div className="space-y-5"><div><h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Web server</h3><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">This website follows the active web-server provider.</p></div><Summary icon={Server} title="Active provider">{serverType === "apache" ? "Apache HTTP Server" : "Nginx"}</Summary><CheckRow checked={true} onChange={() => {}} label="HTTP/2 enabled" description="Use the modern protocol when TLS is active." /></div>;
+  if (tab === "git") return <div className="space-y-5"><div><h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Git deployment</h3><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Connect a repository and deploy updates into this project folder.</p></div><Field label="Repository URL"><input className="mt-1.5 w-full rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm dark:border-slate-700 dark:text-slate-100" placeholder="https://github.com/example/project.git" /></Field><Field label="Branch"><input className="mt-1.5 w-full rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm dark:border-slate-700 dark:text-slate-100" placeholder="main" /></Field></div>;
+  if (tab === "composer") return <div className="space-y-5"><div><h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Composer deployment</h3><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Install and maintain PHP dependencies for this website.</p></div><CheckRow checked={true} onChange={() => {}} label="Install dependencies on deploy" description="Run composer install with the managed Composer runtime after deployment." /><CheckRow checked={false} onChange={() => {}} label="Production mode" description="Use --no-dev and optimize the Composer autoloader." /></div>;
+  if (tab === "redirect") return <div className="space-y-3"><div><h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Redirects</h3><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Send visitors from an old path or domain to a new URL without changing application code.</p></div><div className="grid gap-4 sm:grid-cols-2"><Field label="Source path"><input value={redirectSource} onChange={(event) => setRedirectSource(event.target.value)} className="mt-1.5 w-full rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:text-slate-100" placeholder="/old-path" /></Field><Field label="Destination URL"><input value={redirectTarget} onChange={(event) => setRedirectTarget(event.target.value)} className="mt-1.5 w-full rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:text-slate-100" placeholder="https://example.com/new-path" /></Field></div><div className="grid gap-4 sm:grid-cols-2"><SelectField label="Redirect type" value={redirectCode} onChange={setRedirectCode}><option value="301">301 · Permanent</option><option value="302">302 · Temporary</option><option value="307">307 · Preserve method</option><option value="308">308 · Permanent method</option></SelectField><CheckRow divided={false} checked={redirectKeepPath} onChange={setRedirectKeepPath} label="Keep the remaining path" description="Append the requested path when redirecting to another domain." /></div><div className="flex flex-wrap gap-2"><button type="button" className="inline-flex cursor-pointer items-center rounded-full border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:border-blue-500 hover:text-blue-600 dark:border-slate-700 dark:text-slate-300 dark:hover:border-blue-400 dark:hover:text-blue-400" onClick={() => { setRedirectSource("/"); setRedirectTarget(`https://${form.domain || "example.com"}`); setRedirectCode("301"); }}>Canonical domain</button><button type="button" className="inline-flex cursor-pointer items-center rounded-full border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:border-blue-500 hover:text-blue-600 dark:border-slate-700 dark:text-slate-300 dark:hover:border-blue-400 dark:hover:text-blue-400" onClick={() => { setRedirectSource("/old-path"); setRedirectTarget("/new-path"); setRedirectCode("301"); }}>Path move</button></div></div>;
+  if (tab === "proxy") return <div className="space-y-3"><div><h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Proxy</h3><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Forward a path to a Node.js, Python, Docker, or other HTTP application.</p></div><div className="flex flex-wrap gap-2"><span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Common upstreams</span>{["Node.js · 3000", "Python · 8000", "API · 8080"].map((preset) => <button type="button" key={preset} className="inline-flex cursor-pointer items-center rounded-full border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:border-blue-500 hover:text-blue-600 dark:border-slate-700 dark:text-slate-300 dark:hover:border-blue-400 dark:hover:text-blue-400" onClick={() => setProxyTarget(`http://127.0.0.1:${preset.endsWith("3000") ? "3000" : preset.endsWith("8000") ? "8000" : "8080"}`)}>{preset}</button>)}</div><div className="grid gap-4 sm:grid-cols-2"><Field label="Upstream URL"><input value={proxyTarget} onChange={(event) => setProxyTarget(event.target.value)} className="mt-1.5 w-full rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:text-slate-100" placeholder="http://127.0.0.1:3000" /></Field><Field label="Public path"><input value={proxyPath} onChange={(event) => setProxyPath(event.target.value)} className="mt-1.5 w-full rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:text-slate-100" placeholder="/app" /></Field></div><div className="grid gap-4 sm:grid-cols-2"><Field label="Response timeout (seconds)"><input type="number" min="1" value={proxyTimeout} onChange={(event) => setProxyTimeout(event.target.value)} className="mt-1.5 w-full rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:text-slate-100" /></Field><div className="space-y-1"><CheckRow divided={false} checked={proxyWebSockets} onChange={setProxyWebSockets} label="WebSocket support" description="Forward Upgrade and Connection headers for realtime apps." /><CheckRow divided={false} checked={proxyBuffering} onChange={setProxyBuffering} label="Response buffering" description="Buffer upstream responses for steadier delivery." /></div></div><Summary icon={Globe2} title="Forwarded headers">Host, client IP, protocol, and forwarded-for headers are enabled by default.</Summary></div>;
+  if (tab === "hotlink") return <div className="space-y-3"><div><h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Hotlink protection</h3><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Stop other websites from embedding or consuming your images and static assets without permission.</p></div><CheckRow divided={false} checked={hotlinkEnabled} onChange={setHotlinkEnabled} label="Enable hotlink protection" description="Check the request referrer before serving protected file types." /><div className="space-y-4"><div><p className="text-sm font-medium text-slate-900 dark:text-slate-100">Protected files</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Use extensions separated by commas. These are the assets most commonly targeted for bandwidth theft.</p></div><Field label="File extensions"><input value={hotlinkExtensions} onChange={(event) => setHotlinkExtensions(event.target.value)} className="mt-1.5 w-full rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:text-slate-100" placeholder="jpg, jpeg, png, gif, webp" /></Field><div className="flex flex-wrap gap-2">{["Images", "Video", "Downloads"].map((preset) => <button type="button" key={preset} className="inline-flex cursor-pointer items-center rounded-full border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:border-blue-500 hover:text-blue-600 dark:border-slate-700 dark:text-slate-300 dark:hover:border-blue-400 dark:hover:text-blue-400" onClick={() => setHotlinkExtensions(preset === "Images" ? "jpg, jpeg, png, gif, webp, svg" : preset === "Video" ? "mp4, webm, mov, m4v" : "zip, pdf, mp3, mp4")}>{preset}</button>)}</div></div><div className="space-y-4"><div><p className="text-sm font-medium text-slate-900 dark:text-slate-100">Allowed referrers</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Your primary domain and aliases are trusted automatically. Add CDN or campaign domains here.</p></div><Field label="Additional domains"><input value={hotlinkDomains} onChange={(event) => setHotlinkDomains(event.target.value)} className="mt-1.5 w-full rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:text-slate-100" placeholder="cdn.example.com, partner.example.com" /></Field><CheckRow divided={false} checked={hotlinkAllowEmpty} onChange={setHotlinkAllowEmpty} label="Allow direct requests" description="Allow visitors who open the asset URL directly without a referrer." /></div><div className="space-y-4"><div><p className="text-sm font-medium text-slate-900 dark:text-slate-100">Blocked request action</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Choose what an untrusted referrer receives.</p></div><div className="flex flex-wrap gap-5"><label className="inline-flex cursor-pointer items-center gap-2 text-sm text-slate-700 dark:text-slate-300"><input type="radio" name="hotlink-action" value="403" checked={hotlinkAction === "403"} onChange={(event) => setHotlinkAction(event.target.value)} className="h-4 w-4 cursor-pointer accent-blue-600" />403 Forbidden</label><label className="inline-flex cursor-pointer items-center gap-2 text-sm text-slate-700 dark:text-slate-300"><input type="radio" name="hotlink-action" value="redirect" checked={hotlinkAction === "redirect"} onChange={(event) => setHotlinkAction(event.target.value)} className="h-4 w-4 cursor-pointer accent-blue-600" />Redirect</label></div>{hotlinkAction === "redirect" && <Field label="Redirect URL"><input value={hotlinkRedirect} onChange={(event) => setHotlinkRedirect(event.target.value)} className="mt-1.5 w-full rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:text-slate-100" placeholder="https://example.com/blocked-hotlink" /></Field>}</div></div>;
+  if (tab === "maintenance") return <div className="space-y-3"><div><h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Maintenance</h3><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Temporarily take this website out of service while you deploy, migrate, or repair it.</p></div><CheckRow divided={false} checked={maintenance} onChange={setMaintenance} label="Enable maintenance mode" description="Visitors receive the maintenance response instead of the application. Your configured bypass addresses remain available." /><div className="space-y-4 py-2"><div><p className="text-sm font-medium text-slate-900 dark:text-slate-100">Visitor response</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Use the standard temporary-unavailable response for search engines and clients.</p></div><div className="flex flex-wrap gap-5"><label className="inline-flex cursor-pointer items-center gap-2 text-sm text-slate-700 dark:text-slate-300"><input type="radio" name="maintenance-status" value="503" defaultChecked className="h-4 w-4 cursor-pointer accent-blue-600" />503 Service Unavailable</label><label className="inline-flex cursor-pointer items-center gap-2 text-sm text-slate-700 dark:text-slate-300"><input type="radio" name="maintenance-status" value="200" className="h-4 w-4 cursor-pointer accent-blue-600" />200 OK</label></div><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Maintenance message<textarea value={maintenanceMessage} onChange={(event) => setMaintenanceMessage(event.target.value)} rows="3" className="mt-1.5 w-full resize-y rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:text-slate-100" placeholder="We’ll be back shortly." /></label></div><div className="space-y-4 py-2"><div><p className="text-sm font-medium text-slate-900 dark:text-slate-100">Access exceptions</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Allow trusted office, VPN, or deployment addresses to view the live site during maintenance.</p></div><Field label="Allowed IP addresses"><input value={maintenanceBypass} onChange={(event) => setMaintenanceBypass(event.target.value)} className="mt-1.5 w-full rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:text-slate-100" placeholder="203.0.113.10, 198.51.100.0/24" /></Field></div><div className="space-y-4 py-2"><div><p className="text-sm font-medium text-slate-900 dark:text-slate-100">Schedule</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Optionally activate maintenance for a planned deployment window.</p></div><div className="grid gap-4 sm:grid-cols-2"><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Start<input type="datetime-local" value={maintenanceStart} onChange={(event) => setMaintenanceStart(event.target.value)} className="mt-1.5 w-full rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:text-slate-100" /></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">End<input type="datetime-local" value={maintenanceEnd} onChange={(event) => setMaintenanceEnd(event.target.value)} className="mt-1.5 w-full rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:text-slate-100" /></label></div></div></div>;
+  if (tab === "logs") return <div className="space-y-5"><div><h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Response log</h3><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Choose how this website records requests and errors.</p></div><CheckRow checked={true} onChange={() => {}} label="Access log enabled" description="Record response status, request path, duration, and client address." /><SelectField label="Log retention" value="30" onChange={() => {}}><option value="7">7 days</option><option value="30">30 days</option><option value="90">90 days</option></SelectField></div>;
+  return null;
+}
+
+function FolderPicker({ value, defaultRoot, onSelect, onClose }) {
+  const [current, setCurrent] = React.useState(value || defaultRoot);
+  const [data, setData] = React.useState({ directories: [], parent: null });
+  const [newFolder, setNewFolder] = React.useState("");
+  const [error, setError] = React.useState("");
+  const load = React.useCallback(() => apiRequest(`/api/v1/websites/directories?path=${encodeURIComponent(current)}`).then(async (response) => { if (!response.ok) throw new Error(await readApiError(response)); setData(await response.json()); }).catch((reason) => setError(reason.message)), [current]);
+  React.useEffect(() => { load(); }, [load]);
+  async function createFolder(event) { event.preventDefault(); if (!newFolder.trim()) return; const response = await apiRequest("/api/v1/websites/directories", { method: "POST", body: JSON.stringify({ path: current, name: newFolder.trim() }) }); if (!response.ok) setError(await readApiError(response)); else { setNewFolder(""); load(); } }
+  return <div className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-slate-950/60 p-4 sm:p-8"><section className="w-full max-w-xl rounded-xl bg-white shadow-xl dark:bg-slate-900"><div className="flex items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-800"><div><h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Choose project folder</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Only folders inside the website root are available.</p></div><button type="button" className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800" onClick={onClose}><X size={17} /></button></div><div className="space-y-4 px-5 py-5"><div className="flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:text-slate-300"><Folder size={16} className="text-blue-600" /><span className="min-w-0 flex-1 truncate">{current}</span><button type="button" className="cursor-pointer text-blue-600 hover:text-blue-700" onClick={() => onSelect(current)}>Select</button></div>{data.parent && <button type="button" className="inline-flex cursor-pointer items-center gap-1 text-sm font-medium text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100" onClick={() => setCurrent(data.parent)}><ChevronLeft size={15} />Parent folder</button>}<div className="divide-y divide-slate-200 border-y border-slate-200 dark:divide-slate-800 dark:border-slate-800">{data.directories.length ? data.directories.map((item) => <button type="button" key={item.path} className="flex w-full cursor-pointer items-center gap-3 py-3 text-left text-sm text-slate-700 hover:text-blue-600 dark:text-slate-300 dark:hover:text-blue-400" onClick={() => setCurrent(item.path)}><Folder size={16} />{item.name}</button>) : <p className="py-5 text-sm text-slate-500 dark:text-slate-400">No folders here yet.</p>}</div><form className="flex gap-2" onSubmit={createFolder}><input className="min-w-0 flex-1 rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-slate-700 dark:text-slate-100" value={newFolder} onChange={(event) => setNewFolder(event.target.value)} placeholder="New folder name" /><button type="submit" className={`${buttonClass} border border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300`}>Create folder</button></form>{error && <p className="text-sm text-rose-600 dark:text-rose-400">{error}</p>}</div></section></div>;
+}
+
+export default function WebsiteFormModal({ site, defaultRoot, phpVersions = [], serverType = "nginx", onClose, onSaved }) {
   const [form, setForm] = React.useState(empty);
+  const [tab, setTab] = React.useState("site");
+  const [folderOpen, setFolderOpen] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState("");
+  const [fieldErrors, setFieldErrors] = React.useState({});
+  const [runningDirectories, setRunningDirectories] = React.useState(["."]);
   const editing = Boolean(site?.id);
+  const latestPhp = phpVersions.map((item) => item.version || item).filter(Boolean).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))[0] || "";
+  React.useEffect(() => { setForm(site?.id ? { ...empty, ...site, aliases: site.aliases.join(", "), tags: site.tags.join(", ") } : { ...empty, project_path: `${defaultRoot || "/server-engine/www"}/`, server_type: serverType, php_version: latestPhp }); setTab("site"); setError(""); setFieldErrors({}); }, [site, defaultRoot, serverType, latestPhp]);
   React.useEffect(() => {
-    setForm(
-      site?.id
-        ? {
-            ...empty,
-            ...site,
-            aliases: site.aliases.join(", "),
-            tags: site.tags.join(", "),
-          }
-        : { ...empty, project_path: `${defaultRoot || "/server-engine/www"}/` },
-    );
-    setError("");
-  }, [site, defaultRoot]);
-  const change = (key, value) =>
-    setForm((current) => ({ ...current, [key]: value }));
-  const submit = async (event) => {
-    event.preventDefault();
-    setBusy(true);
-    setError("");
-    const payload = {
-      ...form,
-      aliases: form.aliases
-        .split(",")
-        .map((item) => item.trim())
-        .filter(Boolean),
-      tags: form.tags
-        .split(",")
-        .map((item) => item.trim())
-        .filter(Boolean),
-    };
-    const response = await apiRequest(
-      editing ? `/api/v1/websites/${site.id}` : "/api/v1/websites",
-      { method: editing ? "PATCH" : "POST", body: JSON.stringify(payload) },
-    );
-    if (!response.ok) setError(await readApiError(response));
-    else {
-      onSaved(await response.json());
-      onClose();
-    }
-    setBusy(false);
-  };
-  const field = (key, label, type = "text", placeholder = "") => (
-    <label className="website-field">
-      <span>{label}</span>
-      <input
-        type={type}
-        value={form[key] ?? ""}
-        placeholder={placeholder}
-        onChange={(event) =>
-          change(
-            key,
-            type === "checkbox" ? event.target.checked : event.target.value,
-          )
-        }
-      />
-    </label>
-  );
+    if (!form.project_path) return undefined;
+    let active = true;
+    apiRequest(`/api/v1/websites/directories?path=${encodeURIComponent(form.project_path)}`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((value) => {
+        if (!active || !value) return;
+        const root = value.path.replace(/\\/g, "/").replace(/\/$/, "");
+        const options = [".", ...value.directories.map((item) => {
+          const path = item.path.replace(/\\/g, "/");
+          return path.startsWith(`${root}/`) ? path.slice(root.length + 1) : item.name;
+        })];
+        setRunningDirectories([...new Set(options)]);
+        setForm((current) => options.includes(current.web_root) ? current : { ...current, web_root: "." });
+      })
+      .catch(() => active && setRunningDirectories(["."]));
+    return () => { active = false; };
+  }, [form.project_path]);
+  const change = (key, value) => { setForm((current) => ({ ...current, [key]: value })); setFieldErrors((current) => ({ ...current, [key]: "" })); };
+  function validate() { const next = {}; if (!form.domain.trim()) next.domain = "Enter the primary domain."; else if (!domainPattern.test(form.domain.trim())) next.domain = "Enter a valid domain such as example.com."; if (!form.project_path.trim()) next.project_path = "Choose a project folder."; if (!form.web_root.trim()) next.web_root = "Choose a running directory."; if (form.database_enabled && !form.database_name.trim()) next.database_name = "Enter a database name."; if (form.database_enabled && !form.database_user.trim()) next.database_user = "Enter a database user."; setFieldErrors(next); if (next.domain || next.project_path || next.web_root) setTab("site"); else if (next.database_name || next.database_user) setTab("database"); return Object.keys(next).length === 0; }
+  async function submit(event) { event.preventDefault(); if (!validate()) return; setBusy(true); setError(""); const payload = { ...form, name: editing ? form.name || form.domain : form.domain, aliases: form.aliases.split(",").map((item) => item.trim()).filter(Boolean), tags: form.tags.split(",").map((item) => item.trim()).filter(Boolean) }; const response = await apiRequest(editing ? `/api/v1/websites/${site.id}` : "/api/v1/websites", { method: editing ? "PATCH" : "POST", body: JSON.stringify(payload) }); if (!response.ok) setError(await readApiError(response)); else { onSaved(await response.json()); onClose(); } setBusy(false); }
   if (!site) return null;
+  const phpOptions = phpVersions.map((item) => item.version || item).filter(Boolean);
+  const activeTabs = editing ? editTabs : tabs;
   return (
-    <div
-      className="modal-backdrop"
-      onMouseDown={(event) => event.target === event.currentTarget && onClose()}
-    >
-      <form className="modal-card website-form" onSubmit={submit}>
-        <div className="modal-header">
-          <div>
-            <p className="eyebrow">WEBSITE CONFIGURATION</p>
-            <h2>{editing ? "Edit website" : "Create website"}</h2>
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/60 p-4 sm:p-8">
+      <form className="w-full max-w-3xl rounded-xl bg-white shadow-xl dark:bg-slate-900" onSubmit={submit}>
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5 dark:border-slate-800">
+          <div><p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Web hosting</p><h2 className="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">{editing ? "Edit website" : "Create website"}</h2>{!editing && <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Set the domain, folder, runtime, and TLS behavior for this website.</p>}</div>
+          <button type="button" aria-label="Close website form" className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 dark:hover:text-slate-200" onClick={onClose}><X size={18} /></button>
+        </div>
+        <div>
+          <div className="flex flex-nowrap gap-5 overflow-x-auto border-b border-slate-200 px-6 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:border-slate-800">
+            {activeTabs.map(([id, label, Icon]) => <button type="button" key={id} onClick={() => setTab(id)} className={`inline-flex cursor-pointer shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium ${tab === id ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"}`}><Icon size={15} />{label}</button>)}
           </div>
-          <button type="button" className="icon-button" onClick={onClose}>
-            <X size={18} />
-          </button>
-        </div>
-        {error && <div className="website-error">{error}</div>}
-        <div className="website-form-grid">
-          {field("name", "Display name", "text", "My production site")}
-          {field("domain", "Primary domain", "text", "example.test")}
-          {field(
-            "aliases",
-            "Domain aliases",
-            "text",
-            "www.example.test, api.example.test",
-          )}
-          {field(
-            "project_path",
-            "Project folder",
-            "text",
-            `${defaultRoot || "/server-engine/www"}/example.test`,
-          )}
-          {field(
-            "web_root",
-            "Document root inside project",
-            "text",
-            ". or public",
-          )}
-          {field(
-            "php_version",
-            "PHP-FPM version",
-            "text",
-            phpVersions.length
-              ? "Choose an installed version"
-              : "No PHP runtime installed",
-          )}
-          {
-            <label className="website-field">
-              <span>Web server</span>
-              <select
-                value={form.server_type}
-                onChange={(event) => change("server_type", event.target.value)}
-              >
-                <option value="nginx">Nginx</option>
-                <option value="apache">Apache</option>
-              </select>
-            </label>
-          }
-          {
-            <label className="website-field">
-              <span>Framework preset</span>
-              <select
-                value={form.framework}
-                onChange={(event) => change("framework", event.target.value)}
-              >
-                <option value="generic_php">Generic PHP</option>
-                <option value="laravel">Laravel</option>
-                <option value="wordpress">WordPress</option>
-                <option value="symfony">Symfony</option>
-                <option value="codeigniter">CodeIgniter</option>
-                <option value="custom">Custom</option>
-              </select>
-            </label>
-          }
-        </div>
-        <div className="website-form-section">
-          <h3>TLS and database</h3>
-          <div className="website-checks">
-            <label>
-              <input
-                className="h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 dark:border-slate-600 dark:bg-slate-800 dark:focus:ring-offset-slate-900"
-                type="checkbox"
-                checked={form.ssl_enabled}
-                onChange={(event) =>
-                  change("ssl_enabled", event.target.checked)
-                }
-              />{" "}
-              TLS enabled
-            </label>
-            <label>
-              <input
-                className="h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 dark:border-slate-600 dark:bg-slate-800 dark:focus:ring-offset-slate-900"
-                type="checkbox"
-                checked={form.ssl_enforce_tls}
-                onChange={(event) =>
-                  change("ssl_enforce_tls", event.target.checked)
-                }
-              />{" "}
-              Redirect HTTP to HTTPS
-            </label>
-            <label>
-              <input
-                className="h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 dark:border-slate-600 dark:bg-slate-800 dark:focus:ring-offset-slate-900"
-                type="checkbox"
-                checked={form.database_enabled}
-                onChange={(event) =>
-                  change("database_enabled", event.target.checked)
-                }
-              />{" "}
-              Attach a database
-            </label>
+          <div className="max-h-[calc(100vh-15rem)] overflow-y-auto px-6 py-5">
+            {error && <div className="mb-5 border-b border-rose-200 pb-3 text-sm text-rose-600 dark:border-rose-900 dark:text-rose-400">{error}</div>}
+            {tab === "site" && <div className="space-y-5"><div><h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Website identity</h3><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">The domain and folder served by the active web server.</p></div><div className="grid gap-4 sm:grid-cols-2"><Field label="Primary domain" value={form.domain} onChange={(value) => change("domain", value.replace(/[^a-zA-Z0-9.-]/g, "").toLowerCase())} error={fieldErrors.domain} placeholder="example.com" /><Field label="Domain aliases" value={form.aliases} onChange={(value) => change("aliases", sanitizeDomainList(value))} placeholder="www.example.com, shop.example.com" /><Field label="Project folder" value={form.project_path} error={fieldErrors.project_path}><div className="mt-1.5 flex gap-2"><input readOnly className={`min-w-0 flex-1 rounded-md border bg-transparent px-3 py-2 text-sm text-slate-900 outline-none dark:text-slate-100 ${fieldErrors.project_path ? "border-rose-500" : "border-slate-300 dark:border-slate-700"}`} value={form.project_path} /><button type="button" className={`${buttonClass} border border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300`} onClick={() => setFolderOpen(true)}><Folder size={15} />Browse</button></div></Field><SelectField label="Running directory" value={form.web_root} onChange={(value) => change("web_root", value)}><option value=".">Project folder (/)</option>{runningDirectories.filter((directory) => directory !== ".").map((directory) => <option key={directory} value={directory}>{directory}</option>)}</SelectField></div><Summary icon={Globe2} title={`Active web server: ${serverType === "apache" ? "Apache HTTP Server" : "Nginx"}`}>The website will use the currently running web server automatically.</Summary></div>}
+            {tab === "runtime" && <div className="space-y-5"><div><h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Runtime and application</h3><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">New websites default to the newest installed PHP runtime.</p></div><div className="grid gap-4 sm:grid-cols-2"><SelectField label="Application preset" value={form.framework} onChange={(value) => change("framework", value)}><option value="generic_php">Generic PHP</option><option value="laravel">Laravel</option><option value="wordpress">WordPress</option><option value="symfony">Symfony</option><option value="codeigniter">CodeIgniter</option><option value="custom">Custom application</option></SelectField><SelectField label="PHP-FPM version" value={form.php_version} onChange={(value) => change("php_version", value)}><option value="">Static site / no PHP</option>{phpOptions.map((version) => <option key={version} value={version}>PHP {version}</option>)}</SelectField></div></div>}
+            {tab === "security" && <div className="space-y-5"><div><h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">TLS and redirects</h3><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Choose whether this website should always use HTTPS.</p></div><CheckRow checked={form.ssl_enforce_tls} onChange={(value) => { change("ssl_enforce_tls", value); if (value) change("ssl_enabled", true); }} label="Force HTTPS" description="Enable TLS and permanently redirect HTTP visitors to the secure URL." /></div>}
+            {tab === "database" && <div className="space-y-5"><div><h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Database attachment</h3><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Optionally reserve a database identity for this application.</p></div><CheckRow checked={form.database_enabled} onChange={(value) => change("database_enabled", value)} label="Attach a database" description="Create or connect the database record when the backend workflow is enabled." />{form.database_enabled && <div className="grid gap-4 sm:grid-cols-2"><Field label="Database name" value={form.database_name} onChange={(value) => change("database_name", value)} error={fieldErrors.database_name} placeholder="example_db" /><Field label="Database user" value={form.database_user} onChange={(value) => change("database_user", value)} error={fieldErrors.database_user} placeholder="example_user" /></div>}</div>}
+            {editing && <EditWebsiteTab tab={tab} form={form} change={change} serverType={serverType} siteId={site.id} />}
           </div>
-          {form.database_enabled && (
-            <div className="website-form-grid">
-              {field("database_name", "Database name", "text", "example_db")}
-              {field("database_user", "Database user", "text", "example_user")}
-            </div>
-          )}
         </div>
-        <div className="website-form-grid">
-          {field("tags", "Tags", "text", "production, wordpress")}
-          {field("notes", "Notes", "text", "Optional deployment notes")}
-        </div>
-        <div className="modal-actions">
-          <button
-            type="button"
-            className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-            onClick={onClose}
-          >
-            Cancel
-          </button>
-          <button
-            className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
-            disabled={busy}
-          >
-            <Save size={15} />
-            {busy ? "Saving…" : editing ? "Save website" : "Create website"}
-          </button>
-        </div>
+        <div className="flex justify-end gap-3 border-t border-slate-200 px-6 py-4 dark:border-slate-800"><button type="button" className={`${buttonClass} border border-slate-300 text-slate-700 dark:border-slate-700 dark:text-slate-300`} onClick={onClose}>Cancel</button><button type="submit" className={`${buttonClass} bg-blue-600 text-white hover:bg-blue-700`} disabled={busy}><Save size={15} />{busy ? "Saving…" : editing ? "Save website" : "Create website"}</button></div>
       </form>
+      {folderOpen && <FolderPicker value={form.project_path} defaultRoot={defaultRoot} onSelect={(path) => { change("project_path", path); setFolderOpen(false); }} onClose={() => setFolderOpen(false)} />}
     </div>
   );
 }

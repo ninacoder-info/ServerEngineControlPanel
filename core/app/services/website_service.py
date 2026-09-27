@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import pwd
 import re
 import tempfile
 import uuid
@@ -32,6 +33,44 @@ class WebsiteService:
     def get(self, website_id: str) -> Website | None:
         return next((site for site in self.list() if site.id == website_id), None)
 
+    def configuration(self, website_id: str) -> dict:
+        site = self.get(website_id)
+        if site is None:
+            raise HTTPException(404, "Website not found")
+        if site.server_type != "nginx":
+            return {"website_id": site.id, "server_type": site.server_type, "config_path": site.config_path, "content": "# Apache virtual-host configuration is managed by the Apache service."}
+        nginx_root = self.service_root / "nginx"
+        config_id = self._configuration_id(site)
+        config_path = nginx_root / "conf" / "sites" / f"{config_id}.conf"
+        names = " ".join([site.domain, *site.aliases])
+        index = "index.php index.html index.htm default.php default.htm default.html"
+        lines = [
+            "server {",
+            "    listen 80;",
+            f"    server_name {names};",
+            f"    index {index};",
+            f"    root {site.document_root};",
+            f"    access_log {nginx_root}/logs/sites/{config_id}.access.log;",
+            f"    error_log {nginx_root}/logs/sites/{config_id}.error.log;",
+            f"    include {nginx_root}/conf/sites/{config_id}/*.conf;",
+            "",
+            "    location / {",
+            "        try_files $uri $uri/ /index.php?$query_string;",
+            "    }",
+        ]
+        if site.php_version:
+            socket = self.service_root / "php" / "versions" / site.php_version / "run" / "php-fpm.sock"
+            lines.extend([
+                "",
+                "    location ~ \\.php$ {",
+                f"        fastcgi_pass unix:{socket};",
+                "        include fastcgi_params;",
+                "        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;",
+                "    }",
+            ])
+        lines.extend(["", "    location ~ /\\. {", "        deny all;", "    }", "}", ""])
+        return {"website_id": site.id, "server_type": site.server_type, "config_path": str(config_path), "content": "\n".join(lines)}
+
     def create(self, payload: WebsiteCreateRequest) -> Website:
         with self._lock:
             sites = [Website.model_validate(item) for item in self._read()]
@@ -42,8 +81,9 @@ class WebsiteService:
             if payload.database_enabled and not payload.database_name.strip():
                 raise HTTPException(400, "Database name is required when database integration is enabled")
             project.mkdir(parents=True, exist_ok=True)
+            self._set_hosting_owner(project)
             now = self._now()
-            site_id = uuid.uuid4().hex[:12]
+            site_id = str(uuid.uuid4())
             config_path = self.service_root / "websites" / f"{site_id}.json"
             site = Website(id=site_id, name=payload.name.strip(), domain=domain, aliases=aliases,
                 project_path=str(project), web_root=web_root,
@@ -67,13 +107,20 @@ class WebsiteService:
             changes = payload.model_dump(exclude_unset=True)
             domain, aliases = self._domains(changes.get("domain", site.domain), changes.get("aliases", site.aliases))
             self._ensure_domains_free(sites, [domain, *aliases], website_id)
+            if "project_path" in changes:
+                project = self._safe_project_path(changes["project_path"])
+                if not project.exists() or not project.is_dir():
+                    raise HTTPException(400, "Project folder must be an existing directory")
+                changes["project_path"] = str(project)
+                self._set_hosting_owner(project)
+            if "web_root" in changes:
+                changes["web_root"] = self._normalize_web_root(changes["web_root"])
             for key, value in changes.items():
                 if key in {"name", "php_version", "database_name", "database_user", "notes"} and isinstance(value, str):
                     value = value.strip()
                 if key == "tags": value = self._tags(value)
                 if hasattr(site, key): setattr(site, key, value)
             site.domain, site.aliases = domain, aliases
-            if "web_root" in changes: site.web_root = self._normalize_web_root(site.web_root)
             site.document_root = str(Path(site.project_path) if site.web_root == "." else Path(site.project_path) / site.web_root)
             site.updated_at = self._now()
             self._write_site(site, sites)
@@ -89,6 +136,58 @@ class WebsiteService:
             site.updated_at = self._now()
             self._write_site(site, sites)
             return site
+
+    def directories(self, path: str | None = None, recursive: bool = False) -> dict:
+        current = self._safe_project_path(path or str(self.web_root))
+        if not current.exists():
+            raise HTTPException(400, "That folder does not exist")
+        try:
+            if recursive:
+                folders = sorted(
+                    ({"name": item.name, "path": str(item)} for item in current.rglob("*") if item.is_dir() and not any(part.startswith(".") for part in item.relative_to(current).parts)),
+                    key=lambda item: item["path"].lower(),
+                )
+            else:
+                folders = sorted(
+                    ({"name": item.name, "path": str(item)} for item in current.iterdir() if item.is_dir() and not item.name.startswith(".")),
+                    key=lambda item: item["name"].lower(),
+                )
+        except OSError as exc:
+            raise HTTPException(400, f"This folder cannot be read: {exc}")
+        parent = str(current.parent) if current != self.web_root else None
+        return {"path": str(current), "parent": parent, "root": str(self.web_root), "directories": folders}
+
+    def create_directory(self, path: str, name: str) -> dict:
+        if "/" in name or "\\" in name or name in {".", ".."}:
+            raise HTTPException(400, "Folder name contains unsupported characters")
+        parent = self._safe_project_path(path)
+        if not parent.is_dir():
+            raise HTTPException(400, "Choose an existing parent folder")
+        target = self._safe_project_path(str(parent / name))
+        target.mkdir(parents=False, exist_ok=False)
+        self._set_hosting_owner(target)
+        return {"name": target.name, "path": str(target)}
+
+    @staticmethod
+    def _set_hosting_owner(path: Path) -> None:
+        """Keep website project directories writable by the managed web user."""
+        try:
+            owner = pwd.getpwnam("serverengine")
+            os.chown(path, owner.pw_uid, owner.pw_gid)
+        except (KeyError, OSError):
+            # Development images may not have the production account yet.
+            # The production installer always creates it before the panel starts.
+            pass
+
+    @staticmethod
+    def _configuration_id(site: Website) -> str:
+        """Return a stable, standard UUID for generated service filenames."""
+        try:
+            return str(uuid.UUID(site.id))
+        except ValueError:
+            # Older websites used short IDs. Keep their identity stable while
+            # upgrading generated filenames to the standard UUID format.
+            return str(uuid.uuid5(uuid.NAMESPACE_URL, f"server-engine:website:{site.id}"))
 
     def delete(self, website_id: str, remove_files: bool = False) -> None:
         with self._lock:

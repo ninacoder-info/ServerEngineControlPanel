@@ -378,14 +378,14 @@ export default function UsersPage() {
       <div className="flex flex-col items-start justify-between gap-4 md:flex-row md:items-end">
         <div>
           <p className="text-sm font-medium text-blue-600 dark:text-blue-400">
-            Accounts and resellers
+              Hosting accounts
           </p>
           <h2 className="mt-1 text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
-            Users
+            Accounts
           </h2>
           <p className="mt-2 max-w-3xl text-base leading-7 text-slate-500 dark:text-slate-400">
-            Create hosting accounts, delegate reseller access, and control
-            quotas and features from one place.
+            Manage customer accounts, delegated ownership, resource plans, and
+            feature access from one place.
           </p>
         </div>
         <button

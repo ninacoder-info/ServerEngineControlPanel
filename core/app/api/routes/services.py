@@ -10,9 +10,32 @@ from app.api.dependencies import require_user
 from app.models.service import ConfigurationSaveRequest, ExtensionInstallRequest, InstallServiceRequest, InstalledService, ServiceActionRequest, ServiceDefinition, SwitchVersionRequest
 from app.services.service_catalog import CATALOG, PHP_EXTENSIONS, get_service
 from app.services.job_service import job_store
-from app.services.service_runtime import PHP_BASELINE_MODULES, SERVICE_PACKAGES, binary_path, ensure_nginx_layout, ensure_php_fpm_layout, nginx_default_configuration, nginx_paths, php_cli_path, service_root
+from app.services.service_runtime import PHP_BASELINE_MODULES, SERVICE_PACKAGES, binary_path, composer_path, ensure_composer_launcher, ensure_nginx_layout, ensure_node_runtime, ensure_php_fpm_layout, ensure_php_terminal_launcher, nginx_default_configuration, nginx_paths, php_cli_path, service_root
 
 router = APIRouter(prefix="/api/v1/services", tags=["services"])
+
+
+@router.get("/composer/terminal")
+def composer_terminal_access(user=Depends(require_user)):
+    ensure_composer_launcher()
+    marker = service_root("composer") / ".terminal-enabled"
+    return {"enabled": marker.exists(), "path": str(composer_path())}
+
+
+@router.put("/composer/terminal")
+def update_composer_terminal_access(payload: dict, user=Depends(require_user)):
+    ensure_composer_launcher()
+    marker = service_root("composer") / ".terminal-enabled"
+    old_marker = service_root("composer") / ".terminal-disabled"
+    enabled = bool(payload.get("enabled", False))
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    if enabled:
+        marker.write_text("enabled\n")
+        old_marker.unlink(missing_ok=True)
+    else:
+        marker.unlink(missing_ok=True)
+        old_marker.unlink(missing_ok=True)
+    return {"enabled": enabled, "path": str(composer_path())}
 
 
 def _php_extension_state(version: str) -> list[dict]:
@@ -32,6 +55,30 @@ def php_runtimes(user=Depends(require_user)):
     definition = get_service("php")
     detected = {item.version: item for item in installed(user) if item.id.startswith("php@") and item.version}
     return [{"version": item.version, "channel": item.channel, "supported": item.supported, "installed": item.version in detected, "status": detected[item.version].status if item.version in detected else "not-installed", "config_path": str(service_root("php", item.version) / "conf/php-fpm.conf"), "socket_path": str(service_root("php", item.version) / "run/php-fpm.sock") if item.version in detected else None, "binary_path": str(binary_path("php", item.version)) if item.version in detected else None, "fpm_path": str(binary_path("php", item.version)) if item.version in detected else None, "cli_path": str(php_cli_path(item.version)) if item.version in detected and php_cli_path(item.version).exists() else None, "extensions": _php_extension_state(item.version) if item.version in detected else []} for item in definition.versions]
+
+
+@router.get("/php/{version}/terminal")
+def php_terminal_access(version: str, user=Depends(require_user)):
+    root = service_root("php", version)
+    if not php_cli_path(version).exists():
+        raise HTTPException(status_code=404, detail="That PHP CLI version is not installed")
+    return {"version": version, "enabled": (root / ".terminal-enabled").exists(), "path": str(php_cli_path(version))}
+
+
+@router.put("/php/{version}/terminal")
+def update_php_terminal_access(version: str, payload: dict, user=Depends(require_user)):
+    root = service_root("php", version)
+    if not php_cli_path(version).exists():
+        raise HTTPException(status_code=404, detail="That PHP CLI version is not installed")
+    marker = root / ".terminal-enabled"
+    enabled = bool(payload.get("enabled", False))
+    if enabled:
+        ensure_php_fpm_layout(version)
+        ensure_php_terminal_launcher(version)
+        marker.write_text("enabled\n")
+    else:
+        marker.unlink(missing_ok=True)
+    return {"version": version, "enabled": enabled, "path": str(php_cli_path(version))}
 
 
 @router.get("/php/{version}/extensions")
@@ -64,6 +111,15 @@ def uninstall_php(version: str, user=Depends(require_user)):
     return {"status": "queued", "job_id": job_id, "message": f"PHP-FPM {version} uninstall queued."}
 
 
+@router.delete("/nodejs/{version}", status_code=status.HTTP_202_ACCEPTED)
+def uninstall_node(version: str, user=Depends(require_user)):
+    if not binary_path("nodejs", version).exists():
+        raise HTTPException(status_code=404, detail="That Node.js runtime is not installed")
+    job_id = f"uninstall-nodejs-{version}"
+    job_store.enqueue_action(job_id, "nodejs", "uninstall", version)
+    return {"status": "queued", "job_id": job_id, "message": f"Node.js {version} uninstall queued."}
+
+
 @router.get("/catalog", response_model=list[ServiceDefinition])
 def catalog(user=Depends(require_user)):
     return CATALOG
@@ -84,6 +140,16 @@ def installed(user=Depends(require_user)):
                         running = _process_running("php", version_root.name)
                         detected.append(InstalledService(id=f"php@{version_root.name}", name=f"{definition.name} {version_root.name}", version=version, status="running" if running else "stopped", managed=False))
             continue
+        if service_id == "nodejs":
+            versions_root = service_root("nodejs") / "versions"
+            if versions_root.exists():
+                for version_root in sorted(item for item in versions_root.iterdir() if item.is_dir()):
+                    ensure_node_runtime(version_root)
+                    version = _installed_service_version("nodejs", package, version_root.name)
+                    if version is not None:
+                        detected.append(InstalledService(id=f"nodejs@{version_root.name}", name=f"Node.js {version_root.name}", version=version, status="stopped", managed=False))
+            ensure_node_runtime(service_root("nodejs"))
+            continue
         version = _installed_service_version(service_id, package)
         if version is None:
             continue
@@ -91,6 +157,12 @@ def installed(user=Depends(require_user)):
         process_name = service_id
         running = _process_running(process_name)
         detected.append(InstalledService(id=service_id, name=definition.name if definition else service_id, version=version, status="running" if running else "stopped", managed=False))
+    composer_root = service_root("composer") / "versions"
+    if composer_root.exists() and composer_path().exists():
+        version_root = composer_path().parents[1]
+        marker = version_root / ".serverengine-version"
+        version = marker.read_text().strip() if marker.exists() else version_root.name
+        detected.append(InstalledService(id="composer", name="Composer", version=version, status="installed", managed=False))
     return detected
 
 
@@ -197,6 +269,11 @@ def configuration(service_id: str, version: str | None = None, file: str = "fpm"
     config_path = _configuration_path(service_id, version, file)
     path = Path(config_path)
     content = path.read_text(errors="replace") if path.exists() else _default_configuration(service_id)
+    if service_id == "apache" and "CustomLog" not in content:
+        content = content.replace(
+            "IncludeOptional conf/sites/*.conf",
+            'LogFormat "%v %h %l %u %t \\\"%r\\\" %>s %b" combined\nCustomLog "logs/access.log" combined\nIncludeOptional conf/sites/*.conf',
+        )
     return {"service": service_id, "config_path": str(path), "content": content, "owner": "serverengine", "port": service.default_port, "safe_defaults": True, "notes": "Configuration is isolated inside the Server Engine service root."}
 
 
@@ -208,6 +285,8 @@ def _configuration_path(service_id: str, version: str | None, file: str = "fpm")
         return php_fpm_paths(version)["ini" if file == "ini" else "config"]
     if service_id == "mysql":
         return service_root("mysql") / "conf/my.cnf"
+    if service_id == "apache":
+        return service_root("apache") / "conf/httpd.conf"
     return service_root(service_id) / "conf/service.conf"
 
 
@@ -216,6 +295,8 @@ def _default_configuration(service_id: str) -> str:
         return nginx_default_configuration(nginx_paths())
     if service_id == "mysql":
         return """[mysqld]\nbind-address=127.0.0.1\nport=3306\ndatadir=/opt/server-engine/services/mysql/data\nlog-error=/opt/server-engine/services/mysql/logs/error.log\nslow_query_log=ON\nmax_connections=151\nsql_mode=STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION\n\n[client]\nport=3306\n"""
+    if service_id == "apache":
+        return """ServerRoot \"/opt/server-engine/services/apache\"\nListen 80\nServerName localhost\n\n# Apache production baseline for Server Engine\nLoadModule mpm_event_module modules/mod_mpm_event.so\nLoadModule unixd_module modules/mod_unixd.so\nLoadModule authz_core_module modules/mod_authz_core.so\nLoadModule dir_module modules/mod_dir.so\nLoadModule mime_module modules/mod_mime.so\nLoadModule rewrite_module modules/mod_rewrite.so\nLoadModule headers_module modules/mod_headers.so\nLoadModule ssl_module modules/mod_ssl.so\nLoadModule proxy_module modules/mod_proxy.so\nLoadModule proxy_fcgi_module modules/mod_proxy_fcgi.so\nLoadModule http2_module modules/mod_http2.so\nLoadModule deflate_module modules/mod_deflate.so\n\nPidFile \"/opt/server-engine/services/apache/run/httpd.pid\"\nErrorLog \"/opt/server-engine/services/apache/logs/error.log\"\nLogLevel warn\nServerTokens Prod\nServerSignature Off\nEnableSendfile On\nKeepAlive On\nKeepAliveTimeout 5\nMaxKeepAliveRequests 100\nTimeout 60\n\nTypesConfig conf/mime.types\nDirectoryIndex index.php index.html index.htm\nDocumentRoot \"/opt/server-engine/www\"\n\n<Directory \"/opt/server-engine/www\">\n    AllowOverride All\n    Options FollowSymLinks\n    Require all granted\n</Directory>\n\n<IfModule mod_headers.c>\n    Header always set X-Content-Type-Options \"nosniff\"\n    Header always set X-Frame-Options \"SAMEORIGIN\"\n    Header always set Referrer-Policy \"strict-origin-when-cross-origin\"\n</IfModule>\n\n<IfModule mod_deflate.c>\n    AddOutputFilterByType DEFLATE text/plain text/html text/css application/javascript application/json application/xml image/svg+xml\n</IfModule>\n\nIncludeOptional conf/sites/*.conf\n"""
     return ""
 
 
@@ -255,18 +336,25 @@ def restore_configuration(service_id: str, version: str | None = None, file: str
 
 
 @router.get("/{service_id}/logs")
-def logs(service_id: str, lines: int = 100, version: str | None = None, user=Depends(require_user)):
+def logs(service_id: str, lines: int = 100, version: str | None = None, kind: str = "error", user=Depends(require_user)):
     if get_service(service_id) is None:
         raise HTTPException(status_code=404, detail="Service is not in the provider catalog")
     lines = max(10, min(lines, 500))
-    if service_id == "nginx":
+    if service_id == "nginx" and kind == "response":
+        log_path = nginx_paths().get("access_log", service_root(service_id) / "logs/access.log")
+    elif service_id == "nginx":
         log_path = nginx_paths()["error_log"]
     elif service_id == "php" and version:
         from app.services.service_runtime import php_fpm_paths
         log_path = php_fpm_paths(version)["error_log"]
+    elif service_id == "apache" and kind == "response":
+        log_path = service_root(service_id) / "logs/access.log"
     else:
         log_path = service_root(service_id) / "logs/error.log"
     path = Path(log_path)
+    if service_id == "apache" and kind == "response":
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch(exist_ok=True)
     if not path.exists():
         return {"service": service_id, "path": str(path), "lines": [], "available": False}
     return {"service": service_id, "path": str(path), "lines": path.read_text(errors="replace").splitlines()[-lines:], "available": True}

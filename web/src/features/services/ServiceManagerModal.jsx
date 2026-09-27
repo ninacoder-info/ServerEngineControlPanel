@@ -12,16 +12,21 @@ import {
   Server,
   ShieldCheck,
   Settings2,
+  TerminalSquare,
   X,
 } from "lucide-react";
 import { apiRequest, readApiError } from "../../lib/api";
 import ConfigEditor from "./ConfigEditor";
+import ApacheConfigModal from "./ApacheConfigModal";
+import SaveButton from "../../components/SaveButton";
+import Toast from "../../components/Toast";
 
 const tabs = [
   ["configuration", "Configuration", FileCog],
   ["mysql-file", "my.cnf", FileCog],
   ["nginx-file", "nginx.conf", FileCog],
   ["extensions", "Extensions", Download],
+  ["terminal", "Terminal access", TerminalSquare],
   ["versions", "Versions", History],
   ["runtime", "Runtime", Activity],
   ["tuning", "Performance", Gauge],
@@ -1100,11 +1105,26 @@ export default function ServiceManagerModal({
   installed: installedProp,
   onClose,
 }) {
-  const installedItems = Array.isArray(installedProp)
+  if (service.id === "apache") {
+    return (
+      <ApacheConfigModal
+        service={service}
+        installed={installedProp}
+        onClose={onClose}
+      />
+    );
+  }
+  const initialInstalledItems = Array.isArray(installedProp)
     ? installedProp
     : installedProp
       ? [installedProp]
       : [];
+  const [installedItems, setInstalledItems] = React.useState(
+    initialInstalledItems,
+  );
+  React.useEffect(() => {
+    setInstalledItems(initialInstalledItems);
+  }, [installedProp]);
   const installed =
     installedItems.find((item) => item.status === "running") ||
     installedItems[0];
@@ -1126,6 +1146,9 @@ export default function ServiceManagerModal({
   const [message, setMessage] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [action, setAction] = React.useState("");
+  const [phpTerminalEnabled, setPhpTerminalEnabled] = React.useState(false);
+  const [phpTerminalPath, setPhpTerminalPath] = React.useState("");
+  const [terminalToast, setTerminalToast] = React.useState(null);
   const query =
     isPhp && version ? `?version=${encodeURIComponent(version)}&file=ini` : "";
   React.useEffect(() => {
@@ -1137,6 +1160,18 @@ export default function ServiceManagerModal({
       })
       .catch(() => {});
   }, [service.id, query]);
+  React.useEffect(() => {
+    if (!isPhp || !version) return undefined;
+    apiRequest(`/api/v1/services/php/${encodeURIComponent(version)}/terminal`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((value) => {
+        if (!value) return;
+        setPhpTerminalEnabled(Boolean(value.enabled));
+        setPhpTerminalPath(value.path || "");
+      })
+      .catch(() => {});
+    return undefined;
+  }, [isPhp, version]);
   const loadLogs = React.useCallback(
     () =>
       apiRequest(
@@ -1237,11 +1272,40 @@ export default function ServiceManagerModal({
     setMessage(body.message || "Extension installation failed.");
     setBusy(false);
   }
+  async function savePhpTerminalAccess() {
+    setBusy(true);
+    const r = await apiRequest(
+      `/api/v1/services/php/${encodeURIComponent(version)}/terminal`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ enabled: phpTerminalEnabled }),
+      },
+    );
+    const body = r.ok ? await r.json() : { message: await readApiError(r) };
+    if (r.ok) {
+      setTerminalToast({
+        type: "success",
+        message: phpTerminalEnabled
+          ? `PHP ${version} is now available as php in new local terminal sessions.`
+          : `PHP ${version} was removed from new local terminal sessions.`,
+      });
+    } else {
+      setTerminalToast({ type: "error", message: body.message });
+    }
+    setBusy(false);
+    return r.ok;
+  }
   async function serviceAction(actionName) {
     setAction(actionName);
-    setMessage(
-      `${actionName[0].toUpperCase()}${actionName.slice(1)}ing ${serviceLabel}…`,
-    );
+    const actionProgress =
+      actionName === "stop"
+        ? "Stopping"
+        : actionName === "start"
+          ? "Starting"
+          : actionName === "restart"
+            ? "Restarting"
+            : `${actionName[0].toUpperCase()}${actionName.slice(1)}`;
+    setMessage(`${actionProgress} ${serviceLabel}…`);
     const r = await apiRequest(`/api/v1/services/${service.id}/action`, {
       method: "POST",
       body: JSON.stringify({
@@ -1268,18 +1332,29 @@ export default function ServiceManagerModal({
       )
         break;
     }
-    setMessage(finalJob?.message || body.message || "Service action finished.");
+    setMessage("");
     setAction("");
+    const refreshed = await apiRequest("/api/v1/services/installed");
+    if (refreshed.ok) {
+      const detected = await refreshed.json();
+      setInstalledItems(
+        detected.filter(
+          (item) =>
+            item.id === service.id || item.id.startsWith(`${service.id}@`),
+        ),
+      );
+    }
   }
   const running = installed?.status === "running";
   const primary = running ? "stop" : "start";
   const actionLabel = action
-    ? `${action[0].toUpperCase()}${action.slice(1)}ing…`
+    ? `${action === "stop" ? "Stopping" : action === "start" ? "Starting" : action === "restart" ? "Restarting" : action}…`
     : primary === "stop"
       ? "Stop"
       : "Start";
   const visibleTabs = tabs.filter(([id]) => {
     if (id === "extensions") return isPhp;
+    if (id === "terminal") return isPhp;
     if (id === "mysql-file") return isMysql;
     if (id === "nginx-file") return isNginx;
     if (id === "versions") return !isPhp;
@@ -1290,35 +1365,36 @@ export default function ServiceManagerModal({
       className="modal-backdrop"
       onMouseDown={(event) => event.target === event.currentTarget && onClose()}
     >
-      <section className="modal-card service-manager-modal">
-        <div className="modal-header">
+      <section className="max-h-[calc(100vh-2rem)] w-full max-w-3xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl dark:bg-slate-900">
+        <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="eyebrow">
-              {isMysql
-                ? "MYSQL DATABASE SERVICE"
-                : isPhp
-                  ? "PHP RUNTIME SERVICE"
-                  : "SERVICE WORKSPACE"}
-            </p>
-            <h2>{serviceLabel}</h2>
-            <p className="manager-status">
+            <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
+              {serviceLabel}
+            </h2>
+            <p className="mt-1 flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
               <span
-                className={`status-dot ${running ? "status-dot-on" : ""}`}
+                className={`h-2 w-2 rounded-full ${running ? "bg-emerald-500" : "bg-amber-500"}`}
               />
               {installed?.status || "not installed"}
               {installed?.version && ` · v${installed.version}`}
             </p>
           </div>
-          <button className="icon-button" onClick={onClose}>
+          <button
+            type="button"
+            aria-label="Close service configuration"
+            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+            onClick={onClose}
+          >
             <X size={18} />
           </button>
         </div>
-        <div className="service-tabs">
+        <div className="mt-6 flex gap-5 overflow-x-auto border-b border-slate-200 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:border-slate-800">
           {visibleTabs.map(([id, label, Icon]) => (
             <button
+              type="button"
               key={id}
-              className={tab === id ? "service-tab-active" : ""}
               onClick={() => setTab(id)}
+              className={`inline-flex items-center gap-1.5 whitespace-nowrap border-b-2 px-1 pb-3 text-sm font-medium ${tab === id ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"}`}
             >
               <Icon size={15} />
               {isNginx && id === "configuration"
@@ -1411,6 +1487,45 @@ export default function ServiceManagerModal({
                 )}
               </div>
             ))}
+          </div>
+        )}
+        {tab === "terminal" && isPhp && (
+          <div className="manager-pane space-y-5">
+            <div>
+              <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                PHP {version} in Terminal
+              </h3>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                Enable this version to use the isolated PHP runtime by typing <code>php</code> in new local terminal sessions. The server’s existing PHP command is not changed.
+              </p>
+            </div>
+            <label className="flex cursor-pointer items-start gap-3 border-y border-slate-200 py-4 dark:border-slate-800">
+              <input
+                type="checkbox"
+                checked={phpTerminalEnabled}
+                onChange={(event) => setPhpTerminalEnabled(event.target.checked)}
+                className="mt-0.5 h-4 w-4 cursor-pointer accent-blue-600"
+              />
+              <span>
+                <span className="block text-sm font-medium text-slate-900 dark:text-slate-100">
+                  Make PHP {version} available as php
+                </span>
+                <span className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">
+                  PHP CLI tools from this isolated version will be placed first in PATH. Reconnect the terminal after saving.
+                </span>
+              </span>
+            </label>
+            <div className="space-y-2 text-sm text-slate-600 dark:text-slate-300">
+              <p>Mapped command</p>
+              <code className="block break-all text-xs text-slate-500 dark:text-slate-400">
+                php → {phpTerminalPath || "Loading…"}
+              </code>
+            </div>
+            <div className="flex justify-end">
+              <SaveButton saving={busy} onClick={savePhpTerminalAccess}>
+                Save terminal access
+              </SaveButton>
+            </div>
           </div>
         )}
         {tab === "versions" && (
@@ -1545,6 +1660,11 @@ export default function ServiceManagerModal({
           </div>
         )}
       </section>
+      <Toast
+        message={terminalToast?.message}
+        type={terminalToast?.type}
+        onClose={() => setTerminalToast(null)}
+      />
     </div>
   );
 }

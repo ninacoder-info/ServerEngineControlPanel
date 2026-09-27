@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends
 
 from app.api.dependencies import require_user
+from app.version import APP_VERSION
 
 router = APIRouter(prefix="/api/v1", tags=["system"])
 
@@ -84,7 +85,7 @@ def metrics(user=Depends(require_user)):
 
 @router.get("/health")
 def health():
-    return {"status": "ok", "service": "server-engine-core", "version": "0.1.0", "timestamp": datetime.now(timezone.utc)}
+    return {"status": "ok", "service": "server-engine-core", "version": APP_VERSION, "timestamp": datetime.now(timezone.utc)}
 
 
 @router.get("/capabilities")

@@ -25,7 +25,7 @@ import ActionDialog from "../../components/ActionDialog";
 const apiBase = import.meta.env.VITE_API_URL || window.location.origin;
 const starter = {
   id: "local",
-  name: "Local Docker server",
+  name: "Local Server",
   kind: "local",
   host: "localhost",
   port: 22,
@@ -161,6 +161,10 @@ function TerminalSession({
     onControls(profile.id, {
       clear: () => terminal.clear(),
       fullscreen: () => root.current?.requestFullscreen?.(),
+      switchUser: () => {
+        if (profile.kind === "local" && socket.current?.readyState === WebSocket.OPEN)
+          socket.current.send("su -s /bin/bash serverengine\n");
+      },
       reconnect: () => {
         socket.current?.close();
         open();
@@ -201,22 +205,22 @@ function TerminalSession({
   );
 }
 
-export default function TerminalPage() {
+export default function TerminalPage({ autoConnect = false }) {
   const [profiles, setProfiles] = React.useState(() => {
     try {
       return (
-        JSON.parse(localStorage.getItem("serverengine:terminal-profiles")) || [
-          starter,
-        ]
+        (JSON.parse(localStorage.getItem("serverengine:terminal-profiles")) || [starter]).map((profile) =>
+          profile.id === "local" ? { ...profile, name: "Local Server" } : profile,
+        )
       );
     } catch {
       return [starter];
     }
   });
   const [activeId, setActiveId] = React.useState("local"),
-    [enabled, setEnabled] = React.useState({ local: true }),
+    [enabled, setEnabled] = React.useState({ local: false }),
     [restart, setRestart] = React.useState({}),
-    [statuses, setStatuses] = React.useState({ local: "connecting" });
+    [statuses, setStatuses] = React.useState({ local: "disconnected" });
   const [modal, setModal] = React.useState(null),
     [menuId, setMenuId] = React.useState(null),
     [showPassword, setShowPassword] = React.useState(false),
@@ -233,26 +237,39 @@ export default function TerminalPage() {
       private_key: "",
       password: "",
     });
+  React.useEffect(() => {
+    if (autoConnect) {
+      setEnabled((value) => (value.local ? value : { ...value, local: true }));
+    }
+  }, [autoConnect]);
+  React.useEffect(() => {
+    const closeMenu = (event) => {
+      if (!event.target.closest("[data-terminal-actions]")) setMenuId(null);
+    };
+    document.addEventListener("mousedown", closeMenu);
+    return () => document.removeEventListener("mousedown", closeMenu);
+  }, []);
   const testSocket = React.useRef(null);
   const controls = React.useRef({}),
     current = profiles.find((profile) => profile.id === activeId) || starter;
   const updateStatus = React.useCallback(
     (id, status) =>
-      setStatuses((value) => {
-        const next = { ...value, [id]: status };
-        window.dispatchEvent(
-          new CustomEvent("serverengine:terminal-status", {
-            detail: {
-              connected: Object.values(next).filter(
-                (item) => item === "connected",
-              ).length,
-            },
-          }),
-        );
-        return next;
-      }),
+      setStatuses((value) =>
+        value[id] === status ? value : { ...value, [id]: status },
+      ),
     [],
   );
+  React.useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent("serverengine:terminal-status", {
+        detail: {
+          connected: Object.values(statuses).filter(
+            (item) => item === "connected",
+          ).length,
+        },
+      }),
+    );
+  }, [statuses]);
   const setControls = React.useCallback((id, value) => {
     if (value) controls.current[id] = value;
     else delete controls.current[id];
@@ -462,7 +479,11 @@ export default function TerminalPage() {
             </button>
           </div>
           {profiles.map((profile) => (
-            <div key={profile.id} className="group relative">
+            <div
+              key={profile.id}
+              className="group relative"
+              data-terminal-actions
+            >
               <button
                 onClick={() => choose(profile.id)}
                 className={`flex w-full items-center gap-3 rounded-lg px-3 py-3 pr-10 text-left ${activeId === profile.id ? "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300" : "text-slate-600 dark:text-slate-300"}`}
@@ -556,6 +577,14 @@ export default function TerminalPage() {
               <Button label="Reconnect" onClick={reconnect}>
                 <RefreshCw size={16} />
               </Button>
+              {current.id === "local" && (
+                <Button
+                  label="Switch to serverengine"
+                  onClick={() => controls.current[activeId]?.switchUser()}
+                >
+                  <UserRound size={16} />
+                </Button>
+              )}
               <Button
                 label="Clear terminal"
                 onClick={() => controls.current[activeId]?.clear()}
@@ -578,7 +607,7 @@ export default function TerminalPage() {
               key={profile.id}
               profile={profile}
               visible={profile.id === activeId}
-              enabled={profile.kind === "local" || !!enabled[profile.id]}
+            enabled={!!enabled[profile.id]}
               restart={restart[profile.id] || 0}
               onStatus={updateStatus}
               onControls={setControls}

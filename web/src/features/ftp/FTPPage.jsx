@@ -46,6 +46,10 @@ export function VsftpdConfigModal({
   const [error, setError] = React.useState("");
   const [tab, setTab] = React.useState("configuration");
   const [actionBusy, setActionBusy] = React.useState(false);
+  const [version, setVersion] = React.useState(service.version || "3.0.5");
+  const [confirmed, setConfirmed] = React.useState(false);
+  const [versionBusy, setVersionBusy] = React.useState(false);
+  const [versionMessage, setVersionMessage] = React.useState("");
   const save = async (event) => {
     event.preventDefault();
     setBusy(true);
@@ -79,6 +83,28 @@ export function VsftpdConfigModal({
     ["runtime", "Runtime", Activity],
     ["error-log", "Error log", AlertTriangle],
   ];
+  const versions = service.versions || [
+    { version: "3.0.5", channel: "stable" },
+    { version: "3.0.3", channel: "security" },
+    { version: "3.0.2", channel: "legacy" },
+  ];
+  const switchVersion = async () => {
+    setVersionBusy(true);
+    setVersionMessage("");
+    const response = await apiRequest(
+      "/api/v1/services/vsftpd/switch-version",
+      {
+        method: "POST",
+        body: JSON.stringify({ version, confirmed }),
+      },
+    );
+    const body = response.ok ? await response.json() : null;
+    setVersionMessage(
+      body?.message ||
+        (await readApiError(response, "Unable to switch vsftpd version.")),
+    );
+    setVersionBusy(false);
+  };
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4">
       <form
@@ -106,11 +132,16 @@ export function VsftpdConfigModal({
               Configure transfer ports, access policy, and connection limits.
             </p>
           </div>
-          <button type="button" onClick={onClose} className="text-slate-400">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close vsftpd configuration"
+            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+          >
             ×
           </button>
         </div>
-        <div className="mt-6 flex gap-5 overflow-x-auto border-b border-slate-200 dark:border-slate-800">
+        <div className="mt-6 flex gap-5 overflow-x-auto border-b border-slate-200 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:border-slate-800">
           {tabs.map(([value, label, Icon]) => (
             <button
               type="button"
@@ -224,19 +255,45 @@ export function VsftpdConfigModal({
                 Manage the FTP server version provided by Server Engine.
               </p>
             </div>
-            <div className="flex items-center justify-between rounded-lg border border-slate-200 p-4 dark:border-slate-800">
-              <div>
-                <p className="font-medium text-slate-900 dark:text-slate-100">
-                  vsftpd 3.0.5
-                </p>
-                <p className="text-sm text-slate-500">
-                  Current installed version
-                </p>
-              </div>
-              <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">
-                Installed
-              </span>
+            <label className="block text-sm font-medium text-slate-800 dark:text-slate-200">
+              vsftpd version
+              <select
+                className={`${field} bg-white dark:bg-slate-950`}
+                value={version}
+                onChange={(event) => setVersion(event.target.value)}
+              >
+                {versions.map((item) => (
+                  <option key={item.version} value={item.version}>
+                    {item.version} · {item.channel}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                checked={confirmed}
+                onChange={(event) => setConfirmed(event.target.checked)}
+              />
+              Queue this version installation or switch.
+            </label>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={switchVersion}
+                disabled={!confirmed || versionBusy}
+                className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                <Settings2 size={14} />{" "}
+                {versionBusy ? "Queueing…" : "Install / switch version"}
+              </button>
             </div>
+            {versionMessage && (
+              <p className="text-sm text-slate-600 dark:text-slate-300">
+                {versionMessage}
+              </p>
+            )}
           </div>
         )}
         {tab === "runtime" && (
@@ -337,6 +394,101 @@ export function VsftpdConfigModal({
   );
 }
 
+function FolderPicker({ browser, busy, browse, onSelect, onClose }) {
+  const current = browser.path || "/server-engine/www";
+  return (
+    <div className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-slate-950/60 p-4 sm:p-8">
+      <section className="w-full max-w-xl rounded-xl bg-white shadow-xl dark:bg-slate-900">
+        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+          <div>
+            <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+              Choose account root folder
+            </h3>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              The FTP account can access this folder and its subfolders only.
+            </p>
+          </div>
+          <button
+            type="button"
+            aria-label="Close folder browser"
+            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+            onClick={onClose}
+          >
+            ×
+          </button>
+        </div>
+        <div className="space-y-4 px-5 py-5">
+          <div className="flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:text-slate-300">
+            <FolderOpen size={16} className="text-blue-600" />
+            <span className="min-w-0 flex-1 truncate">{current}</span>
+            {browser.path && (
+              <button
+                type="button"
+                className="cursor-pointer text-blue-600 hover:text-blue-700 dark:text-blue-400"
+                onClick={() => onSelect(browser.path)}
+              >
+                Select
+              </button>
+            )}
+          </div>
+          {browser.parent && (
+            <button
+              type="button"
+              className="cursor-pointer text-sm font-medium text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
+              onClick={() => browse(browser.parent)}
+            >
+              ← Parent folder
+            </button>
+          )}
+          {busy ? (
+            <p className="py-5 text-sm text-slate-500 dark:text-slate-400">
+              Loading folders…
+            </p>
+          ) : !browser.path ? (
+            <div className="divide-y divide-slate-200 border-y border-slate-200 dark:divide-slate-800 dark:border-slate-800">
+              {browser.roots.map((root) => (
+                <button
+                  type="button"
+                  key={root.path}
+                  className="flex w-full cursor-pointer items-center gap-3 py-3 text-left text-sm text-slate-700 hover:text-blue-600 dark:text-slate-300 dark:hover:text-blue-400"
+                  onClick={() => browse(root.path)}
+                >
+                  <FolderOpen size={16} />
+                  {root.path}
+                </button>
+              ))}
+              {!browser.roots.length && (
+                <p className="py-5 text-sm text-slate-500 dark:text-slate-400">
+                  No allowed website roots are available yet.
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-200 border-y border-slate-200 dark:divide-slate-800 dark:border-slate-800">
+              {browser.directories.map((directory) => (
+                <button
+                  type="button"
+                  key={directory.path}
+                  className="flex w-full cursor-pointer items-center gap-3 py-3 text-left text-sm text-slate-700 hover:text-blue-600 dark:text-slate-300 dark:hover:text-blue-400"
+                  onClick={() => browse(directory.path)}
+                >
+                  <FolderOpen size={16} />
+                  {directory.name}
+                </button>
+              ))}
+              {!browser.directories.length && (
+                <p className="py-5 text-sm text-slate-500 dark:text-slate-400">
+                  No subfolders in this directory.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function AccountModal({ account, onClose, onSaved }) {
   const editing = Boolean(account);
   const [form, setForm] = React.useState({
@@ -346,7 +498,6 @@ function AccountModal({ account, onClose, onSaved }) {
     access: account?.access || "read-write",
     quota_mb: account?.quota_mb || "",
     enabled: account?.enabled ?? true,
-    notes: account?.notes || "",
   });
   const [error, setError] = React.useState("");
   const [busy, setBusy] = React.useState(false);
@@ -357,6 +508,7 @@ function AccountModal({ account, onClose, onSaved }) {
     directories: [],
   });
   const [browserBusy, setBrowserBusy] = React.useState(false);
+  const [browserOpen, setBrowserOpen] = React.useState(false);
   const browse = React.useCallback(async (path = null) => {
     setBrowserBusy(true);
     const query = path ? `?path=${encodeURIComponent(path)}` : "";
@@ -441,89 +593,31 @@ function AccountModal({ account, onClose, onSaved }) {
           </label>
           <label className="text-sm font-medium text-slate-800 dark:text-slate-200 md:col-span-2">
             Account root folder
-            <div className="relative">
-              <FolderOpen
-                size={16}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-              />
-              <input
-                className={`${field} pl-9`}
-                value={form.root}
-                readOnly
-                placeholder="Choose a folder below"
-              />
+            <div className="mt-2 flex gap-2">
+              <div className="relative min-w-0 flex-1">
+                <FolderOpen
+                  size={16}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                />
+                <input
+                  className={`${field} mt-0 pl-9`}
+                  value={form.root}
+                  readOnly
+                  placeholder="Choose a folder"
+                />
+              </div>
+              <button
+                type="button"
+                className="mt-2 inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-md border border-slate-300 px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                onClick={() => setBrowserOpen(true)}
+              >
+                <FolderOpen size={15} />
+                Browse
+              </button>
             </div>
             <span className="mt-1 block text-xs font-normal text-slate-500">
               The FTP account cannot browse above this directory.
             </span>
-            <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-950">
-              <div className="flex items-center justify-between gap-3 text-xs">
-                <span className="truncate font-medium text-slate-700 dark:text-slate-200">
-                  {browser.path || "Allowed website folders"}
-                </span>
-                <div className="flex shrink-0 items-center gap-3">
-                  {browser.parent && (
-                    <button
-                      type="button"
-                      className="text-blue-600 hover:underline dark:text-blue-400"
-                      onClick={() => browse(browser.parent)}
-                    >
-                      Up
-                    </button>
-                  )}
-                  {browser.path && (
-                    <button
-                      type="button"
-                      className="font-semibold text-blue-600 hover:underline dark:text-blue-400"
-                      onClick={() => setForm({ ...form, root: browser.path })}
-                    >
-                      Use this folder
-                    </button>
-                  )}
-                </div>
-              </div>
-              {browserBusy ? (
-                <p className="mt-3 text-xs text-slate-500">Loading folders…</p>
-              ) : !browser.path ? (
-                <div className="mt-3 space-y-1">
-                  {browser.roots.map((root) => (
-                    <button
-                      type="button"
-                      key={root.path}
-                      className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm text-slate-700 hover:bg-white dark:text-slate-200 dark:hover:bg-slate-900"
-                      onClick={() => browse(root.path)}
-                    >
-                      <FolderOpen size={15} className="text-slate-400" />
-                      {root.path}
-                    </button>
-                  ))}
-                  {!browser.roots.length && (
-                    <p className="py-2 text-xs text-slate-500">
-                      No allowed website roots are available yet.
-                    </p>
-                  )}
-                </div>
-              ) : (
-                <div className="mt-3 space-y-1">
-                  {browser.directories.map((directory) => (
-                    <button
-                      type="button"
-                      key={directory.path}
-                      className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm text-slate-700 hover:bg-white dark:text-slate-200 dark:hover:bg-slate-900"
-                      onClick={() => browse(directory.path)}
-                    >
-                      <FolderOpen size={15} className="text-slate-400" />
-                      {directory.name}
-                    </button>
-                  ))}
-                  {!browser.directories.length && (
-                    <p className="py-2 text-xs text-slate-500">
-                      No subfolders in this directory.
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
           </label>
           <label className="text-sm font-medium text-slate-800 dark:text-slate-200">
             Access
@@ -562,17 +656,6 @@ function AccountModal({ account, onClose, onSaved }) {
             />
             Allow this account to sign in
           </label>
-          <label className="text-sm font-medium text-slate-800 dark:text-slate-200 md:col-span-2">
-            Notes
-            <textarea
-              className={`${field} min-h-24`}
-              value={form.notes}
-              onChange={(event) =>
-                setForm({ ...form, notes: event.target.value })
-              }
-              placeholder="Deployment account for example.com"
-            />
-          </label>
         </div>
         {error && (
           <p className="mt-4 text-sm text-rose-600 dark:text-rose-400">
@@ -596,6 +679,18 @@ function AccountModal({ account, onClose, onSaved }) {
           </button>
         </div>
       </form>
+      {browserOpen && (
+        <FolderPicker
+          browser={browser}
+          busy={browserBusy}
+          browse={browse}
+          onSelect={(path) => {
+            setForm((current) => ({ ...current, root: path }));
+            setBrowserOpen(false);
+          }}
+          onClose={() => setBrowserOpen(false)}
+        />
+      )}
     </div>
   );
 }

@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   ChevronDown,
   CirclePlus,
+  Edit3,
   Globe2,
   LockKeyhole,
   MoreHorizontal,
@@ -14,8 +15,10 @@ import {
   Search,
   Shield,
   ShieldAlert,
+  Trash2,
   X,
 } from "lucide-react";
+import { apiRequest, readApiError } from "../../lib/api";
 
 const tabs = [
   ["rules", "Firewall rules"],
@@ -83,7 +86,69 @@ const input =
 const panel =
   "rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900";
 
-function RuleModal({ onClose, onCreate }) {
+function PortTagsField({ value, onChange }) {
+  const [draft, setDraft] = React.useState("");
+  const items = value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  function addItem() {
+    const next = draft.trim();
+    if (!next || items.includes(next)) return;
+    onChange([...items, next].join(", "));
+    setDraft("");
+  }
+
+  function removeItem(item) {
+    onChange(items.filter((current) => current !== item).join(", "));
+  }
+
+  return (
+    <div className="mt-2 rounded-md border border-slate-300 px-2 py-2 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/20 dark:border-slate-700">
+      <div className="flex flex-wrap items-center gap-1.5">
+        {items.map((item) => (
+          <span
+            key={item}
+            className="inline-flex items-center gap-1 rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+          >
+            {item}
+            <button
+              type="button"
+              aria-label={`Remove ${item}`}
+              className="cursor-pointer text-slate-400 hover:text-slate-700 dark:hover:text-slate-100"
+              onClick={() => removeItem(item)}
+            >
+              ×
+            </button>
+          </span>
+        ))}
+        <input
+          className="min-w-[9rem] flex-1 border-0 bg-transparent px-1 py-1 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:text-slate-100"
+          required={items.length === 0}
+          value={draft}
+          placeholder="Type a port or alias and press Enter"
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === ",") {
+              event.preventDefault();
+              addItem();
+            }
+          }}
+        />
+        <button
+          type="button"
+          className="cursor-pointer px-1 text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400"
+          onClick={addItem}
+        >
+          Add
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function RuleModal({ rule, onClose, onSave }) {
   const [form, setForm] = React.useState({
     action: "Allow",
     protocol: "TCP",
@@ -94,24 +159,21 @@ function RuleModal({ onClose, onCreate }) {
     interface: "WAN",
     note: "",
   });
+  React.useEffect(() => {
+    if (rule) setForm({ action: rule.action, protocol: rule.protocol, source: rule.source, destination: rule.destination, service: rule.service, port: rule.port, interface: rule.interface, note: rule.note || "" });
+  }, [rule]);
   const change = (key, value) =>
     setForm((current) => ({ ...current, [key]: value }));
   return (
     <div
       className="fixed inset-0 z-50 grid place-items-center bg-slate-950/60 p-4"
-      onMouseDown={(event) => event.target === event.currentTarget && onClose()}
     >
       <form
         className="max-h-[calc(100vh-2rem)] w-full max-w-3xl overflow-y-auto rounded-xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900"
-        onSubmit={(event) => {
+          onSubmit={async (event) => {
           event.preventDefault();
-          onCreate({
-            ...form,
-            id: crypto.randomUUID(),
-            enabled: true,
-            states: 0,
-          });
-          onClose();
+          const saved = await onSave(form);
+          if (saved) onClose();
         }}
       >
         <div className="flex items-start justify-between gap-4">
@@ -120,7 +182,7 @@ function RuleModal({ onClose, onCreate }) {
               Rule editor
             </p>
             <h2 className="mt-1 text-2xl font-semibold text-slate-900 dark:text-slate-100">
-              Add firewall rule
+              {rule ? "Edit firewall rule" : "Add firewall rule"}
             </h2>
             <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
               Rules are evaluated from top to bottom. Keep trusted allow rules
@@ -208,12 +270,9 @@ function RuleModal({ onClose, onCreate }) {
           </label>
           <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
             Port or port alias
-            <input
-              required
-              className={input}
+            <PortTagsField
               value={form.port}
-              onChange={(event) => change("port", event.target.value)}
-              placeholder="22, 80, 443 or WebPorts"
+              onChange={(value) => change("port", value)}
             />
           </label>
           <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
@@ -243,7 +302,7 @@ function RuleModal({ onClose, onCreate }) {
           </button>
           <button className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700">
             <CirclePlus size={16} />
-            Add rule
+            {rule ? "Save rule" : "Add rule"}
           </button>
         </div>
       </form>
@@ -256,7 +315,62 @@ export default function FirewallPage() {
   const [rules, setRules] = React.useState(initialRules);
   const [query, setQuery] = React.useState("");
   const [action, setAction] = React.useState("all");
-  const [modal, setModal] = React.useState(false);
+  const [modal, setModal] = React.useState(null);
+  const [menu, setMenu] = React.useState(null);
+  const [blockedStates, setBlockedStates] = React.useState(0);
+  const [firewallStatus, setFirewallStatus] = React.useState("loading");
+  const [error, setError] = React.useState("");
+  const [loading, setLoading] = React.useState(true);
+  const load = React.useCallback(async () => {
+    setLoading(true);
+    const response = await apiRequest("/api/v1/firewall");
+    if (response.ok) {
+      const value = await response.json();
+      setRules(value.rules || []);
+      setBlockedStates(value.blocked_states || 0);
+      setFirewallStatus(value.status || "protected");
+      setError("");
+    } else setError(await readApiError(response, "Unable to load firewall policy"));
+    setLoading(false);
+  }, []);
+  React.useEffect(() => { load(); }, [load]);
+  React.useEffect(() => {
+    if (!menu) return undefined;
+    const close = (event) => { if (!event.target.closest("[data-firewall-menu]")) setMenu(null); };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [menu]);
+  const createRule = async (rule) => {
+    const response = await apiRequest("/api/v1/firewall/rules", { method: "POST", body: JSON.stringify(rule) });
+    if (!response.ok) { setError(await readApiError(response)); return false; }
+    const created = await response.json();
+    setRules((current) => [...current, created]);
+    return true;
+  };
+  const updateRule = async (rule) => {
+    const response = await apiRequest(`/api/v1/firewall/rules/${modal.id}`, { method: "PUT", body: JSON.stringify(rule) });
+    if (!response.ok) { setError(await readApiError(response)); return false; }
+    const updated = await response.json();
+    setRules((current) => current.map((item) => item.id === updated.id ? updated : item));
+    return true;
+  };
+  const toggleRule = async (rule) => {
+    const response = await apiRequest(`/api/v1/firewall/rules/${rule.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !rule.enabled }) });
+    if (response.ok) setRules((current) => current.map((item) => item.id === rule.id ? { ...item, enabled: !item.enabled } : item));
+    else setError(await readApiError(response));
+    setMenu(null);
+  };
+  const deleteRule = async (rule) => {
+    const response = await apiRequest(`/api/v1/firewall/rules/${rule.id}`, { method: "DELETE" });
+    if (response.ok) setRules((current) => current.filter((item) => item.id !== rule.id));
+    else setError(await readApiError(response));
+    setMenu(null);
+  };
+  const reloadPolicy = async () => {
+    const response = await apiRequest("/api/v1/firewall/reload", { method: "POST" });
+    if (response.ok) { const value = await response.json(); setRules(value.rules || []); setBlockedStates(value.blocked_states || 0); setFirewallStatus(value.status || "protected"); setError(""); }
+    else setError(await readApiError(response));
+  };
   const visible = rules.filter(
     (rule) =>
       (action === "all" || rule.action.toLowerCase() === action) &&
@@ -280,13 +394,13 @@ export default function FirewallPage() {
           </p>
         </div>
         <div className="flex gap-3">
-          <button className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-300">
+          <button onClick={reloadPolicy} disabled={loading} className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-300 disabled:cursor-not-allowed disabled:opacity-50">
             <RefreshCw size={16} />
             Reload policy
           </button>
           <button
             className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
-            onClick={() => setModal(true)}
+            onClick={() => setModal({})}
           >
             <CirclePlus size={16} />
             Add rule
@@ -302,7 +416,7 @@ export default function FirewallPage() {
                 Firewall status
               </small>
               <strong className="mt-1 block text-xl text-emerald-600 dark:text-emerald-400">
-                Protected
+                {firewallStatus === "protected" ? "Protected" : firewallStatus}
               </strong>
             </span>
           </div>
@@ -334,7 +448,7 @@ export default function FirewallPage() {
                 Blocked states
               </small>
               <strong className="mt-1 block text-xl text-slate-900 dark:text-slate-100">
-                317
+                {blockedStates.toLocaleString()}
               </strong>
             </span>
           </div>
@@ -359,9 +473,10 @@ export default function FirewallPage() {
           </p>
         </div>
       </section>
+      {error && <div className="border-b border-rose-300 pb-3 text-sm text-rose-600 dark:border-rose-900 dark:text-rose-400">{error}</div>}
       <section className="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <div className="border-b border-slate-200 px-5 pt-5 dark:border-slate-800">
-          <div className="flex gap-1 overflow-x-auto">
+          <div className="flex gap-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {tabs.map(([id, label]) => (
               <button
                 key={id}
@@ -460,10 +575,11 @@ export default function FirewallPage() {
                       <td className="px-3 py-4 text-sm text-slate-600 dark:text-slate-400">
                         {rule.states.toLocaleString()}
                       </td>
-                      <td className="px-3 py-4 text-right">
-                        <button className="rounded-md p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">
+                      <td data-firewall-menu className="relative px-3 py-4 text-right">
+                        <button onClick={() => setMenu(menu === rule.id ? null : rule.id)} className="cursor-pointer rounded-md p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">
                           <MoreHorizontal size={17} />
                         </button>
+                        {menu === rule.id && <div className="absolute right-3 top-12 z-10 w-44 rounded-md border border-slate-200 bg-white py-1 text-left shadow-lg dark:border-slate-700 dark:bg-slate-900"><button className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800" onClick={() => { setModal(rule); setMenu(null); }}><Edit3 size={15} />Edit rule</button><button className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800" onClick={() => toggleRule(rule)}><CheckCircle2 size={15} />{rule.enabled ? "Disable rule" : "Enable rule"}</button><button className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/30" onClick={() => deleteRule(rule)}><Trash2 size={15} />Delete rule</button></div>}
                       </td>
                     </tr>
                   ))}
@@ -501,8 +617,9 @@ export default function FirewallPage() {
       </section>
       {modal && (
         <RuleModal
+          rule={modal.id ? modal : null}
           onClose={() => setModal(false)}
-          onCreate={(rule) => setRules((current) => [...current, rule])}
+          onSave={modal.id ? updateRule : createRule}
         />
       )}
     </div>

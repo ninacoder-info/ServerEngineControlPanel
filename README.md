@@ -1,41 +1,85 @@
-# Server Engine
+# Server Engine Control Panel
 
-Server Engine is a self-hosted server control plane inspired by the operational model of hosting panels. It has a Python API, a React/Tailwind/Lucide web console, and a future privileged host agent for installing and managing services.
+Server Engine Control Panel is an open-source control panel for running production websites on your own Linux server, under the Server Engine product family.
 
-## Important deployment distinction
+It brings websites, domains, databases, mail, backups, services, security, users, plans, logs, and terminal access into one workspace. The goal is simple: a person should be able to deploy and operate a real website without needing to understand every system daemon, package manager, or configuration file underneath it.
 
-Docker is for local development and disposable tests. It represents a customer server during development.
+> Status: active development. The control-panel UI is ahead of some backend workflows. Treat the development and installer-test environments as safe places to evaluate the project; review every production change before exposing a server to the internet.
 
-The customer installer is native Linux. It does not install Docker, Nginx, Apache, PHP, MySQL, databases, or firewall rules yet.
+## What it includes
+
+- Website and domain management with project-folder browsing, PHP runtime selection, TLS options, rewrites, redirects, proxy settings, maintenance mode, and response logs.
+- Service catalog and management UI for Nginx, Apache, PHP-FPM, Node.js, MySQL, PostgreSQL, MariaDB, Redis-compatible stores, FTP, Docker, queues, DNS, security, and deployment tools.
+- Multi-version PHP and Node.js runtimes with isolated paths, configuration editors, runtime controls, extensions, and terminal command mapping.
+- Database inventory, database users, backups, engine selection, search, and pagination.
+- Mail workspace UI for domains, mailboxes, aliases, forwarders, autoresponders, filters, and deliverability controls.
+- FTP accounts with scoped root folders and vsftpd service controls.
+- Firewall rules, application protection/WAF controls, IP lists, geo controls, traffic views, custom policies, attack map, and reports.
+- Backups, cron jobs, activity records, audit logs, server health, Docker resources, and a persistent SSH/local terminal workspace.
+- Hosting accounts and reusable plans with resource quotas, feature access, and reseller assignment controls.
+- English, Vietnamese, and French language foundations with flag-based language selection.
+
+## Architecture
 
 ```text
-Developer machine                    Customer Linux server
------------------                    ---------------------
-docker-compose.dev.yml               ./install.sh
-hot reload                           native Python + Node
-test containers                       systemd services
+Browser
+  │
+  ├── React + Vite frontend
+  │     └── web/
+  │
+  └── FastAPI core API + WebSocket terminal
+        └── core/
+              ├── SQLite control state
+              ├── service catalog and runtime manager
+              ├── website, database, firewall, FTP, jobs, and settings APIs
+              └── native CLI and systemd integration
 ```
+
+The panel has two supported operating modes:
+
+1. Docker development/test mode for working on the project.
+2. Native Linux installation for a customer server.
+
+Native installation is deliberately separate from the Docker development harness. The native installer installs Server Engine itself; it does not silently install Nginx, Apache, PHP, databases, Docker, or firewall rules on a customer machine.
 
 ## Requirements
 
-For development:
+### Development
 
-- Docker Desktop or Docker Engine
-- Docker Compose
+- Docker with Compose
+- Git
+- A modern browser
 
-For native installation:
+### Native Linux installation
 
-- 64-bit Linux
-- Ubuntu 20.04+, Debian 11+, or RHEL-family 8+
-- Python 3.10+
-- Node.js 20.19+
-- npm
-- systemd
-- root access
+The installer currently supports:
 
-## Fast development workflow
+- Ubuntu 20.04 or newer
+- Debian 11 or newer
+- RHEL-family distributions version 8 or newer, including Rocky Linux, AlmaLinux, RHEL, Fedora, and Oracle Linux
+- CentOS Stream 9 or newer; CentOS Linux and CentOS Stream 8 are not supported because they are end-of-life
+- 64-bit `x86_64`, `aarch64`, or `arm64`
+- At least 1 GiB RAM for installation and light workloads
+- 2 GiB RAM recommended for a production website with PHP, databases, and background services
+- At least 2 GiB free disk space for the panel installation
+- Python 3.10 or newer
+- Node.js 20.19 or newer for the panel runtime; npm is only needed when installing directly from a source checkout
 
-Start the bind-mounted development stack:
+The installer can install missing system dependencies when explicitly requested with `--install-system-deps`. The customer release runs the compiled `web/dist` frontend through the small `web/server.mjs` runtime; it does not run Vite development mode or ship the React source tree.
+
+When the installer is executed remotely, it automatically installs the operating-system dependencies needed to run the downloaded bundle. A custom release artifact can be selected with `--release-url` or the `SE_RELEASE_URL` environment variable.
+
+Build a release bundle for publishing to GitHub Releases:
+
+```bash
+./scripts/build-release.sh 0.1.0
+```
+
+This creates `server-engine-release.tar.gz` containing the backend, compiled `web/dist`, production web server, CLI, and service units.
+
+## Start the development environment
+
+The development Compose file mounts the source tree into live-reloading containers.
 
 ```bash
 docker compose -f docker-compose.dev.yml up
@@ -43,296 +87,264 @@ docker compose -f docker-compose.dev.yml up
 
 Open:
 
-```text
-Web panel: http://localhost:5173
-API docs:  http://localhost:18000/docs
-```
+- Panel: http://localhost:5173
+- API: http://localhost:18000
+- API documentation: http://localhost:18000/docs
+- Health check: http://localhost:18000/api/v1/health
 
-Development login:
+The development administrator credentials are defined in `docker-compose.dev.yml`:
 
 ```text
 Username: admin
 Password: change-me-now
 ```
 
-Edit files directly:
+Change these values before using the environment beyond local development.
 
-- React frontend: `web/src/`
-- Python backend: `core/app/`
-
-Vite reloads frontend changes. Uvicorn reloads backend changes. No image rebuild is needed for source edits.
-
-Stop development:
+Stop the development stack:
 
 ```bash
 docker compose -f docker-compose.dev.yml down
 ```
 
-The equivalent command wrapper is:
+The repository wrapper provides the same workflow:
 
 ```bash
 ./bin/serverengine start dev
-./bin/serverengine restart dev
-./bin/serverengine logs dev
 ./bin/serverengine status dev
+./bin/serverengine logs dev
+./bin/serverengine restart dev
 ./bin/serverengine stop dev
-./bin/serverengine watch dev
 ```
 
-## Test the native installer in Docker
+## Build the production-style containers
 
-This runs the real native `install.sh` inside a disposable Debian-based container. It does not modify the host and does not start systemd services.
-
-Build the test image once:
+This Compose file builds the Python API image and the static Node web runtime. It is useful for image validation and local deployment testing.
 
 ```bash
-docker compose -f docker-compose.test.yml build installer-test
-```
-
-Run the installer test:
-
-```bash
-docker compose -f docker-compose.test.yml run --rm installer-test
-```
-
-The repository is mounted into the test container, so current source changes are used immediately. pip and npm caches are stored in Docker volumes.
-
-Expected final output:
-
-```text
-SERVER ENGINE INSTALLED SUCCESSFULLY
-native installer test passed
-```
-
-## Run the installed panel in Docker
-
-This runs the installer and keeps the panel/API alive with published ports:
-
-```bash
-docker compose -f docker-compose.test.yml up --build -d panel-live
+docker compose up --build
 ```
 
 Open:
 
-```text
-Panel:  http://localhost:18888
-API:    http://localhost:18000/docs
-Health: http://localhost:18000/api/v1/health
-```
+- Web panel: http://localhost:8080
+- API: http://localhost:8000
 
-Login:
-
-```text
-Username: admin
-Password: change-me-now
-```
-
-View logs:
+The native installer test environment is separate from this stack:
 
 ```bash
-docker compose -f docker-compose.test.yml logs -f panel-live
+docker compose -f docker-compose.test.yml build installer-test
+docker compose -f docker-compose.test.yml run --rm installer-test
 ```
 
-Apply current code by recreating only the panel container:
+## Native installation
+
+The public installer downloads a prebuilt release bundle. It does not need a source checkout and does not compile React on the customer server.
+
+One-line installation:
 
 ```bash
-./bin/serverengine update panel
+curl -fsSL https://raw.githubusercontent.com/ninacoder-info/ServerEngineWebServer/main/install.sh -o install.sh
+sudo bash install.sh --yes
 ```
 
-To apply changes automatically while using the installer-backed panel:
+The same command with `wget`:
 
 ```bash
-./bin/serverengine watch panel
+wget -qO install.sh https://raw.githubusercontent.com/ninacoder-info/ServerEngineWebServer/main/install.sh
+sudo bash install.sh --yes
 ```
 
-For daily development, `watch dev` is faster because Vite and Uvicorn hot-reload source changes without rerunning installation.
-
-Restart without rerunning installation:
-
-```bash
-./bin/serverengine restart panel
-```
-
-Stop the live panel:
-
-```bash
-./bin/serverengine stop panel
-```
-
-## Native customer installation
-
-From a Linux checkout of this repository:
+For local source or development installation, run the installer as root from the repository:
 
 ```bash
 sudo ./install.sh --install-system-deps
 ```
 
-The installer:
+For a non-interactive installation:
 
-1. validates Linux, architecture, distribution, disk, memory, and ports;
-2. detects apt, dnf, or yum;
-3. installs system dependencies only when explicitly requested;
-4. creates a versioned release under `/opt/server-engine/releases/`;
-5. creates a Python virtual environment;
-6. builds the React panel;
-7. creates the `serverengine` service account;
-8. activates `/opt/server-engine/current`;
-9. registers and starts systemd services;
-10. verifies API and web health.
+```bash
+sudo ./install.sh --install-system-deps --yes
+```
 
 Useful options:
 
 ```bash
-sudo ./install.sh --help
-sudo ./install.sh --install-system-deps --web-port 8888 --api-port 8000
-sudo ./install.sh --no-service --yes
+sudo ./install.sh \
+  --prefix /opt/server-engine \
+  --state-dir /var/lib/server-engine \
+  --web-port 8888 \
+  --api-port 8000 \
+  --api-host 127.0.0.1 \
+  --install-system-deps \
+  --yes
 ```
 
-Native paths:
+The installer creates versioned releases and a `current` link under the installation prefix. Persistent control state is stored separately from release files so upgrades do not discard panel data.
+
+Default locations:
 
 ```text
-Application: /opt/server-engine/current
-Releases:   /opt/server-engine/releases/
-State:      /var/lib/server-engine/
-Logs:       /var/log/server-engine/
-Backups:    /var/backups/server-engine/
+Panel files:       /opt/server-engine
+Persistent state:  /var/lib/server-engine
+Web root:          /server-engine/www
+Panel logs:        /var/log/server-engine
+Install log:       /var/log/server-engine-install.log
+Backups:           /var/backups/server-engine
 ```
 
-Native services:
+The installer creates and manages these systemd units when service mode is enabled:
 
-```bash
-systemctl status server-engine-core server-engine-web
-journalctl -u server-engine-core -u server-engine-web -f
-systemctl restart server-engine-core server-engine-web
+```text
+server-engine-core.service
+server-engine-web.service
 ```
 
-The native installer also provides the shorter `se` command for SSH administration:
+After installation, open the configured web port and complete the initial account setup. Keep the API bound to loopback unless it is intentionally protected by a trusted reverse proxy and firewall policy.
+
+## CLI
+
+The native installation provides the `se` command at `/usr/local/bin/se`.
+
+Panel control:
 
 ```bash
+sudo se panel start
+sudo se panel stop
+sudo se panel restart
 se panel status
-se panel restart
-se mysql restart
-se nginx logs --lines 100
+se panel logs --lines 200
+```
+
+Managed service control:
+
+```bash
+sudo se nginx restart
+sudo se mysql status
+sudo se mysql logs --lines 200
+sudo se php restart --version 8.3
 se php status
-se php restart --version 8.3
+se php logs --version 8.3 --lines 200
 ```
 
-PHP-FPM commands require `--version` for start, stop, restart, and logs because each installed PHP version has its own process, socket, and configuration. The `se` command is installed at `/usr/local/bin/se` and is available after a native installation or update.
-
-The installer also installs:
+The generic form is also available:
 
 ```bash
-/usr/local/bin/serverengine
+sudo se service nginx restart
+sudo se service php restart --version 8.3
 ```
 
-Native shortcuts:
+Development wrapper commands remain separate from the native CLI:
 
 ```bash
-serverengine native-status
-serverengine native-restart
+./bin/serverengine start dev
+./bin/serverengine logs dev
+./bin/serverengine native-status
 ```
 
-If no admin password is provided, the API generates one during first startup. Find it with:
+See [docs/CLI.md](docs/CLI.md) for the complete command reference.
 
-```bash
-journalctl -u server-engine-core --no-pager | grep 'bootstrap password'
-```
+## Service isolation and runtime paths
 
-## Authentication and theme
+Server Engine keeps managed runtime files under its service root instead of changing the host installation unexpectedly.
 
-The panel requires authentication. Sessions use an HttpOnly cookie and are stored server-side in SQLite.
-
-Development authentication is configured in `docker-compose.dev.yml` and `docker-compose.test.yml`. Production credential bootstrap will be moved into the native installer’s first-run setup flow.
-
-Use the sun/moon control in the upper-right corner to change between light and dark themes. The choice is saved in browser local storage.
-
-## Current API endpoints
-
-Public health endpoint:
+Typical paths include:
 
 ```text
-GET /api/v1/health
+/opt/server-engine/services/nginx/
+/opt/server-engine/services/mysql/
+/opt/server-engine/services/php/versions/8.3/
+/opt/server-engine/services/nodejs/versions/22/
+/opt/server-engine/services/composer/
 ```
 
-Authentication:
+When a runtime is enabled for terminal access, Server Engine creates a managed command mapping for new local terminal sessions. It does not overwrite a user’s existing host runtime unless the user explicitly enables that mapping.
 
-```text
-POST /api/v1/auth/login
-GET  /api/v1/auth/me
-POST /api/v1/auth/logout
-```
-
-Protected foundation endpoints:
-
-```text
-GET /api/v1/servers
-GET /api/v1/jobs
-GET /api/v1/capabilities
-```
-
-## Project structure
-
-```text
-core/
-  app/
-    api/routes/       HTTP route modules
-    models/           request, response, and domain models
-    services/         business actions
-    auth.py           authentication persistence helpers
-    main.py           application wiring only
-
-web/
-  src/
-    app/              application composition
-    components/       shared UI components
-    features/         feature-specific pages/components
-    hooks/            frontend state hooks
-    lib/              API/client helpers
-
-deploy/               systemd units
-docker/               Docker test assets
-docs/                 architecture and installer design
-bin/serverengine      development/native lifecycle wrapper
-install.sh            native customer-server installer
-```
-
-## Service manager direction
-
-Nginx, MySQL/MariaDB, PHP, PostgreSQL, and other services will be installed through durable background jobs, not directly from HTTP handlers.
-
-The planned boundary is:
-
-```text
-serverengine       web panel + Python API
-serverengine-agent privileged allowlisted service manager
-```
-
-See [docs/SERVICE_MANAGER.md](docs/SERVICE_MANAGER.md) for provider manifests, version selection, previews, background jobs, logs, retries, and rollback requirements.
-
-## Troubleshooting
-
-Check development services:
+Use the executable path supplied by the panel when running an isolated binary directly. For example:
 
 ```bash
-docker compose -f docker-compose.dev.yml ps
-docker compose -f docker-compose.dev.yml logs -f
+/opt/server-engine/services/php/versions/8.3/usr/bin/php8.3 -v
 ```
 
-Check live installer test:
+The panel is responsible for creating the runtime configuration, required baseline extensions, logs, sockets, and service-specific directories during installation. Service-specific configuration should be edited from that service’s own manager rather than copied between unrelated services.
+
+## Project layout
+
+```text
+core/                       FastAPI application and native CLI
+  app/api/routes/            HTTP and WebSocket routes
+  app/models/                Pydantic/domain models
+  app/services/              Service, website, firewall, job, and runtime logic
+  app/cli.py                 `se` command implementation
+web/                        React/Vite control-panel frontend
+  src/components/            Shared UI components
+  src/features/              Page-level product areas
+  src/locales/               Translation catalogs
+  src/assets/flags/          Language flag SVG assets
+docs/                       Focused operator and design documentation
+deploy/                     systemd unit files
+docker/                     Installer and panel test helpers
+bin/                        Development environment wrapper commands
+install.sh                  Native Linux installer
+```
+
+## API and authentication
+
+The API is built with FastAPI and exposes versioned routes under `/api/v1`. Browser requests use the authenticated session cookie. The terminal uses an authenticated WebSocket connection and supports both the local Server Engine container and saved external SSH connections.
+
+The API health endpoint is intentionally lightweight:
 
 ```bash
-docker compose -f docker-compose.test.yml ps
-docker compose -f docker-compose.test.yml logs -f panel-live
+curl http://127.0.0.1:8000/api/v1/health
 ```
 
-If ports are already occupied, stop the other environment before starting another one. The dev stack uses ports `5173` and `18000`; the live panel uses `18888` and `18000`.
+Before exposing a panel publicly:
 
-If Docker reports orphan containers, it is usually only a warning from another Compose file using the same project directory. Inspect with:
+- Set a strong administrator password.
+- Put the web panel behind HTTPS.
+- Keep the API on loopback unless external access is required.
+- Restrict SSH and terminal access to trusted administrator accounts.
+- Review firewall, MFA, session, and audit settings.
+- Back up the control database and service configuration.
+- Do not paste private keys or production secrets into issue reports.
+
+## Testing and validation
+
+Run the frontend build inside the project container:
 
 ```bash
-docker ps
-docker compose -f docker-compose.dev.yml ps
-docker compose -f docker-compose.test.yml ps
+docker compose build web
 ```
 
-Do not run the native installer on macOS. Use Docker for local testing and run the native installer on a disposable Linux VM before using it on a customer server.
+Run the backend image build:
+
+```bash
+docker compose build core
+```
+
+For the broader repository test workflow, see [TESTING.md](TESTING.md).
+
+The project currently uses UI-first development for several management areas. A visible control may represent the intended workflow while its production backend integration is still being implemented. Always verify the resulting service state with the panel logs, service logs, and the `se` CLI before relying on it in production.
+
+## Documentation
+
+- [CLI reference](docs/CLI.md)
+- [Service manager design](docs/SERVICE_MANAGER.md)
+- [Installer design](docs/INSTALLER_DESIGN.md)
+- [Testing guide](TESTING.md)
+- [AGPLv3 license](LICENSE)
+
+## Contributing
+
+1. Create a focused branch.
+2. Keep UI changes in the relevant feature folder and shared behavior in `web/src/components` or `web/src/lib`.
+3. Keep service behavior in the FastAPI service layer instead of embedding operational logic in JSX.
+4. Run `git diff --check`.
+5. Build the affected Docker image before opening a pull request.
+6. Document new CLI commands, service paths, environment variables, and security implications.
+
+Avoid adding a new one-off CSS class when a native Tailwind utility or reusable component is appropriate. Reuse shared controls such as `Button`, `Toast`, `ActionDialog`, `SaveButton`, and the translation hook.
+
+## License
+
+Server Engine Control Panel is licensed under the GNU Affero General Public License v3.0. See [LICENSE](LICENSE).

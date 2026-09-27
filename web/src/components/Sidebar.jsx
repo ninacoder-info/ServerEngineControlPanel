@@ -1,5 +1,7 @@
 import {
   Activity,
+  CalendarClock,
+  Container,
   Database,
   FileCog,
   FolderOpen,
@@ -15,6 +17,7 @@ import {
   Server,
   Settings,
   ShieldCheck,
+  ShieldAlert,
   Users,
 } from "lucide-react";
 import Brand from "./Brand";
@@ -49,14 +52,27 @@ const sections = [
     [
       ["Services", "/services", Package],
       ["PHP runtimes", "/services/php", FileCog],
+      ["Node.js runtimes", "/services/nodejs", FileCog],
+      ["Containers", "/docker", Container],
       ["Server health", "/health", Gauge],
+    ],
+  ],
+  [
+    "Automation",
+    [["Cron jobs", "/cronjobs", CalendarClock]],
+  ],
+  [
+    "Accounts & plans",
+    [
+      ["Accounts", "/users", Users],
+      ["Hosting plans", "/plans", Package],
     ],
   ],
   [
     "Security & access",
     [
       ["Firewall", "/firewall", ShieldCheck],
-      ["Users & resellers", "/users", Users],
+      ["Application Shield", "/application-shield", ShieldAlert],
       ["Logs", "/logs", Logs],
     ],
   ],

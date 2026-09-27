@@ -15,6 +15,16 @@ import {
   XCircle,
 } from "lucide-react";
 import { apiRequest } from "../lib/api";
+import Toast from "./Toast";
+import englishFlag from "../assets/flags/en.svg";
+import vietnameseFlag from "../assets/flags/vi.svg";
+import frenchFlag from "../assets/flags/fr.svg";
+
+const languages = [
+  { id: "en", label: "English", short: "EN", flag: englishFlag },
+  { id: "vi", label: "Tiếng Việt", short: "VI", flag: vietnameseFlag },
+  { id: "fr", label: "Français", short: "FR", flag: frenchFlag },
+];
 
 function JobIcon({ status }) {
   return status === "failed" ? (
@@ -37,7 +47,26 @@ export default function Topbar({
   const [jobs, setJobs] = React.useState([]);
   const [jobsOpen, setJobsOpen] = React.useState(false);
   const [accountOpen, setAccountOpen] = React.useState(false);
+  const [languageOpen, setLanguageOpen] = React.useState(false);
+  const [language, setLanguage] = React.useState(
+    () => localStorage.getItem("server-engine-language") || "en",
+  );
   const [terminalSessions, setTerminalSessions] = React.useState(0);
+  const [operationToast, setOperationToast] = React.useState(null);
+  const jobsInitialized = React.useRef(false);
+  const previousJobStatuses = React.useRef(new Map());
+  const jobsRef = React.useRef(null);
+  const accountRef = React.useRef(null);
+  const languageRef = React.useRef(null);
+  React.useEffect(() => {
+    const closeMenus = (event) => {
+      if (!jobsRef.current?.contains(event.target)) setJobsOpen(false);
+      if (!accountRef.current?.contains(event.target)) setAccountOpen(false);
+      if (!languageRef.current?.contains(event.target)) setLanguageOpen(false);
+    };
+    document.addEventListener("mousedown", closeMenus);
+    return () => document.removeEventListener("mousedown", closeMenus);
+  }, []);
   React.useEffect(() => {
     const update = (event) => setTerminalSessions(event.detail?.connected || 0);
     window.addEventListener("serverengine:terminal-status", update);
@@ -50,7 +79,24 @@ export default function Topbar({
       apiRequest("/api/v1/jobs")
         .then((response) => (response.ok ? response.json() : []))
         .then((items) => {
-          if (alive) setJobs(items);
+          if (!alive) return;
+          if (jobsInitialized.current) {
+            items.forEach((job) => {
+              const previous = previousJobStatuses.current.get(job.id);
+              const finished = ["succeeded", "failed", "cancelled"].includes(job.status);
+              if ((!previous || previous !== job.status) && finished) {
+                setOperationToast({
+                  type: job.status === "succeeded" ? "success" : "error",
+                  message: job.message || `${job.type} ${job.status}.`,
+                });
+              }
+            });
+          }
+          previousJobStatuses.current = new Map(
+            items.map((job) => [job.id, job.status]),
+          );
+          jobsInitialized.current = true;
+          setJobs(items);
         })
         .catch(() => {});
     load();
@@ -81,6 +127,14 @@ export default function Topbar({
   ).length;
   const username = user?.username || "Administrator";
   const initial = username[0]?.toUpperCase() || "A";
+  const selectedLanguage = languages.find((item) => item.id === language) || languages[0];
+  const changeLanguage = (next) => {
+    setLanguage(next);
+    localStorage.setItem("server-engine-language", next);
+    document.documentElement.lang = next;
+    window.dispatchEvent(new CustomEvent("serverengine:language-change", { detail: { language: next } }));
+    setLanguageOpen(false);
+  };
   return (
     <header className="topbar !h-14 !bg-white dark:!bg-[#0b1220]">
       <button className="text-slate-400 md:hidden" onClick={onMenu}>
@@ -100,7 +154,7 @@ export default function Topbar({
             </span>
           )}
         </button>
-        <div className="relative">
+        <div className="relative" ref={jobsRef}>
           <button
             className={`icon-button !rounded-full job-button ${activeJobs ? "job-button-active" : ""}`}
             aria-label="View operations"
@@ -179,8 +233,10 @@ export default function Topbar({
                             </div>
                           )}
                         {job.message && <small>{job.message}</small>}
-                        {job.status === "running" && job.log?.length > 0 && (
-                          <pre>{job.log[job.log.length - 1]}</pre>
+                        {job.log?.length > 0 && (
+                          <pre className="mt-2 max-h-24 overflow-auto whitespace-pre-wrap break-words text-[11px] leading-4">
+                            {job.log.slice(-6).join("\n")}
+                          </pre>
                         )}
                       </div>
                     </div>
@@ -197,7 +253,39 @@ export default function Topbar({
         >
           {light ? <Moon size={18} /> : <Sun size={18} />}
         </button>
-        <div className="relative">
+        <div className="relative" ref={languageRef}>
+          <button
+            type="button"
+            className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-full px-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+            aria-label="Choose language"
+            aria-expanded={languageOpen}
+            onClick={() => {
+              setLanguageOpen((value) => !value);
+              setAccountOpen(false);
+              setJobsOpen(false);
+            }}
+          >
+            <img src={selectedLanguage.flag} alt="" className="h-4 w-6 rounded-sm object-cover" />
+          </button>
+          {languageOpen && (
+            <div className="absolute right-0 top-11 z-50 w-48 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+              <p className="px-3 py-2 text-xs font-semibold text-slate-500 dark:text-slate-400">Language</p>
+              {languages.map((item) => (
+                <button
+                  type="button"
+                  key={item.id}
+                  className={`flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm ${language === item.id ? "bg-slate-100 font-semibold text-slate-900 dark:bg-slate-800 dark:text-slate-100" : "text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"}`}
+                  onClick={() => changeLanguage(item.id)}
+                >
+                  <img src={item.flag} alt="" className="h-4 w-6 rounded-sm object-cover" />
+                  <span>{item.label}</span>
+                  {language === item.id && <span className="ml-auto text-blue-600">✓</span>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="relative" ref={accountRef}>
           <button
             className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800"
             onClick={() => {
@@ -281,6 +369,11 @@ export default function Topbar({
           )}
         </div>
       </div>
+      <Toast
+        message={operationToast?.message}
+        type={operationToast?.type}
+        onClose={() => setOperationToast(null)}
+      />
     </header>
   );
 }

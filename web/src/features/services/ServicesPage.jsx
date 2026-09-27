@@ -3,8 +3,12 @@ import { Search, Server } from "lucide-react";
 import { apiRequest, readApiError } from "../../lib/api";
 import InstallServiceModal from "./InstallServiceModal";
 import PhpOverviewCard from "./PhpOverviewCard";
+import NodeOverviewCard from "./NodeOverviewCard";
 import ServiceCard from "./ServiceCard";
 import ServiceManagerModal from "./ServiceManagerModal";
+import ApacheConfigModal from "./ApacheConfigModal";
+import NginxConfigModal from "./NginxConfigModal";
+import ComposerConfigModal from "./ComposerConfigModal";
 import { VsftpdConfigModal } from "../ftp/FTPPage";
 
 export default function ServicesPage() {
@@ -141,6 +145,16 @@ export default function ServicesPage() {
                 onTogglePin={togglePin}
               />
             );
+          if (service.id === "nodejs")
+            return (
+              <NodeOverviewCard
+                key={service.id}
+                service={service}
+                installed={matches}
+                pinned={pinned.includes(service.id)}
+                onTogglePin={togglePin}
+              />
+            );
           return (
             <ServiceCard
               key={service.id}
@@ -165,7 +179,21 @@ export default function ServicesPage() {
         />
       )}{" "}
       {manage &&
-        (manage.service.id === "vsftpd" ? (
+        (manage.service.id === "composer" ? (
+          <ComposerConfigModal service={manage.service} installed={manage.versions} onClose={() => setManage(null)} />
+        ) : manage.service.id === "apache" ? (
+          <ApacheConfigModal
+            service={manage.service}
+            installed={manage.versions}
+            onClose={() => setManage(null)}
+          />
+        ) : manage.service.id === "nginx" ? (
+          <NginxConfigModal
+            service={manage.service}
+            installed={manage.versions}
+            onClose={() => setManage(null)}
+          />
+        ) : manage.service.id === "vsftpd" ? (
           <VsftpdConfigModal
             service={{
               status:

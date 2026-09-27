@@ -14,7 +14,7 @@ from pathlib import Path
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.auth import SESSION_COOKIE
-from app.services.service_runtime import service_root
+from app.services.service_runtime import composer_path, ensure_composer_launcher, ensure_php_terminal_launcher, service_root
 
 router = APIRouter(prefix="/api/v1/terminal", tags=["terminal"])
 
@@ -31,14 +31,27 @@ def resize(fd: int, cols: int, rows: int):
 def local_runtime_environment() -> dict[str, str]:
     """Expose installed isolated runtimes to the local management shell."""
     environment = os.environ.copy()
+    tool_paths = []
+    composer = composer_path()
+    ensure_composer_launcher()
+    composer = composer_path()
+    if composer.exists() and (service_root("composer") / ".terminal-enabled").exists():
+        tool_paths.append(composer.parent)
     versions_root = service_root("php") / "versions"
     if not versions_root.exists():
+        if tool_paths:
+            environment["PATH"] = ":".join(str(path) for path in tool_paths + [Path(item) for item in environment.get("PATH", "").split(":") if item])
+        return environment
         return environment
 
-    versions = sorted((item for item in versions_root.iterdir() if item.is_dir()), reverse=True)
+    versions = sorted(
+        (item for item in versions_root.iterdir() if item.is_dir() and (item / ".terminal-enabled").exists()),
+        reverse=True,
+    )
     bin_paths = []
     library_paths = []
     for version_root in versions:
+        ensure_php_terminal_launcher(version_root.name)
         for relative in ("usr/bin", "bin"):
             path = version_root / relative
             if path.exists():
@@ -54,8 +67,8 @@ def local_runtime_environment() -> dict[str, str]:
             path = version_root / relative
             if path.exists():
                 library_paths.append(path)
-    if bin_paths:
-        environment["PATH"] = ":".join(str(path) for path in bin_paths + [Path(item) for item in environment.get("PATH", "").split(":") if item])
+    if bin_paths or tool_paths:
+        environment["PATH"] = ":".join(str(path) for path in tool_paths + bin_paths + [Path(item) for item in environment.get("PATH", "").split(":") if item])
     if library_paths:
         environment["LD_LIBRARY_PATH"] = ":".join(str(path) for path in library_paths + [Path(item) for item in environment.get("LD_LIBRARY_PATH", "").split(":") if item])
     return environment

@@ -7,6 +7,8 @@ import {
   ShieldCheck,
   UserRound,
 } from "lucide-react";
+import { apiRequest, readApiError } from "../../lib/api";
+import { createPasskey, supportsPasskeys } from "../../lib/passkeys";
 
 const input =
   "mt-2 block min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100";
@@ -70,6 +72,7 @@ export default function AccountSettingsPage({ user }) {
   const [name, setName] = React.useState(user?.username || "Administrator");
   const [email, setEmail] = React.useState("admin@example.com");
   const [message, setMessage] = React.useState("");
+  const [passkeyBusy, setPasskeyBusy] = React.useState(false);
   const [security, setSecurity] = React.useState({
     mfa: true,
     passkeys: false,
@@ -102,6 +105,30 @@ export default function AccountSettingsPage({ user }) {
     setSecurity((values) => ({ ...values, [key]: value }));
   const updateValue = (key, value) =>
     setSecurityValues((values) => ({ ...values, [key]: value }));
+  async function registerPasskey() {
+    if (!supportsPasskeys()) {
+      setMessage("This browser does not support passkeys.");
+      return;
+    }
+    setPasskeyBusy(true);
+    setMessage("");
+    try {
+      const optionsResponse = await apiRequest("/api/v1/auth/passkey/register/options", { method: "POST" });
+      if (!optionsResponse.ok) throw new Error(await readApiError(optionsResponse, "Unable to begin passkey registration."));
+      const credential = await createPasskey(await optionsResponse.json());
+      const response = await apiRequest("/api/v1/auth/passkey/register/verify", {
+        method: "POST",
+        body: JSON.stringify({ credential }),
+      });
+      if (!response.ok) throw new Error(await readApiError(response, "Unable to register passkey."));
+      setSecurity((values) => ({ ...values, passkeys: true }));
+      setMessage("Passkey registered. You can use it on the next sign-in.");
+    } catch (error) {
+      setMessage(error.message || "Passkey registration failed.");
+    } finally {
+      setPasskeyBusy(false);
+    }
+  }
   return (
     <div className="space-y-7">
       <header>
@@ -121,7 +148,7 @@ export default function AccountSettingsPage({ user }) {
       )}
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
         <nav
-          className="flex overflow-x-auto border-b border-slate-200 bg-transparent px-3 dark:border-slate-800"
+          className="flex overflow-x-auto border-b border-slate-200 bg-transparent px-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:border-slate-800"
           aria-label="Account settings tabs"
         >
           {tabs.map(([id, label, Icon]) => (
@@ -198,8 +225,14 @@ export default function AccountSettingsPage({ user }) {
                   onChange={(v) => updateSecurity("passkeys", v)}
                 />
                 <div className="mt-5 flex flex-wrap gap-3">
-                  <button className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">
-                    Manage authenticators
+                  <button
+                    type="button"
+                    disabled={passkeyBusy}
+                    onClick={registerPasskey}
+                    className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    <KeyRound size={15} />
+                    {passkeyBusy ? "Waiting for passkey…" : "Register passkey"}
                   </button>
                   <button className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">
                     Regenerate recovery codes

@@ -17,7 +17,7 @@ function languageFor(path = "") {
   return [];
 }
 
-export default function ConfigEditor({ path, value, onChange }) {
+export default function ConfigEditor({ path, value, onChange, readOnly = false }) {
   const [dark, setDark] = React.useState(() =>
     document.documentElement.classList.contains("dark"),
   );
@@ -34,6 +34,7 @@ export default function ConfigEditor({ path, value, onChange }) {
   return (
     <CodeMirror
       value={value}
+      editable={!readOnly}
       height="24rem"
       theme={dark ? oneDark : undefined}
       extensions={[languageFor(path)]}

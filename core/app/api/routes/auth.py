@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from app.api.dependencies import require_user
 from app.auth import SESSION_COOKIE, set_session
 from app.models.auth import LoginRequest
+from app.services.passkey_service import authentication_options, registration_options, verify_authentication, verify_registration
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -26,3 +27,33 @@ def logout(request: Request, response: Response, user=Depends(require_user)):
     request.app.state.auth_service.logout(request.cookies.get(SESSION_COOKIE))
     response.delete_cookie(SESSION_COOKIE, path="/")
     return {"ok": True}
+
+
+@router.get("/passkey/status")
+def passkey_status(user=Depends(require_user)):
+    return {"enabled": True}
+
+
+@router.post("/passkey/register/options")
+def passkey_register_options(request: Request, user=Depends(require_user)):
+    return registration_options(request, request.app.state.auth_service.store, user)
+
+
+@router.post("/passkey/register/verify")
+def passkey_register_verify(payload: dict, request: Request, user=Depends(require_user)):
+    return verify_registration(request, request.app.state.auth_service.store, user, payload.get("credential", payload))
+
+
+@router.post("/passkey/login/options")
+def passkey_login_options(request: Request):
+    return authentication_options(request, request.app.state.auth_service.store)
+
+
+@router.post("/passkey/login/verify")
+def passkey_login_verify(payload: dict, request: Request, response: Response):
+    store = request.app.state.auth_service.store
+    user_id = verify_authentication(request, store, payload.get("credential", payload))
+    token = store.create_session_for_user(user_id)
+    set_session(response, token)
+    user = store.user_by_id(user_id)
+    return user
