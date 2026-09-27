@@ -57,6 +57,7 @@ class WebsiteUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     domain: str | None = Field(default=None, min_length=3, max_length=253)
     aliases: list[str] | None = Field(default=None, max_length=50)
+    project_path: str | None = Field(default=None, min_length=1, max_length=1024)
     web_root: str | None = Field(default=None, max_length=255)
     php_version: str | None = Field(default=None, max_length=32)
     framework: FrameworkType | None = None
@@ -73,3 +74,8 @@ class WebsiteUpdateRequest(BaseModel):
 
 class WebsiteActionRequest(BaseModel):
     action: Literal["enable", "disable"]
+
+
+class WebsiteDirectoryRequest(BaseModel):
+    path: str = Field(min_length=1, max_length=1024)
+    name: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._-]+$")

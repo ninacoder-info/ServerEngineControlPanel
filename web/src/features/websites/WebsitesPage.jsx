@@ -14,8 +14,21 @@ import {
 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import ActionDialog from "../../components/ActionDialog";
+import Button from "../../components/Button";
+import Toast from "../../components/Toast";
 import { apiRequest, readApiError } from "../../lib/api";
 import WebsiteFormModal from "./WebsiteFormModal";
+
+function DetailRow({ label, children }) {
+  return (
+    <div className="flex items-start justify-between gap-4 border-t border-slate-200 py-3 text-sm dark:border-slate-800">
+      <span className="text-slate-500 dark:text-slate-400">{label}</span>
+      <strong className="max-w-[65%] truncate text-right font-medium text-slate-900 dark:text-slate-100">
+        {children}
+      </strong>
+    </div>
+  );
+}
 
 export default function WebsitesPage() {
   const navigate = useNavigate();
@@ -24,30 +37,53 @@ export default function WebsitesPage() {
   const [sites, setSites] = React.useState([]);
   const [root, setRoot] = React.useState("/server-engine/www");
   const [php, setPhp] = React.useState([]);
+  const [serverType, setServerType] = React.useState("nginx");
   const [query, setQuery] = React.useState("");
   const [modal, setModal] = React.useState(null);
   const [dialog, setDialog] = React.useState(null);
   const [error, setError] = React.useState("");
+  const [toast, setToast] = React.useState(null);
   const load = React.useCallback(
     () =>
       Promise.all([
         apiRequest("/api/v1/websites"),
         apiRequest("/api/v1/settings"),
         apiRequest("/api/v1/services/php/runtimes"),
+        apiRequest("/api/v1/services/installed"),
       ])
-        .then(async ([a, b, c]) => {
-          if (!a.ok) throw new Error(await readApiError(a));
-          const settings = b.ok ? await b.json() : {};
-          const runtimes = c.ok ? await c.json() : [];
-          setSites(await a.json());
-          setRoot(settings.values?.default_site_root || "/server-engine/www");
-          setPhp(
-            runtimes
-              .filter((item) => item.installed)
-              .map((item) => item.version),
-          );
-        })
-        .catch((error) => setError(error.message || "Unable to load websites")),
+        .then(
+          async ([
+            websites,
+            settingsResponse,
+            phpResponse,
+            servicesResponse,
+          ]) => {
+            if (!websites.ok) throw new Error(await readApiError(websites));
+            const settings = settingsResponse.ok
+              ? await settingsResponse.json()
+              : {};
+            const runtimes = phpResponse.ok ? await phpResponse.json() : [];
+            const services = servicesResponse.ok
+              ? await servicesResponse.json()
+              : [];
+            setSites(await websites.json());
+            setRoot(settings.values?.default_site_root || "/server-engine/www");
+            setPhp(
+              runtimes
+                .filter((item) => item.installed)
+                .map((item) => item.version),
+            );
+            const running = services.find(
+              (item) =>
+                ["nginx", "apache"].includes(item.id) &&
+                item.status === "running",
+            );
+            if (running) setServerType(running.id);
+          },
+        )
+        .catch((reason) =>
+          setError(reason.message || "Unable to load websites"),
+        ),
     [],
   );
   React.useEffect(() => {
@@ -59,13 +95,12 @@ export default function WebsitesPage() {
       .toLowerCase()
       .includes(query.toLowerCase()),
   );
-  const save = (site) => {
+  const save = (site) =>
     setSites((current) =>
       current.some((item) => item.id === site.id)
         ? current.map((item) => (item.id === site.id ? site : item))
         : [site, ...current],
     );
-  };
   const toggle = async (site) => {
     const response = await apiRequest(`/api/v1/websites/${site.id}/actions`, {
       method: "POST",
@@ -92,169 +127,185 @@ export default function WebsitesPage() {
         } else setError(await readApiError(response));
       },
     });
+  const modalProps = {
+    site: modal,
+    defaultRoot: root,
+    phpVersions: php,
+    serverType,
+    onClose: () => setModal(null),
+    onSaved: (site) => {
+      const editing = Boolean(modal?.id);
+      save(site);
+      setModal(null);
+      setToast({
+        type: "success",
+        message: editing
+          ? `${site.domain} was updated.`
+          : `${site.domain} was created.`,
+      });
+    },
+  };
+
   if (selectedId && selected)
     return (
-      <div className="websites-page space-y-7">
-        <button className="back-link" onClick={() => navigate("/websites")}>
+      <div className="space-y-7">
+        <button
+          className="inline-flex cursor-pointer items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400"
+          onClick={() => navigate("/websites")}
+        >
           <ArrowLeft size={15} />
           All websites
         </button>
-        <div className="website-detail-heading">
+        <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
           <div>
-            <p className="eyebrow">WEBSITE</p>
-            <h2>{selected.domain}</h2>
-            <p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">
+              Website
+            </p>
+            <h2 className="mt-1 text-3xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
+              {selected.domain}
+            </h2>
+            <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
               {selected.project_path} · {selected.server_type} ·{" "}
               {selected.php_version || "static runtime"}
             </p>
           </div>
-          <div className="website-actions">
-            <button
-              className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
               onClick={() => setModal(selected)}
             >
               <Edit3 size={15} />
               Edit
-            </button>
-            <button
-              className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
-              onClick={() => toggle(selected)}
-            >
+            </Button>
+            <Button variant="primary" onClick={() => toggle(selected)}>
               {selected.enabled ? (
                 <PauseCircle size={15} />
               ) : (
                 <CheckCircle2 size={15} />
-              )}{" "}
+              )}
               {selected.enabled ? "Disable" : "Enable"}
-            </button>
+            </Button>
           </div>
         </div>
-        <div className="website-detail-grid">
-          <section className="panel website-detail-card">
-            <h3>Runtime</h3>
-            <div>
-              <span>Status</span>
-              <strong
+        <div className="grid gap-5 lg:grid-cols-2">
+          <section className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+            <h3 className="mb-3 text-base font-semibold text-slate-900 dark:text-slate-100">
+              Runtime
+            </h3>
+            <DetailRow label="Status">
+              <span
                 className={
                   selected.enabled
-                    ? "website-status-ready"
-                    : "website-status-disabled"
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-amber-600 dark:text-amber-400"
                 }
               >
                 {selected.enabled ? "Ready" : "Disabled"}
-              </strong>
-            </div>
-            <div>
-              <span>Document root</span>
-              <strong>{selected.document_root}</strong>
-            </div>
-            <div>
-              <span>Server provider</span>
-              <strong>{selected.server_type}</strong>
-            </div>
-            <div>
-              <span>PHP-FPM</span>
-              <strong>{selected.php_version || "Not selected"}</strong>
-            </div>
+              </span>
+            </DetailRow>
+            <DetailRow label="Document root">
+              {selected.document_root}
+            </DetailRow>
+            <DetailRow label="Server provider">
+              {selected.server_type}
+            </DetailRow>
+            <DetailRow label="PHP-FPM">
+              {selected.php_version || "Not selected"}
+            </DetailRow>
           </section>
-          <section className="panel website-detail-card">
-            <h3>Domains and policy</h3>
-            <div>
-              <span>Aliases</span>
-              <strong>
-                {selected.aliases.length ? selected.aliases.join(", ") : "None"}
-              </strong>
-            </div>
-            <div>
-              <span>TLS</span>
-              <strong>
-                {selected.ssl_enabled
-                  ? selected.ssl_enforce_tls
-                    ? "Enabled · enforced"
-                    : "Enabled"
-                  : "Not configured"}
-              </strong>
-            </div>
-            <div>
-              <span>Database</span>
-              <strong>
-                {selected.database_enabled
-                  ? selected.database_name
-                  : "Not attached"}
-              </strong>
-            </div>
-            <div>
-              <span>Config metadata</span>
-              <strong>{selected.config_path}</strong>
-            </div>
+          <section className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+            <h3 className="mb-3 text-base font-semibold text-slate-900 dark:text-slate-100">
+              Domains and policy
+            </h3>
+            <DetailRow label="Aliases">
+              {selected.aliases.length ? selected.aliases.join(", ") : "None"}
+            </DetailRow>
+            <DetailRow label="TLS">
+              {selected.ssl_enabled
+                ? selected.ssl_enforce_tls
+                  ? "Enabled · enforced"
+                  : "Enabled"
+                : "Not configured"}
+            </DetailRow>
+            <DetailRow label="Database">
+              {selected.database_enabled
+                ? selected.database_name
+                : "Not attached"}
+            </DetailRow>
+            <DetailRow label="Config metadata">
+              {selected.config_path}
+            </DetailRow>
           </section>
         </div>
-        <div className="website-detail-footer">
-          <button
-            className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+        <div className="flex flex-wrap justify-between gap-3">
+          <Button
+            variant="secondary"
             onClick={() => window.open(`http://${selected.domain}`, "_blank")}
           >
             <ExternalLink size={15} />
             Open site
-          </button>
-          <button
-            className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-rose-300 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 dark:border-rose-800 dark:text-rose-300 dark:hover:bg-rose-950/30"
+          </Button>
+          <Button
+            variant="danger"
             onClick={() => remove(selected)}
           >
             <Trash2 size={15} />
             Delete record
-          </button>
+          </Button>
         </div>
-        <WebsiteFormModal
-          site={modal}
-          defaultRoot={root}
-          phpVersions={php}
-          onClose={() => setModal(null)}
-          onSaved={(site) => {
-            save(site);
-            setModal(null);
-          }}
-        />
+        <WebsiteFormModal {...modalProps} />
         <ActionDialog
           dialog={dialog}
           onClose={() => setDialog(null)}
           onSubmit={() => dialog?.onSubmit?.()}
         />
+        <Toast
+          message={toast?.message}
+          type={toast?.type}
+          onClose={() => setToast(null)}
+        />
       </div>
     );
+
   return (
-    <div className="websites-page space-y-7">
-      <div className="websites-heading">
+    <div className="space-y-7">
+      <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
         <div>
-          <p className="eyebrow">WEB HOSTING</p>
-          <h2>Websites</h2>
-          <p>
-            Manage domains, shared document roots, runtime selection, TLS
-            policy, and application metadata.
+          <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">
+            Web hosting
+          </p>
+          <h2 className="mt-1 text-3xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
+            Websites
+          </h2>
+          <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+            Manage domains, document roots, runtimes, TLS policy, and
+            application hosting.
           </p>
         </div>
-        <button
-          className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
-          onClick={() => setModal({})}
-        >
+        <Button variant="primary" onClick={() => setModal({})}>
           <Plus size={16} />
           Create website
-        </button>
+        </Button>
       </div>
-      {error && <div className="website-error">{error}</div>}
-      <div className="website-toolbar">
-        <div className="search-box">
+      {error && (
+        <div className="border-b border-rose-300 pb-3 text-sm text-rose-600 dark:border-rose-900 dark:text-rose-400">
+          {error}
+        </div>
+      )}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <label className="flex min-w-0 flex-1 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
           <Search size={16} />
           <input
+            className="min-w-0 flex-1 border-0 bg-transparent text-slate-900 outline-none placeholder:text-slate-400 dark:text-slate-100"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search domains or project names…"
           />
-        </div>
-        <div className="website-count">
+        </label>
+        <span className="inline-flex items-center gap-1.5 text-sm text-slate-500 dark:text-slate-400">
           <Globe2 size={15} />
           {sites.length} websites
-        </div>
+        </span>
       </div>
       <div className="flex items-center justify-between gap-4">
         <div>
@@ -265,119 +316,127 @@ export default function WebsitesPage() {
             Domains and hosting environments on this server.
           </p>
         </div>
-        <button
-          className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 md:hidden"
+        <Button
+          variant="primary"
+          className="md:hidden"
           onClick={() => setModal({})}
         >
           <Plus size={15} />
           Create website
-        </button>
+        </Button>
       </div>
       {visible.length ? (
-        <div className="website-list">
+        <div className="space-y-3">
           {visible.map((site) => (
-            <article className="website-row panel" key={site.id}>
-              <div className="website-row-main">
-                <div className="website-mark">
-                  <Globe2 size={18} />
+            <article
+              className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"
+              key={site.id}
+            >
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
+                <div className="flex min-w-0 flex-1 items-start gap-3">
+                  <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400">
+                    <Globe2 size={19} />
+                  </div>
+                  <div className="min-w-0">
+                    <button
+                      className="cursor-pointer truncate text-left text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400"
+                      onClick={() => navigate(`/websites/${site.id}`)}
+                    >
+                      {site.domain}
+                    </button>
+                    <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">
+                      {site.project_path}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <button
-                    className="website-domain"
+                <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-slate-500 dark:text-slate-400">
+                  <span className="inline-flex items-center gap-1.5">
+                    <Server size={14} />
+                    {site.server_type}
+                  </span>
+                  <span>
+                    {site.php_version ? `PHP ${site.php_version}` : "Static"}
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <ShieldCheck size={14} />
+                    {site.ssl_enabled ? "TLS on" : "TLS off"}
+                  </span>
+                  <span
+                    className={
+                      site.enabled
+                        ? "font-semibold text-emerald-600 dark:text-emerald-400"
+                        : "font-semibold text-amber-600 dark:text-amber-400"
+                    }
+                  >
+                    {site.enabled ? "Ready" : "Disabled"}
+                  </span>
+                </div>
+                <div className="flex shrink-0 gap-1">
+                  <Button
+                    iconOnly
+                    aria-label="Open details"
+                    title="Open details"
                     onClick={() => navigate(`/websites/${site.id}`)}
                   >
-                    {site.domain}
-                  </button>
-                  <p>
-                    {site.name} · {site.project_path}
-                  </p>
+                    <ExternalLink size={15} />
+                  </Button>
+                  <Button
+                    iconOnly
+                    aria-label={site.enabled ? "Disable" : "Enable"}
+                    title={site.enabled ? "Disable" : "Enable"}
+                    onClick={() => toggle(site)}
+                  >
+                    {site.enabled ? (
+                      <PauseCircle size={15} />
+                    ) : (
+                      <CheckCircle2 size={15} />
+                    )}
+                  </Button>
+                  <Button
+                    iconOnly
+                    aria-label="Edit"
+                    title="Edit"
+                    onClick={() => setModal(site)}
+                  >
+                    <Edit3 size={15} />
+                  </Button>
                 </div>
-              </div>
-              <div className="website-row-meta">
-                <span>
-                  <Server size={14} />
-                  {site.server_type}
-                </span>
-                <span>
-                  {site.php_version ? `PHP ${site.php_version}` : "Static"}
-                </span>
-                <span>
-                  <ShieldCheck size={14} />
-                  {site.ssl_enabled ? "TLS on" : "TLS off"}
-                </span>
-                <b
-                  className={
-                    site.enabled
-                      ? "website-status-ready"
-                      : "website-status-disabled"
-                  }
-                >
-                  {site.enabled ? "Ready" : "Disabled"}
-                </b>
-              </div>
-              <div className="website-row-actions">
-                <button
-                  className="icon-button"
-                  title="Open details"
-                  onClick={() => navigate(`/websites/${site.id}`)}
-                >
-                  <ExternalLink size={15} />
-                </button>
-                <button
-                  className="icon-button"
-                  title={site.enabled ? "Disable" : "Enable"}
-                  onClick={() => toggle(site)}
-                >
-                  {site.enabled ? (
-                    <PauseCircle size={15} />
-                  ) : (
-                    <CheckCircle2 size={15} />
-                  )}
-                </button>
-                <button
-                  className="icon-button"
-                  title="Edit"
-                  onClick={() => setModal(site)}
-                >
-                  <Edit3 size={15} />
-                </button>
               </div>
             </article>
           ))}
         </div>
       ) : (
-        <div className="panel website-empty">
-          <Globe2 size={28} />
-          <h3>{query ? "No matching websites" : "No websites configured"}</h3>
-          <p>
-            Create the first site and its shared project folder will be prepared
-            under {root}.
+        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 px-6 py-16 text-center dark:border-slate-700">
+          <Globe2 size={30} className="text-blue-600" />
+          <h3 className="mt-4 text-base font-semibold text-slate-900 dark:text-slate-100">
+            {query ? "No matching websites" : "No websites configured"}
+          </h3>
+          <p className="mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">
+            Create the first site and its project folder will be prepared under{" "}
+            {root}.
           </p>
           {!query && (
-            <button
-              className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+            <Button
+              variant="primary"
+              className="mt-5"
               onClick={() => setModal({})}
             >
               <Plus size={15} />
               Create website
-            </button>
+            </Button>
           )}
         </div>
       )}
-      <WebsiteFormModal
-        site={modal}
-        defaultRoot={root}
-        phpVersions={php}
-        onClose={() => setModal(null)}
-        onSaved={(site) => {
-          save(site);
-          setModal(null);
-        }}
-      />
+      <WebsiteFormModal {...modalProps} />
       <ActionDialog
         dialog={dialog}
         onClose={() => setDialog(null)}
         onSubmit={() => dialog?.onSubmit?.()}
+      />
+      <Toast
+        message={toast?.message}
+        type={toast?.type}
+        onClose={() => setToast(null)}
       />
     </div>
   );

@@ -9,6 +9,7 @@ import {
   Server,
   ShieldCheck,
 } from "lucide-react";
+import { useTranslation } from "../../lib/i18n";
 
 function QuickAction({ icon: Icon, title, description, onClick }) {
   return (
@@ -58,19 +59,20 @@ function Check({ icon: Icon, name, description, status = "Waiting" }) {
 }
 
 export default function DashboardWorkspace({ onNavigate }) {
+  const { t } = useTranslation();
   return (
     <section className="grid gap-5 xl:grid-cols-[1.15fr_.85fr]">
       <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              Common tasks
+              {t("dashboard.commonTasks")}
             </p>
             <h3 className="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100">
-              Quick actions
+              {t("dashboard.quickActions")}
             </h3>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-              Start the next hosting operation from one place.
+              {t("dashboard.quickActionsDescription")}
             </p>
           </div>
           <BriefcaseBusiness size={20} className="text-slate-400" />
@@ -78,26 +80,26 @@ export default function DashboardWorkspace({ onNavigate }) {
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
           <QuickAction
             icon={FilePlus2}
-            title="Create website"
-            description="Add a domain and document root."
+            title={t("dashboard.createWebsite")}
+            description={t("dashboard.createWebsiteDescription")}
             onClick={() => onNavigate("/websites")}
           />
           <QuickAction
             icon={PackagePlus}
-            title="Install service"
-            description="Add PHP, a database, or a cache."
+            title={t("dashboard.installService")}
+            description={t("dashboard.installServiceDescription")}
             onClick={() => onNavigate("/services")}
           />
           <QuickAction
             icon={FolderOpen}
-            title="Open file manager"
-            description="Browse and manage server files."
+            title={t("dashboard.openFileManager")}
+            description={t("dashboard.openFileManagerDescription")}
             onClick={() => onNavigate("/file-manager")}
           />
           <QuickAction
             icon={KeyRound}
-            title="Review security"
-            description="Check access and session policy."
+            title={t("dashboard.reviewSecurity")}
+            description={t("dashboard.reviewSecurityDescription")}
             onClick={() => onNavigate("/settings")}
           />
         </div>
@@ -106,13 +108,13 @@ export default function DashboardWorkspace({ onNavigate }) {
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              Readiness
+              {t("dashboard.readiness")}
             </p>
             <h3 className="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100">
-              System checks
+              {t("dashboard.systemChecks")}
             </h3>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-              Core areas monitored by the control plane.
+              {t("dashboard.systemChecksDescription")}
             </p>
           </div>
           <ShieldCheck size={20} className="text-slate-400" />
@@ -120,20 +122,21 @@ export default function DashboardWorkspace({ onNavigate }) {
         <div className="mt-4">
           <Check
             icon={Server}
-            name="Host agent"
-            description="Connect a managed server to enable operations."
+            name={t("dashboard.hostAgent")}
+            description={t("dashboard.hostAgentDescription")}
+            status={t("dashboard.waiting")}
           />
           <Check
             icon={HardDrive}
-            name="Storage policy"
-            description="Disk and backup thresholds are ready."
-            status="Configured"
+            name={t("dashboard.storagePolicy")}
+            description={t("dashboard.storagePolicyDescription")}
+            status={t("dashboard.configured")}
           />
           <Check
             icon={ShieldCheck}
-            name="Security baseline"
-            description="Review authentication and network controls."
-            status="Review"
+            name={t("dashboard.securityBaseline")}
+            description={t("dashboard.securityBaselineDescription")}
+            status={t("dashboard.review")}
           />
         </div>
       </div>

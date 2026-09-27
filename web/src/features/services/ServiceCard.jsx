@@ -34,11 +34,13 @@ export default function ServiceCard({
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <span
-              className={`status-pill ${active ? "status-running" : capability ? "status-stopped" : installed?.status === "stopped" ? "status-stopped" : "status-missing"}`}
+              className={`status-pill ${active || installed?.status === "installed" ? "status-running" : capability ? "status-stopped" : installed?.status === "stopped" ? "status-stopped" : "status-missing"}`}
             >
               {capability ? (
                 <ExternalLink size={13} />
               ) : active ? (
+                <CheckCircle2 size={13} />
+              ) : installed?.status === "installed" ? (
                 <CheckCircle2 size={13} />
               ) : installed?.status === "stopped" ? (
                 <CircleStop size={13} />
@@ -51,7 +53,9 @@ export default function ServiceCard({
                   : "Managed feature"
                 : active
                   ? "Running"
-                  : installed?.status === "stopped"
+                  : installed?.status === "installed"
+                    ? "Installed"
+                    : installed?.status === "stopped"
                     ? "Stopped"
                     : "Not installed"}
             </span>

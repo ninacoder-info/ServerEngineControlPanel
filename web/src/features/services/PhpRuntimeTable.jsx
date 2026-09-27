@@ -26,6 +26,13 @@ export default function PhpRuntimeTable({
   const [menuVersion, setMenuVersion] = React.useState(null);
   const [copiedPath, setCopiedPath] = React.useState(null);
   const [uninstallVersion, setUninstallVersion] = React.useState(null);
+  React.useEffect(() => {
+    const closeMenu = (event) => {
+      if (!event.target.closest("[data-php-actions]")) setMenuVersion(null);
+    };
+    document.addEventListener("mousedown", closeMenu);
+    return () => document.removeEventListener("mousedown", closeMenu);
+  }, []);
 
   const copyPath = async (version, path) => {
     if (!path) return;
@@ -137,7 +144,7 @@ export default function PhpRuntimeTable({
                           <Settings2 size={14} />
                           Manage
                         </button>
-                        <div className="relative">
+                        <div className="relative" data-php-actions>
                           <button
                             type="button"
                             aria-label={`More actions for PHP ${runtime.version}`}

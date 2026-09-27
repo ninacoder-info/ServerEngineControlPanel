@@ -6,7 +6,11 @@ IFS=$'\n\t'
 # Docker is deliberately not used here; docker-compose.yml is the test harness.
 
 readonly INSTALLER_VERSION="0.1.0"
-readonly SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+readonly DEFAULT_RELEASE_URL="https://github.com/ninacoder-info/ServerEngineWebServer/releases/latest/download/server-engine-release.tar.gz"
+RELEASE_URL="${SE_RELEASE_URL:-$DEFAULT_RELEASE_URL}"
+ARTIFACT_DIR=""
+ARTIFACT_ARCHIVE=""
 PREFIX="/opt/server-engine"
 STATE_DIR="/var/lib/server-engine"
 LOG_DIR="/var/log/server-engine"
@@ -23,6 +27,7 @@ CERTBOT_ROOT=""
 LOCK_FILE="/run/lock/server-engine-install.lock"
 LOG_FILE="/var/log/server-engine-install.log"
 BACKUP_ROOT="/var/backups/server-engine"
+readonly MIN_RAM_MB="1024"
 RELEASE_ID="$(date -u +%Y%m%d%H%M%S)-$$"
 RELEASE_DIR=""
 OLD_RELEASE=""
@@ -46,6 +51,7 @@ Options:
   --web-port PORT         Panel port (default: 8888)
   --api-port PORT         Loopback API port (default: 8000)
   --api-host HOST         API bind address (default: 127.0.0.1)
+  --release-url URL       Prebuilt release bundle URL
   --install-system-deps  Install missing OS packages using apt/dnf/yum
   --no-service            Install and verify files without enabling systemd
   -y, --yes               Do not ask before replacing an existing release
@@ -80,6 +86,7 @@ parse_args() {
       --web-port) WEB_PORT="${2:?--web-port requires a port}"; shift 2;;
       --api-port) API_PORT="${2:?--api-port requires a port}"; shift 2;;
       --api-host) API_HOST="${2:?--api-host requires an address}"; shift 2;;
+      --release-url) RELEASE_URL="${2:?--release-url requires a URL}"; shift 2;;
       --install-system-deps) INSTALL_SYSTEM_DEPS="true"; shift;;
       --no-service) NO_SERVICE="true"; shift;;
       -y|--yes) YES="true"; shift;;
@@ -127,12 +134,18 @@ check_host() {
   case "$OS_ID" in
     ubuntu) version_ge "$OS_VERSION" "20.04" || die "Ubuntu 20.04+ is required";;
     debian) version_ge "$OS_VERSION" "11" || die "Debian 11+ is required";;
-    rocky|almalinux|rhel|fedora|centos|ol) version_ge "$OS_VERSION" "8" || die "RHEL-family 8+ is required";;
+    rocky|almalinux|rhel|fedora|ol) version_ge "$OS_VERSION" "8" || die "RHEL-family 8+ is required";;
+    centos) version_ge "$OS_VERSION" "9" || die "CentOS Stream 9+ is required; CentOS Linux and CentOS Stream 8 are unsupported";;
     *) die "unsupported Linux distribution: $OS_ID $OS_VERSION";;
   esac
-  [ "$(df -Pk "$(dirname "$PREFIX")" | awk 'NR==2 {print $4}')" -ge 2097152 ] || die "at least 2 GiB free space is required"
+  local free_kb; free_kb="$(df -Pk "$(dirname "$PREFIX")" | awk 'NR==2 {print $4}')"
+  if [ "${free_kb:-0}" -lt 2097152 ]; then
+    die "preflight failed: at least 2 GiB free disk space is required; detected ${free_kb:-0} KiB. Installation stopped."
+  fi
   local mem_mb; mem_mb="$(awk '/MemTotal:/ {print int($2/1024)}' /proc/meminfo)"
-  [ "$mem_mb" -ge 512 ] || die "at least 512 MiB RAM is required"
+  if [ "${mem_mb:-0}" -lt "$MIN_RAM_MB" ]; then
+    die "preflight failed: at least 1 GiB RAM is required; detected ${mem_mb:-0} MiB. Installation stopped."
+  fi
   port_is_free "$WEB_PORT" || die "web port $WEB_PORT is already in use"
   port_is_free "$API_PORT" || die "API port $API_PORT is already in use"
   log "Host: $OS_ID $OS_VERSION / $ARCH / ${mem_mb}MiB RAM"
@@ -141,6 +154,28 @@ check_host() {
 detect_package_manager() {
   if has apt-get; then PM="apt"; elif has dnf; then PM="dnf"; elif has yum; then PM="yum"; else die "apt-get, dnf, or yum is required"; fi
   log "Package manager: $PM"
+}
+
+has_source_tree() {
+  [ -f "$SOURCE_DIR/core/pyproject.toml" ] && [ -f "$SOURCE_DIR/web/server.mjs" ]
+}
+
+download_release_bundle() {
+  if has_source_tree; then return 0; fi
+  has curl || has wget || die "curl or wget is required to download the Server Engine release bundle"
+  ARTIFACT_DIR="$(mktemp -d /tmp/server-engine-release.XXXXXX)"
+  ARTIFACT_ARCHIVE="$ARTIFACT_DIR/release.tar.gz"
+  log "Downloading prebuilt Server Engine release from $RELEASE_URL"
+  if has curl; then
+    curl --fail --location --silent --show-error --retry 3 "$RELEASE_URL" -o "$ARTIFACT_ARCHIVE" || die "unable to download the release bundle"
+  else
+    wget --no-verbose --tries=3 -O "$ARTIFACT_ARCHIVE" "$RELEASE_URL" || die "unable to download the release bundle"
+  fi
+  tar -xzf "$ARTIFACT_ARCHIVE" -C "$ARTIFACT_DIR" || die "unable to extract the release bundle"
+  local extracted
+  extracted="$(find "$ARTIFACT_DIR" -mindepth 1 -maxdepth 4 -type f -path '*/core/pyproject.toml' -printf '%h/..\n' | head -n1)"
+  [ -n "$extracted" ] && [ -f "$extracted/web/dist/index.html" ] || die "release bundle does not contain a production web build"
+  SOURCE_DIR="$(cd -- "$extracted" && pwd)"
 }
 
 install_system_dependencies() {
@@ -195,11 +230,18 @@ create_release() {
   install -d -m 0755 "$RELEASE_DIR" "$PREFIX/releases" "$STATE_DIR" "$LOG_DIR" "$BACKUP_ROOT" "$WEB_ROOT"
   cp -a "$SOURCE_DIR/core" "$RELEASE_DIR/core"
   cp -a "$SOURCE_DIR/web" "$RELEASE_DIR/web"
-  rm -rf "$RELEASE_DIR/web/node_modules" "$RELEASE_DIR/web/dist" "$RELEASE_DIR/core/.venv"
+  rm -rf "$RELEASE_DIR/web/node_modules" "$RELEASE_DIR/core/.venv"
   "$PYTHON" -m venv "$RELEASE_DIR/core/.venv"
   "$RELEASE_DIR/core/.venv/bin/python" -m pip install --upgrade pip
   "$RELEASE_DIR/core/.venv/bin/pip" install --no-cache-dir "$RELEASE_DIR/core"
-  (cd "$RELEASE_DIR/web" && npm install --ignore-scripts && npm run build)
+  if [ ! -f "$RELEASE_DIR/web/dist/index.html" ]; then
+    has npm || die "npm is required when installing from a source checkout"
+    (cd "$RELEASE_DIR/web" && npm install --ignore-scripts && npm run build)
+  fi
+  # The installed panel serves the compiled frontend only. Do not ship React
+  # source files, Vite configuration, or development dependencies in a release.
+  rm -rf "$RELEASE_DIR/web/src" "$RELEASE_DIR/web/node_modules" "$RELEASE_DIR/web/package.json" "$RELEASE_DIR/web/package-lock.json" "$RELEASE_DIR/web/vite.config.js" "$RELEASE_DIR/web/Dockerfile" "$RELEASE_DIR/web/.dockerignore" "$RELEASE_DIR/web/index.html"
+  [ -f "$RELEASE_DIR/web/dist/index.html" ] || die "production web build is missing"
   chmod -R u=rwX,go=rX "$RELEASE_DIR"
 }
 
@@ -319,7 +361,9 @@ main() {
   exec 9>"$LOCK_FILE"; flock -n 9 || die "another installer is running"
   check_host
   detect_package_manager
+  if ! has_source_tree; then INSTALL_SYSTEM_DEPS="true"; fi
   install_system_dependencies
+  download_release_bundle
   detect_runtimes
   check_existing_state
   create_release

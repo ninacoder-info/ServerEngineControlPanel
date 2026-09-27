@@ -42,6 +42,11 @@ const initialMailboxes = [
     activity: "Sep 24",
   },
 ];
+const initialForwarders = [
+  { id: 1, source: "sales@example.com", destination: "sales-team@example.com", mode: "Deliver", status: "Active" },
+  { id: 2, source: "support@example.com", destination: "helpdesk@example.net", mode: "Deliver", status: "Active" },
+  { id: 3, source: "all@example.com", destination: "archive@example.com", mode: "Copy", status: "Active" },
+];
 function Badge({ children, tone = "green" }) {
   return (
     <span
@@ -51,11 +56,42 @@ function Badge({ children, tone = "green" }) {
     </span>
   );
 }
+
+function ForwarderModal({ forwarder, onClose, onSave }) {
+  const editing = Boolean(forwarder);
+  const [form, setForm] = React.useState(forwarder || { source: "", destination: "", mode: "Deliver", status: "Active" });
+  const set = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/60 p-4 sm:p-8">
+      <form className="w-full max-w-xl rounded-xl bg-white p-6 shadow-xl dark:bg-slate-900" onSubmit={(event) => { event.preventDefault(); onSave({ ...form, id: forwarder?.id || Date.now() }); }}>
+        <div className="flex items-start justify-between gap-4">
+          <div><p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Mail routing</p><h2 className="mt-1 text-xl font-semibold text-slate-950 dark:text-white">{editing ? "Edit forwarder" : "Create forwarder"}</h2><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Route messages from one address to another destination.</p></div>
+          <button type="button" aria-label="Close forwarder form" className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800" onClick={onClose}><X size={17} /></button>
+        </div>
+        <div className="mt-6 space-y-4">
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Source address<input required className="mt-2 w-full rounded-md border border-slate-300 bg-transparent px-3 py-2.5 text-sm outline-none focus:border-blue-500 dark:border-slate-700 dark:text-slate-100" value={form.source} onChange={(event) => set("source", event.target.value)} placeholder="sales@example.com" /></label>
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Destination address<input required type="email" className="mt-2 w-full rounded-md border border-slate-300 bg-transparent px-3 py-2.5 text-sm outline-none focus:border-blue-500 dark:border-slate-700 dark:text-slate-100" value={form.destination} onChange={(event) => set("destination", event.target.value)} placeholder="team@example.net" /></label>
+          <div className="grid gap-4 sm:grid-cols-2"><label className="text-sm font-medium text-slate-700 dark:text-slate-300">Routing behavior<select className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" value={form.mode} onChange={(event) => set("mode", event.target.value)}><option>Deliver</option><option>Copy</option><option>Reject</option></select></label><label className="text-sm font-medium text-slate-700 dark:text-slate-300">Status<select className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" value={form.status} onChange={(event) => set("status", event.target.value)}><option>Active</option><option>Paused</option></select></label></div>
+        </div>
+        <div className="mt-6 flex justify-end gap-3 border-t border-slate-200 pt-4 dark:border-slate-800"><button type="button" className="cursor-pointer rounded-md px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800" onClick={onClose}>Cancel</button><button type="submit" className="cursor-pointer rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">{editing ? "Save forwarder" : "Create forwarder"}</button></div>
+      </form>
+    </div>
+  );
+}
+
+function ForwardersPanel({ forwarders, onCreate, onEdit, onDelete }) {
+  return <>
+    <div className="flex flex-col gap-3 border-b border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between dark:border-slate-800"><div><h2 className="font-semibold text-slate-950 dark:text-white">Forwarding rules</h2><p className="mt-1 text-sm text-slate-500">Route, copy, or pause mail delivery for hosted addresses.</p></div><button type="button" onClick={onCreate} className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"><Plus size={15} />Create forwarder</button></div>
+    <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm"><thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-950/40"><tr><th className="px-5 py-3">Source</th><th className="px-5 py-3">Destination</th><th className="px-5 py-3">Behavior</th><th className="px-5 py-3">Status</th><th className="px-5 py-3 text-right">Actions</th></tr></thead><tbody className="divide-y divide-slate-100 dark:divide-slate-800">{forwarders.map((item) => <tr key={item.id}><td className="px-5 py-4 font-medium text-slate-900 dark:text-slate-100">{item.source}</td><td className="px-5 py-4 text-slate-600 dark:text-slate-400">{item.destination}</td><td className="px-5 py-4 text-slate-600 dark:text-slate-400">{item.mode}</td><td className="px-5 py-4"><Badge tone={item.status === "Active" ? "green" : "amber"}>{item.status}</Badge></td><td className="px-5 py-4 text-right"><div className="flex justify-end gap-3"><button type="button" className="cursor-pointer text-sm font-semibold text-blue-600 dark:text-blue-400" onClick={() => onEdit(item)}>Configure</button><button type="button" className="cursor-pointer text-sm text-rose-600 dark:text-rose-400" onClick={() => onDelete(item.id)}>Delete</button></div></td></tr>)}</tbody></table></div>
+  </>;
+}
 export default function EmailPage() {
   const [tab, setTab] = React.useState("Mailboxes");
   const [mailboxes, setMailboxes] = React.useState(initialMailboxes);
+  const [forwarders, setForwarders] = React.useState(initialForwarders);
   const [query, setQuery] = React.useState("");
   const [modal, setModal] = React.useState(false);
+  const [forwarderModal, setForwarderModal] = React.useState(null);
   const [local, setLocal] = React.useState("");
   const filtered = mailboxes.filter((x) =>
     x.address.includes(query.toLowerCase()),
@@ -74,6 +110,12 @@ export default function EmailPage() {
     ]);
     setLocal("");
     setModal(false);
+  };
+  const saveForwarder = (forwarder) => {
+    setForwarders((items) => items.some((item) => item.id === forwarder.id)
+      ? items.map((item) => item.id === forwarder.id ? forwarder : item)
+      : [...items, forwarder]);
+    setForwarderModal(null);
   };
   return (
     <div className="space-y-8">
@@ -226,21 +268,27 @@ export default function EmailPage() {
             </div>
           </>
         )}
-        {tab !== "Mailboxes" && (
-          <div className="p-8 text-center">
-            <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-slate-100 text-slate-500 dark:bg-slate-800">
-              <Mail size={22} />
+        {tab === "Forwarders" && (
+          <ForwardersPanel
+            forwarders={forwarders}
+            onCreate={() => setForwarderModal({})}
+            onEdit={setForwarderModal}
+            onDelete={(id) => setForwarders((items) => items.filter((item) => item.id !== id))}
+          />
+        )}
+        {!['Mailboxes', 'Forwarders'].includes(tab) && (
+          <div className="space-y-5 p-5">
+            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+              <div>
+                <h2 className="font-semibold text-slate-950 dark:text-white">{tab} configuration</h2>
+                <p className="mt-1 text-sm text-slate-500">Manage {tab.toLowerCase()} behavior for hosted domains.</p>
+              </div>
+              <button type="button" className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"><Plus size={15} />Create {tab === "Autoresponders" ? "autoresponder" : "rule"}</button>
             </div>
-            <h2 className="mt-4 font-semibold text-slate-950 dark:text-white">
-              {tab}
-            </h2>
-            <p className="mx-auto mt-2 max-w-md text-sm text-slate-500">
-              Configure {tab.toLowerCase()} for your domains. The workspace is
-              ready for mailbox and mail-routing APIs.
-            </p>
-            <button className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-blue-600">
-              Open configuration <ChevronRight size={15} />
-            </button>
+            <div className="grid gap-3 sm:grid-cols-3">
+              {["Domain scope", "Current status", "Last updated"].map((label, index) => <div key={label} className="rounded-md bg-slate-50 p-4 dark:bg-slate-950/60"><p className="text-xs text-slate-500 dark:text-slate-400">{label}</p><p className="mt-2 text-sm font-semibold text-slate-800 dark:text-slate-200">{index === 0 ? "example.com" : index === 1 ? "Ready" : "Just now"}</p></div>)}
+            </div>
+            <div className="rounded-md border border-slate-200 p-4 dark:border-slate-800"><div className="flex items-start gap-3"><ShieldCheck size={18} className="mt-0.5 text-emerald-500" /><div><p className="text-sm font-medium text-slate-800 dark:text-slate-200">{tab === "Deliverability" ? "Mail authentication is healthy" : `${tab} are ready to configure`}</p><p className="mt-1 text-sm text-slate-500">Use the action above to add a new configuration, then manage existing entries here.</p></div></div></div>
           </div>
         )}
       </section>
@@ -311,6 +359,13 @@ export default function EmailPage() {
             </div>
           </div>
         </div>
+      )}
+      {forwarderModal && (
+        <ForwarderModal
+          forwarder={forwarderModal.id ? forwarderModal : null}
+          onClose={() => setForwarderModal(null)}
+          onSave={saveForwarder}
+        />
       )}
     </div>
   );

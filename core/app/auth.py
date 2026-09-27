@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import secrets
 import sqlite3
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -38,6 +39,21 @@ class AuthStore:
                     user_id INTEGER NOT NULL REFERENCES users(id),
                     expires_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS passkeys (
+                    credential_id TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    public_key TEXT NOT NULL,
+                    sign_count INTEGER NOT NULL DEFAULT 0,
+                    transports TEXT NOT NULL DEFAULT '[]',
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS webauthn_challenges (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    purpose TEXT NOT NULL,
+                    challenge TEXT NOT NULL,
+                    expires_at TEXT NOT NULL
+                );
             """)
             if db.execute("SELECT 1 FROM users LIMIT 1").fetchone() is None:
                 db.execute("INSERT INTO users(username, password_hash, created_at) VALUES (?, ?, ?)", (self.bootstrap_user, hash_password(self.bootstrap_password), now().isoformat()))
@@ -54,6 +70,14 @@ class AuthStore:
             db.execute("INSERT INTO sessions(token_hash, user_id, expires_at) VALUES (?, ?, ?)", (token_hash(token), user_id, expires.isoformat()))
         return token
 
+    def create_session_for_user(self, user_id: int) -> str:
+        return self.create_session(user_id)
+
+    def user_by_id(self, user_id: int):
+        with self.connection() as db:
+            row = db.execute("SELECT id, username FROM users WHERE id = ?", (user_id,)).fetchone()
+        return dict(row) if row else None
+
     def user_for_session(self, token: str | None):
         if not token:
             return None
@@ -65,6 +89,46 @@ class AuthStore:
         if token:
             with self.connection() as db:
                 db.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash(token),))
+
+    def save_challenge(self, purpose: str, challenge: str, user_id: int | None = None):
+        expires = now() + timedelta(minutes=2)
+        with self.connection() as db:
+            db.execute("DELETE FROM webauthn_challenges WHERE expires_at <= ? OR purpose = ?", (now().isoformat(), purpose))
+            db.execute(
+                "INSERT INTO webauthn_challenges(user_id, purpose, challenge, expires_at) VALUES (?, ?, ?, ?)",
+                (user_id, purpose, challenge, expires.isoformat()),
+            )
+
+    def consume_challenge(self, purpose: str):
+        with self.connection() as db:
+            row = db.execute(
+                "SELECT id, user_id, challenge FROM webauthn_challenges WHERE purpose = ? AND expires_at > ? ORDER BY id DESC LIMIT 1",
+                (purpose, now().isoformat()),
+            ).fetchone()
+            if row:
+                db.execute("DELETE FROM webauthn_challenges WHERE id = ?", (row["id"],))
+        return dict(row) if row else None
+
+    def save_passkey(self, credential_id: str, user_id: int, public_key: str, sign_count: int, transports: list[str]):
+        with self.connection() as db:
+            db.execute(
+                "INSERT OR REPLACE INTO passkeys(credential_id, user_id, public_key, sign_count, transports, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (credential_id, user_id, public_key, sign_count, json.dumps(transports), now().isoformat()),
+            )
+
+    def passkeys_for_user(self, user_id: int):
+        with self.connection() as db:
+            rows = db.execute("SELECT credential_id, created_at, transports FROM passkeys WHERE user_id = ? ORDER BY created_at DESC", (user_id,)).fetchall()
+        return [{**dict(row), "transports": json.loads(row["transports"] or "[]")} for row in rows]
+
+    def passkey(self, credential_id: str):
+        with self.connection() as db:
+            row = db.execute("SELECT * FROM passkeys WHERE credential_id = ?", (credential_id,)).fetchone()
+        return dict(row) if row else None
+
+    def update_passkey_counter(self, credential_id: str, sign_count: int):
+        with self.connection() as db:
+            db.execute("UPDATE passkeys SET sign_count = ? WHERE credential_id = ?", (sign_count, credential_id))
 
 
 def now():

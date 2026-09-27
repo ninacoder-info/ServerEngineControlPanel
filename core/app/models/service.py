@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 class ServiceVersion(BaseModel):
     version: str
-    channel: Literal["lts", "stable", "mainline", "preview", "security"]
+    channel: Literal["lts", "stable", "mainline", "preview", "security", "legacy"]
     supported: bool = True
 
 
@@ -30,7 +30,7 @@ class InstalledService(BaseModel):
     id: str
     name: str
     version: str | None = None
-    status: Literal["running", "stopped", "not-installed", "unknown"]
+    status: Literal["running", "stopped", "installed", "not-installed", "unknown"]
     running_since: datetime | None = None
     port: int | None = None
     managed: bool = False

@@ -1,6 +1,7 @@
 import React from "react";
 import { Cpu, HardDrive, MemoryStick, Network } from "lucide-react";
 import { apiRequest } from "../../lib/api";
+import { useTranslation } from "../../lib/i18n";
 
 function formatBytes(value) {
   if (!Number.isFinite(value)) return "—";
@@ -20,7 +21,8 @@ function Sparkline({
   color = "text-blue-500",
   fill = "fill-blue-500/10",
 }) {
-  const points = values.length > 1 ? values : [0, ...values];
+  const safeValues = values.filter((value) => Number.isFinite(value));
+  const points = safeValues.length > 1 ? safeValues : safeValues.length === 1 ? [0, safeValues[0]] : [0, 0];
   const max = Math.max(...points, 1);
   const min = Math.min(...points, 0);
   const range = max - min || 1;
@@ -54,6 +56,7 @@ function Sparkline({
 }
 
 function Metric({ icon: Icon, label, value, detail, values, color, fill }) {
+  const { t } = useTranslation();
   return (
     <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <div className="flex items-center justify-between">
@@ -64,7 +67,7 @@ function Metric({ icon: Icon, label, value, detail, values, color, fill }) {
           {label}
         </div>
         <span className="text-xs font-medium text-slate-400 dark:text-slate-500">
-          Live · 5 min
+          {t("dashboard.liveFiveMinutes")}
         </span>
       </div>
       <div className="mt-5 flex items-end justify-between gap-3">
@@ -85,6 +88,7 @@ function Metric({ icon: Icon, label, value, detail, values, color, fill }) {
 }
 
 export default function ResourceMetricCards() {
+  const { t } = useTranslation();
   const [metrics, setMetrics] = React.useState(null);
   const [history, setHistory] = React.useState({
     cpu: [],
@@ -131,7 +135,7 @@ export default function ResourceMetricCards() {
         icon={Cpu}
         label="CPU"
         value={cpu ? `${cpu.percent.toFixed(1)}%` : "—"}
-        detail={cpu ? `Load ${cpu.load.toFixed(2)}` : "Collecting sample…"}
+        detail={cpu ? `${t("dashboard.load")} ${cpu.load.toFixed(2)}` : t("dashboard.collectingSample")}
         values={history.cpu}
         color="text-blue-500"
         fill="fill-blue-500/10"
@@ -143,7 +147,7 @@ export default function ResourceMetricCards() {
         detail={
           memory
             ? `${formatBytes(memory.used)} of ${formatBytes(memory.total)}`
-            : "Collecting sample…"
+            : t("dashboard.collectingSample")
         }
         values={history.memory}
         color="text-violet-500"
@@ -156,7 +160,7 @@ export default function ResourceMetricCards() {
         detail={
           disk
             ? `${formatBytes(disk.used)} of ${formatBytes(disk.total)}`
-            : "Collecting sample…"
+            : t("dashboard.collectingSample")
         }
         values={history.disk}
         color="text-amber-500"
@@ -168,8 +172,8 @@ export default function ResourceMetricCards() {
         value={network ? `↓ ${formatBytes(network.download)}/s` : "—"}
         detail={
           network
-            ? `↑ ${formatBytes(network.upload)}/s download / upload`
-            : "Collecting sample…"
+            ? `↑ ${formatBytes(network.upload)}/s ${t("dashboard.downloadUpload")}`
+            : t("dashboard.collectingSample")
         }
         values={history.network}
         color="text-emerald-500"
