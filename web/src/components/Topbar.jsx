@@ -2,7 +2,9 @@ import React from "react";
 import {
   Bell,
   CheckCircle2,
+  Check,
   Clock3,
+  Copy,
   ExternalLink,
   HelpCircle,
   LogOut,
@@ -55,11 +57,14 @@ export default function Topbar({
   );
   const [terminalSessions, setTerminalSessions] = React.useState(0);
   const [operationToast, setOperationToast] = React.useState(null);
+  const [copiedJobId, setCopiedJobId] = React.useState(null);
   const jobsInitialized = React.useRef(false);
   const previousJobStatuses = React.useRef(new Map());
   const jobsRef = React.useRef(null);
   const accountRef = React.useRef(null);
   const languageRef = React.useRef(null);
+  const jobOutputRef = React.useRef(null);
+  const jobOutputFollowRef = React.useRef(true);
   React.useEffect(() => {
     const closeMenus = (event) => {
       if (!jobsRef.current?.contains(event.target)) setJobsOpen(false);
@@ -84,35 +89,57 @@ export default function Topbar({
   }, []);
   React.useEffect(() => {
     let alive = true;
-    const load = () =>
-      apiRequest("/api/v1/jobs")
-        .then((response) => (response.ok ? response.json() : []))
-        .then((items) => {
-          if (!alive) return;
-          if (jobsInitialized.current) {
-            items.forEach((job) => {
-              const previous = previousJobStatuses.current.get(job.id);
-              const finished = ["succeeded", "failed", "cancelled"].includes(job.status);
-              if ((!previous || previous !== job.status) && finished) {
-                setOperationToast({
-                  type: job.status === "succeeded" ? "success" : "error",
-                  message: job.message || `${job.type} ${job.status}.`,
-                });
-              }
-            });
-          }
-          previousJobStatuses.current = new Map(
-            items.map((job) => [job.id, job.status]),
-          );
-          jobsInitialized.current = true;
-          setJobs(items);
-        })
-        .catch(() => {});
-    load();
-    const timer = setInterval(load, 3000);
+    let socket;
+    let reconnectTimer;
+    const applySnapshot = (items) => {
+      if (!alive) return;
+      previousJobStatuses.current = new Map(items.map((job) => [job.id, job.status]));
+      jobsInitialized.current = true;
+      setJobs(items);
+    };
+    const applyJob = (job) => {
+      if (!alive) return;
+      const previous = previousJobStatuses.current.get(job.id);
+      const finished = ["succeeded", "failed", "cancelled"].includes(job.status);
+      const statusChanged = previous !== job.status;
+      if (jobsInitialized.current && previous !== job.status && finished) {
+        setOperationToast({
+          type: job.status === "succeeded" ? "success" : "error",
+          message: job.message || `${job.type} ${job.status}.`,
+        });
+      }
+      previousJobStatuses.current.set(job.id, job.status);
+      setJobs((current) => {
+        const next = current.filter((item) => item.id !== job.id);
+        next.unshift(job);
+        return next;
+      });
+      if (jobsInitialized.current && statusChanged) {
+        window.dispatchEvent(new CustomEvent("serverengine:jobs-updated"));
+      }
+      jobsInitialized.current = true;
+    };
+    const connect = () => {
+      if (!alive) return;
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      socket = new WebSocket(`${protocol}//${window.location.host}/api/v1/jobs/ws`);
+      socket.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          if (message.type === "snapshot") applySnapshot(message.jobs || []);
+          if (message.type === "job" && message.job) applyJob(message.job);
+        } catch {}
+      };
+      socket.onclose = () => {
+        if (alive) reconnectTimer = window.setTimeout(connect, 2000);
+      };
+    };
+    const connectTimer = window.setTimeout(connect, 0);
     return () => {
       alive = false;
-      clearInterval(timer);
+      window.clearTimeout(connectTimer);
+      window.clearTimeout(reconnectTimer);
+      socket?.close();
     };
   }, []);
   const cancelJob = async (job) => {
@@ -135,6 +162,29 @@ export default function Topbar({
     (job) => job.status === "queued" || job.status === "running",
   ).length;
   const selectedJob = jobs.find((job) => job.id === selectedJobId);
+  const copyJobOutput = async (job) => {
+    const details = [
+      job.type,
+      `${job.status} · started ${formatPanelDate(job.created_at)}`,
+      job.message,
+      ...(job.log || []),
+    ].filter(Boolean).join("\n");
+    try {
+      await navigator.clipboard.writeText(details);
+      setCopiedJobId(job.id);
+      window.setTimeout(() => setCopiedJobId((current) => current === job.id ? null : current), 1800);
+    } catch {
+      setOperationToast({ type: "error", message: "Unable to copy the job output." });
+    }
+  };
+  React.useEffect(() => {
+    jobOutputFollowRef.current = true;
+  }, [selectedJobId]);
+  React.useLayoutEffect(() => {
+    const output = jobOutputRef.current;
+    if (!output || !jobOutputFollowRef.current) return;
+    output.scrollTop = output.scrollHeight;
+  }, [selectedJob?.log?.length]);
   const username = user?.username || "Administrator";
   const initial = username[0]?.toUpperCase() || "A";
   const selectedLanguage = languages.find((item) => item.id === language) || languages[0];
@@ -450,11 +500,31 @@ export default function Topbar({
                 </p>
               )}
               <div className="overflow-hidden rounded-lg bg-slate-950 shadow-inner">
-                <div className="flex items-center gap-2 border-b border-slate-800 px-4 py-2 text-xs text-slate-500">
-                  <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                  Job output
+                <div className="flex items-center justify-between gap-3 border-b border-slate-800 px-4 py-2 text-xs text-slate-500">
+                  <div className="flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                    Job output
+                  </div>
+                  <button
+                    type="button"
+                    className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-800 hover:text-slate-100"
+                    aria-label="Copy job output"
+                    title="Copy job output"
+                    onClick={() => copyJobOutput(selectedJob)}
+                  >
+                    {copiedJobId === selectedJob.id ? <Check size={15} /> : <Copy size={15} />}
+                  </button>
                 </div>
-                <pre className="max-h-[60vh] min-h-56 overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-xs leading-5 text-slate-300">
+                <pre
+                  ref={jobOutputRef}
+                  onScroll={(event) => {
+                    const output = event.currentTarget;
+                    const distanceFromBottom =
+                      output.scrollHeight - output.scrollTop - output.clientHeight;
+                    jobOutputFollowRef.current = distanceFromBottom <= 24;
+                  }}
+                  className="max-h-[60vh] min-h-56 overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-xs leading-5 text-slate-300"
+                >
                   {selectedJob.log?.length
                     ? selectedJob.log.join("\n")
                     : "Waiting for job output…"}

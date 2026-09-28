@@ -1,8 +1,10 @@
+import asyncio
 from datetime import datetime, timezone
 import json
 import os
 import pwd
 import platform
+import secrets
 import tarfile
 import urllib.error
 import urllib.request
@@ -17,6 +19,7 @@ from threading import Event, Thread
 from threading import Lock
 
 from app.models.job import JobSummary
+from app.services.service_catalog import apache_source_for, bind9_source_for, certbot_source_for, caddy_source_for, clamav_source_for, dovecot_source_for, ffmpeg_source_for, git_source_for, haproxy_source_for, imagemagick_source_for, lynis_source_for, mariadb_source_for, memcached_source_for, mongodb_source_for, mysql_release_for, nginx_source_for, opensearch_source_for, openlitespeed_source_for, postfix_source_for, powerdns_source_for, postgresql_source_for, python_asset_for, rabbitmq_source_for, redis_source_for, refresh_service_versions, rspamd_source_for, ruby_source_for, stalwart_source_for, supervisor_source_for, unbound_source_for, valkey_source_for, vsftpd_source_for, wpcli_source_for
 from app.services.service_runtime import PHP_BASELINE_MODULES, SERVICE_PACKAGES, binary_path, enable_php_baseline_extensions, ensure_composer_cache, ensure_nginx_layout, ensure_node_runtime, ensure_php_fpm_layout, nginx_paths, package_for, php_cli_path, php_fpm_paths, service_root
 
 
@@ -30,13 +33,34 @@ class JobStore:
     def __init__(self):
         self._jobs: dict[str, JobSummary] = {}
         self._cancel_events: dict[str, Event] = {}
+        self._subscribers: set[tuple[asyncio.AbstractEventLoop, asyncio.Queue]] = set()
         self._lock = Lock()
+
+    def snapshot(self) -> list[dict]:
+        with self._lock:
+            return [job.model_dump(mode="json") for job in sorted(self._jobs.values(), key=lambda item: item.created_at, reverse=True)]
+
+    def subscribe(self, loop: asyncio.AbstractEventLoop, queue: asyncio.Queue):
+        with self._lock:
+            self._subscribers.add((loop, queue))
+
+    def unsubscribe(self, loop: asyncio.AbstractEventLoop, queue: asyncio.Queue):
+        with self._lock:
+            self._subscribers.discard((loop, queue))
+
+    def _broadcast(self, job: JobSummary | None = None):
+        payload = {"type": "job", "job": job.model_dump(mode="json")} if job else {"type": "snapshot", "jobs": self.snapshot()}
+        with self._lock:
+            subscribers = list(self._subscribers)
+        for loop, queue in subscribers:
+            loop.call_soon_threadsafe(queue.put_nowait, payload)
 
     def create(self, job_id: str, job_type: str) -> JobSummary:
         job = JobSummary(id=job_id, type=job_type, status="queued", created_at=datetime.now(timezone.utc))
         with self._lock:
             self._jobs[job_id] = job
             self._cancel_events[job_id] = Event()
+        self._broadcast(job)
         return job
 
     def cancel(self, job_id: str) -> JobSummary | None:
@@ -55,7 +79,8 @@ class JobStore:
                 "updated_at": datetime.now(timezone.utc),
             })
             self._jobs[job_id] = cancelled
-            return cancelled
+        self._broadcast(cancelled)
+        return cancelled
 
     def _is_cancelled(self, job_id: str) -> bool:
         with self._lock:
@@ -172,6 +197,9 @@ class JobStore:
             self._update(job_id, status="failed", message=f"No service controller exists for {service_id} on this host.")
             return
         try:
+            if service_id == "nginx" and action == "start" and _managed_process_alive(nginx["pid"]):
+                self._update(job_id, status="succeeded", message="Nginx is already running.", log=[])
+                return
             if service_id == "nginx" and action in {"start", "restart"}:
                 ensure_nginx_layout()
                 check = subprocess.run([str(nginx["binary"]), "-p", str(nginx["root"]), "-c", str(nginx["config"]), "-t"], capture_output=True, text=True, check=False)
@@ -702,13 +730,14 @@ class JobStore:
             pwd.getpwnam("serverengine")
             return "serverengine"
         except KeyError:
-            useradd = shutil.which("useradd")
-            if not useradd:
-                raise RuntimeError("The isolated MySQL service account serverengine is missing and useradd is unavailable")
-            result = subprocess.run([useradd, "--system", "--home-dir", "/nonexistent", "--shell", "/usr/sbin/nologin", "serverengine"], capture_output=True, text=True, check=False)
-            if result.returncode != 0 and "already exists" not in (result.stderr or ""):
-                raise RuntimeError("Unable to create the isolated MySQL service account: " + (result.stderr or result.stdout).strip())
-            return "serverengine"
+            # Never create a host user as a side effect of installing a
+            # service. The release installer creates serverengine during
+            # bootstrap; development containers may not have it, so use the
+            # current process account for the isolated data directory.
+            try:
+                return pwd.getpwuid(os.geteuid()).pw_name
+            except (KeyError, OSError) as error:
+                raise RuntimeError("No usable service account is available for the isolated database") from error
 
     def _ensure_php_package_source(self):
         os_release = Path("/etc/os-release").read_text(errors="replace") if Path("/etc/os-release").exists() else ""
@@ -807,6 +836,14 @@ class JobStore:
         self._stop_process_by_binary(binary, pid_file)
 
     def _update(self, job_id: str, **changes):
+        message = changes.get("message")
+        if isinstance(message, str) and "HTTP Error 404" in message:
+            changes["message"] = (
+                "The selected release archive is not published for this host or architecture. "
+                "Refresh compatible versions and choose another release."
+            )
+        elif isinstance(message, str) and "HTTP Error 403" in message:
+            changes["message"] = "The upstream provider refused the download. Refresh compatible versions and try again."
         with self._lock:
             current = self._jobs[job_id]
             if current.status == "cancelled" and changes.get("status") != "cancelled":
@@ -822,7 +859,9 @@ class JobStore:
                         if existing[-size:] == incoming[:size]:
                             overlap = size
                     changes["log"] = existing + incoming[overlap:]
-            self._jobs[job_id] = current.model_copy(update={"updated_at": datetime.now(timezone.utc), **changes})
+            updated = current.model_copy(update={"updated_at": datetime.now(timezone.utc), **changes})
+            self._jobs[job_id] = updated
+        self._broadcast(updated)
 
     def _run_install(self, job_id: str, service_id: str, requested_version: str):
         self._run_isolated_package(job_id, service_id, requested_version)
@@ -839,12 +878,164 @@ class JobStore:
         node.write_text(f"#!/bin/sh\nexport LD_LIBRARY_PATH=\"{paths}:$LD_LIBRARY_PATH\"\nexec \"{real_node}\" \"$@\"\n")
         node.chmod(0o755)
 
+    def _ensure_source_build_dependencies(self, job_id: str, service_id: str):
+        """Install only the build prerequisites needed by the selected source service."""
+        base = {
+            "build-essential", "cmake", "pkg-config", "libssl-dev", "zlib1g-dev",
+        }
+        dependencies = {
+            "apache": base | {"automake", "libexpat1-dev", "libnghttp2-dev", "libpcre3-dev", "libpcre2-dev", "perl"},
+            "stalwart": base | {"cargo", "rustc"},
+            "mongodb": base | {"python3", "libcurl4-openssl-dev", "liblzma-dev"},
+            "opensearch": {"openjdk-21-jdk-headless"},
+            "rspamd": base | {"libglib2.0-dev", "libgmime-3.0-dev", "liblua5.4-dev", "libsodium-dev", "libicu-dev", "libevent-dev", "libpcre2-dev", "libcurl4-openssl-dev", "libzstd-dev"},
+            "bind9": base | {"libuv1-dev", "libjson-c-dev", "libidn2-dev", "libnghttp2-dev", "libcap-dev"},
+            "unbound": base | {"libexpat1-dev"},
+            "clamav": base | {"cargo", "rustc", "libcurl4-openssl-dev", "libjson-c-dev", "libxml2-dev", "libncurses-dev", "libpcre2-dev"},
+            "postfix": base,
+            "dovecot": base | {"autoconf", "automake", "libtool", "gettext", "libcap-dev", "libpam0g-dev"},
+        }.get(service_id)
+        if not dependencies:
+            return
+        if os.geteuid() != 0:
+            raise RuntimeError(f"Installing {service_id} requires root privileges to prepare its isolated source build dependencies.")
+        apt = shutil.which("apt-get")
+        dnf = shutil.which("dnf")
+        yum = shutil.which("yum")
+        if apt:
+            packages = sorted(dependencies)
+            self._update(job_id, progress=1, message=f"Preparing build dependencies for {service_id}…", log=["$ apt-get install " + " ".join(packages)])
+            update = subprocess.run([apt, "update"], capture_output=True, text=True, check=False)
+            if update.returncode != 0:
+                raise RuntimeError((update.stderr or update.stdout).strip() or f"Unable to refresh APT metadata for {service_id}")
+            install = subprocess.run([apt, "install", "-y", *packages], capture_output=True, text=True, check=False)
+        elif dnf or yum:
+            manager = dnf or yum
+            package_map = {
+                "build-essential": "gcc gcc-c++ make", "libssl-dev": "openssl-devel", "zlib1g-dev": "zlib-devel",
+                "pkg-config": "pkgconf", "libexpat1-dev": "expat-devel", "libcurl4-openssl-dev": "libcurl-devel",
+                "libjson-c-dev": "json-c-devel", "libxml2-dev": "libxml2-devel", "libncurses-dev": "ncurses-devel",
+                "libpcre2-dev": "pcre2-devel", "libpam0g-dev": "pam-devel", "libcap-dev": "libcap-devel",
+                "libpcre3-dev": "pcre-devel",
+                "libglib2.0-dev": "glib2-devel", "libgmime-3.0-dev": "gmime30-devel", "liblua5.4-dev": "lua-devel",
+                "libsodium-dev": "libsodium-devel", "libicu-dev": "libicu-devel", "libevent-dev": "libevent-devel",
+                "libzstd-dev": "libzstd-devel", "liblzma-dev": "xz-devel", "libuv1-dev": "libuv-devel",
+                "libidn2-dev": "libidn2-devel", "libnghttp2-dev": "libnghttp2-devel", "openjdk-21-jdk-headless": "java-21-openjdk-devel",
+            }
+            packages = sorted({item for package in dependencies for item in package_map.get(package, package).split()})
+            self._update(job_id, progress=1, message=f"Preparing build dependencies for {service_id}…", log=[f"$ {manager} install -y {' '.join(packages)}"])
+            install = subprocess.run([manager, "install", "-y", *packages], capture_output=True, text=True, check=False)
+        else:
+            raise RuntimeError(f"No supported package manager was found to prepare the {service_id} source build.")
+        output = (install.stdout or "") + (install.stderr or "")
+        if install.returncode != 0:
+            raise RuntimeError(output.strip()[-2000:] or f"Unable to install build dependencies for {service_id}")
+        self._update(job_id, progress=3, message=f"Build dependencies for {service_id} are ready.", log=output.splitlines()[-80:])
+
     def _run_isolated_package(self, job_id: str, service_id: str, requested_version: str, package_override: str | None = None):
+        if service_id in {"apache", "stalwart", "mongodb", "opensearch", "wp-cli", "postfix", "dovecot", "rspamd", "bind9", "unbound", "clamav", "supervisor", "lynis"}:
+            self._ensure_source_build_dependencies(job_id, service_id)
         if service_id == "mysql":
             self._run_mysql_binary(job_id, requested_version)
             return
+        if service_id == "sqlserver":
+            self._run_sqlserver_container(job_id, requested_version)
+            return
         if service_id == "nodejs":
             self._run_node_binary(job_id, requested_version)
+            return
+        if service_id == "python":
+            self._run_python_binary(job_id, requested_version)
+            return
+        if service_id == "redis":
+            self._run_redis_binary(job_id, requested_version)
+            return
+        if service_id == "postgresql":
+            self._run_postgresql_binary(job_id, requested_version)
+            return
+        if service_id == "nginx":
+            self._run_nginx_binary(job_id, requested_version)
+            return
+        if service_id == "apache":
+            self._run_apache_binary(job_id, requested_version)
+            return
+        if service_id == "stalwart":
+            self._run_stalwart_binary(job_id, requested_version)
+            return
+        if service_id == "mongodb":
+            self._run_mongodb_binary(job_id, requested_version)
+            return
+        if service_id == "opensearch":
+            self._run_opensearch_binary(job_id, requested_version)
+            return
+        if service_id == "wp-cli":
+            self._run_wpcli_binary(job_id, requested_version)
+            return
+        if service_id == "postfix":
+            self._run_postfix_binary(job_id, requested_version)
+            return
+        if service_id == "dovecot":
+            self._run_dovecot_binary(job_id, requested_version)
+            return
+        if service_id == "rspamd":
+            self._run_rspamd_binary(job_id, requested_version)
+            return
+        if service_id == "bind9":
+            self._run_bind9_binary(job_id, requested_version)
+            return
+        if service_id == "unbound":
+            self._run_unbound_binary(job_id, requested_version)
+            return
+        if service_id == "clamav":
+            self._run_clamav_binary(job_id, requested_version)
+            return
+        if service_id == "supervisor":
+            self._run_supervisor_binary(job_id, requested_version)
+            return
+        if service_id == "lynis":
+            self._run_lynis_binary(job_id, requested_version)
+            return
+        if service_id == "caddy":
+            self._run_caddy_binary(job_id, requested_version)
+            return
+        if service_id == "mariadb":
+            self._run_mariadb_binary(job_id, requested_version)
+            return
+        if service_id == "powerdns":
+            self._run_powerdns_binary(job_id, requested_version)
+            return
+        if service_id == "haproxy":
+            self._run_haproxy_binary(job_id, requested_version)
+            return
+        if service_id == "memcached":
+            self._run_memcached_binary(job_id, requested_version)
+            return
+        if service_id == "valkey":
+            self._run_valkey_binary(job_id, requested_version)
+            return
+        if service_id == "vsftpd":
+            self._run_vsftpd_binary(job_id, requested_version)
+            return
+        if service_id == "certbot":
+            self._run_certbot_binary(job_id, requested_version)
+            return
+        if service_id == "rabbitmq":
+            self._run_rabbitmq_binary(job_id, requested_version)
+            return
+        if service_id == "git":
+            self._run_git_binary(job_id, requested_version)
+            return
+        if service_id == "imagemagick":
+            self._run_imagemagick_binary(job_id, requested_version)
+            return
+        if service_id == "ruby":
+            self._run_ruby_binary(job_id, requested_version)
+            return
+        if service_id == "ffmpeg":
+            self._run_ffmpeg_binary(job_id, requested_version)
+            return
+        if service_id == "openlitespeed":
+            self._run_openlitespeed_binary(job_id, requested_version)
             return
         if service_id == "composer":
             self._run_composer_binary(job_id, requested_version)
@@ -887,6 +1078,38 @@ class JobStore:
             self._update(job_id, progress=8, message="Package metadata is ready. Resolving runtime dependencies…", log=metadata_log)
             apt_cache = shutil.which("apt-cache")
             packages = [item for item in packages if item]
+            if apt_cache and package and requested_version not in {"latest", "managed"} and service_id not in {"php", "nodejs", "python", "mysql", "sqlserver", "composer"}:
+                # Never silently install the repository's newest package when
+                # the user selected an older release. Resolve the exact
+                # package build first, then download it for extraction.
+                candidates = subprocess.run(
+                    [apt_cache, "madison", package],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                ).stdout.splitlines()
+                selected_package_version = None
+                for line in candidates:
+                    parts = [part.strip() for part in line.split("|")]
+                    if len(parts) < 2 or not parts[1]:
+                        continue
+                    full_version = parts[1]
+                    comparable = full_version.split(":", 1)[-1]
+                    if comparable == requested_version or comparable.startswith(f"{requested_version}."):
+                        selected_package_version = full_version
+                        break
+                if not selected_package_version:
+                    available = ", ".join(
+                        parts[1].split(":", 1)[-1]
+                        for line in candidates
+                        for parts in [[part.strip() for part in line.split("|")]]
+                        if len(parts) >= 2 and parts[1]
+                    ) or "none"
+                    raise RuntimeError(
+                        f"{service_id} {requested_version} is not available from this server's configured repositories. "
+                        f"Available versions: {available}. Refresh compatible versions before installing."
+                    )
+                packages[0] = f"{package}={selected_package_version}"
             if apt_cache and service_id == "mariadb" and requested_version not in {"latest", "managed"}:
                 available_versions = subprocess.run(
                     [apt_cache, "madison", package],
@@ -1109,6 +1332,2076 @@ class JobStore:
         except Exception as error:
             self._update(job_id, status="failed", message=str(error))
 
+    def _run_openlitespeed_binary(self, job_id: str, requested_version: str):
+        """Build OpenLiteSpeed with its upstream source build script."""
+        source_url = openlitespeed_source_for(requested_version)
+        if not source_url:
+            try:
+                definition, _, _ = refresh_service_versions("openlitespeed")
+                if any(item.version == requested_version for item in definition.versions):
+                    source_url = openlitespeed_source_for(requested_version)
+            except Exception:
+                source_url = None
+        if not source_url:
+            self._update(job_id, status="failed", message=f"OpenLiteSpeed {requested_version} is not available from the official source repository. Refresh compatible versions and try again.")
+            return
+        if os.geteuid() != 0:
+            self._update(job_id, status="failed", message="The isolated OpenLiteSpeed installer must run with privileges to stage the runtime.")
+            return
+        missing = [tool for tool in ("make", "cmake", "cc", "git", "go", "xz") if not shutil.which(tool)]
+        if missing:
+            self._update(job_id, status="failed", message=f"OpenLiteSpeed source builds require these build tools: {', '.join(missing)}. Install the Server Engine build dependencies, then retry.")
+            return
+        root = service_root("openlitespeed")
+        staging = root.parent / f".openlitespeed-{job_id}-staging"
+        archive = root.parent / f"openlitespeed-{requested_version}.tar.gz"
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True, exist_ok=True)
+            archive.unlink(missing_ok=True)
+            self._update(job_id, status="running", progress=2, message=f"Downloading OpenLiteSpeed {requested_version} source…", log=[])
+            request = urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"})
+            with urllib.request.urlopen(request, timeout=90) as response, archive.open("wb") as output:
+                total = int(response.headers.get("Content-Length", "0") or 0)
+                downloaded = 0
+                while True:
+                    self._raise_if_cancelled(job_id)
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    output.write(chunk)
+                    downloaded += len(chunk)
+                    progress = 4 + round(downloaded * 26 / total) if total else 12
+                    self._update(job_id, progress=min(30, progress), message=f"Downloading OpenLiteSpeed {requested_version} source…")
+            with tarfile.open(archive, "r:gz") as package:
+                members = package.getmembers()
+                if any(member.name.startswith("/") or ".." in Path(member.name).parts for member in members):
+                    raise RuntimeError("The OpenLiteSpeed archive contains an unsafe path")
+                package.extractall(staging)
+            source = next((item for item in staging.iterdir() if item.is_dir()), staging)
+            self._update(job_id, progress=34, message="Building OpenLiteSpeed from source with the upstream build script…", log=["$ ./build.sh"])
+            process = subprocess.Popen(["./build.sh"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=source)
+            assert process.stdout is not None
+            for line in process.stdout:
+                line = line.rstrip()
+                if line:
+                    self._update(job_id, log=[line])
+            if process.wait() != 0:
+                raise RuntimeError("OpenLiteSpeed source build failed; see the job output for the compiler or dependency error.")
+            dist = source / "dist"
+            if not (dist / "bin/openlitespeed").exists():
+                raise RuntimeError("OpenLiteSpeed completed its build but did not produce dist/bin/openlitespeed.")
+            if root.exists():
+                shutil.rmtree(root)
+            shutil.copytree(dist, root)
+            for directory in (root / "conf/vhosts/default", root / "www", root / "logs", root / "run"):
+                directory.mkdir(parents=True, exist_ok=True)
+            config = root / "conf/httpd_config.conf"
+            if not config.exists():
+                config.write_text(
+                    f"serverName ServerEngine\nuser serverengine\ngroup serverengine\nautoRestart 1\n"
+                    f"enableGzip 1\nenableBr 1\nlistener HTTP {{\n  address *:80\n  secure 0\n  map default *\n}}\n"
+                    f"virtualHost default {{\n  vhRoot {root / 'www'}\n  configFile {root / 'conf/vhosts/default/vhost.conf'}\n  allowSymbolLink 1\n  enableScript 1\n}}\n"
+                    f"errorlog {root / 'logs/error.log'} {{ logLevel NOTICE rollingSize 10M keepDays 30 }}\n"
+                    f"accesslog {root / 'logs/access.log'} {{ rollingSize 10M keepDays 30 }}\n"
+                )
+            vhost = root / "conf/vhosts/default/vhost.conf"
+            if not vhost.exists():
+                vhost.write_text("docRoot $VH_ROOT/www\nindex {\n  useServer 0\n  indexFiles index.php, index.html\n}\n")
+            (root / ".serverengine-version").write_text(requested_version + "\n")
+            self._update(job_id, status="succeeded", progress=100, message=f"OpenLiteSpeed {requested_version} was built from source in {root}; no host OpenLiteSpeed package was changed.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+            archive.unlink(missing_ok=True)
+
+    def _run_ruby_binary(self, job_id: str, requested_version: str):
+        """Build MRI Ruby from the official source archive into its own root."""
+        source_url = ruby_source_for(requested_version)
+        if not source_url:
+            try:
+                definition, _, _ = refresh_service_versions("ruby")
+                if any(item.version == requested_version for item in definition.versions):
+                    source_url = ruby_source_for(requested_version)
+            except Exception:
+                source_url = None
+        if not source_url:
+            self._update(job_id, status="failed", message=f"Ruby {requested_version} is not available from the official source archive. Refresh compatible versions and try again.")
+            return
+        if os.geteuid() != 0:
+            self._update(job_id, status="failed", message="The isolated Ruby installer must run with privileges to stage the runtime.")
+            return
+        missing = [tool for tool in ("make", "cc", "xz") if not shutil.which(tool)]
+        if missing:
+            self._update(job_id, status="failed", message=f"Ruby source builds require these build tools: {', '.join(missing)}. Install the Server Engine build dependencies, then retry.")
+            return
+        root = service_root("ruby")
+        staging = root.parent / f".ruby-{job_id}-staging"
+        archive = root.parent / f"ruby-{requested_version}.tar.gz"
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True, exist_ok=True)
+            archive.unlink(missing_ok=True)
+            self._update(job_id, status="running", progress=2, message=f"Downloading Ruby {requested_version} source…", log=[])
+            request = urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"})
+            with urllib.request.urlopen(request, timeout=90) as response, archive.open("wb") as output:
+                total = int(response.headers.get("Content-Length", "0") or 0)
+                downloaded = 0
+                while True:
+                    self._raise_if_cancelled(job_id)
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    output.write(chunk)
+                    downloaded += len(chunk)
+                    progress = 4 + round(downloaded * 26 / total) if total else 12
+                    self._update(job_id, progress=min(30, progress), message=f"Downloading Ruby {requested_version} source…")
+            with tarfile.open(archive, "r:gz") as package:
+                members = package.getmembers()
+                if any(member.name.startswith("/") or ".." in Path(member.name).parts for member in members):
+                    raise RuntimeError("The Ruby archive contains an unsafe path")
+                package.extractall(staging)
+            source = next((item for item in staging.iterdir() if item.is_dir()), staging)
+            if root.exists():
+                shutil.rmtree(root)
+            configure = ["./configure", f"--prefix={root}", "--disable-install-doc", "--enable-shared"]
+            self._update(job_id, progress=34, message="Configuring Ruby for this server…", log=["$ " + " ".join(configure)])
+            configured = subprocess.run(configure, cwd=source, capture_output=True, text=True, check=False)
+            config_output = (configured.stdout + configured.stderr).splitlines()
+            if config_output:
+                self._update(job_id, log=config_output[-100:])
+            if configured.returncode != 0:
+                raise RuntimeError("Ruby configuration failed; see the job output for the missing library or compiler error.")
+            command = ["make", f"-j{max(2, os.cpu_count() or 2)}"]
+            self._update(job_id, progress=48, message="Building Ruby from source…", log=["$ " + " ".join(command)])
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=source)
+            assert process.stdout is not None
+            for line in process.stdout:
+                line = line.rstrip()
+                if line:
+                    self._update(job_id, log=[line])
+            if process.wait() != 0:
+                raise RuntimeError("Ruby source build failed; see the job output for the compiler error.")
+            install = ["make", "install"]
+            self._update(job_id, progress=84, message="Installing the isolated Ruby runtime…", log=["$ " + " ".join(install)])
+            result = subprocess.run(install, cwd=source, capture_output=True, text=True, check=False)
+            output = (result.stdout + result.stderr).splitlines()
+            if output:
+                self._update(job_id, log=output[-100:])
+            if result.returncode != 0:
+                raise RuntimeError("Ruby source installation failed; see the job output for the install error.")
+            (root / ".serverengine-version").write_text(requested_version + "\n")
+            self._update(job_id, status="succeeded", progress=100, message=f"Ruby {requested_version} was built from source in {root}; no host Ruby package was changed.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+            archive.unlink(missing_ok=True)
+
+    def _run_ffmpeg_binary(self, job_id: str, requested_version: str):
+        """Build FFmpeg from the official source archive into its own root."""
+        source_url = ffmpeg_source_for(requested_version)
+        if not source_url:
+            try:
+                definition, _, _ = refresh_service_versions("ffmpeg")
+                if any(item.version == requested_version for item in definition.versions):
+                    source_url = ffmpeg_source_for(requested_version)
+            except Exception:
+                source_url = None
+        if not source_url:
+            self._update(job_id, status="failed", message=f"FFmpeg {requested_version} is not available from the official source archive. Refresh compatible versions and try again.")
+            return
+        if os.geteuid() != 0:
+            self._update(job_id, status="failed", message="The isolated FFmpeg installer must run with privileges to stage the runtime.")
+            return
+        missing = [tool for tool in ("make", "cc", "pkg-config", "xz") if not shutil.which(tool)]
+        if missing:
+            self._update(job_id, status="failed", message=f"FFmpeg source builds require these build tools: {', '.join(missing)}. Install the Server Engine build dependencies, then retry.")
+            return
+        root = service_root("ffmpeg")
+        staging = root.parent / f".ffmpeg-{job_id}-staging"
+        archive = root.parent / f"ffmpeg-{requested_version}.tar.xz"
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True, exist_ok=True)
+            archive.unlink(missing_ok=True)
+            self._update(job_id, status="running", progress=2, message=f"Downloading FFmpeg {requested_version} source…", log=[])
+            request = urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"})
+            with urllib.request.urlopen(request, timeout=90) as response, archive.open("wb") as output:
+                total = int(response.headers.get("Content-Length", "0") or 0)
+                downloaded = 0
+                while True:
+                    self._raise_if_cancelled(job_id)
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    output.write(chunk)
+                    downloaded += len(chunk)
+                    progress = 4 + round(downloaded * 26 / total) if total else 12
+                    self._update(job_id, progress=min(30, progress), message=f"Downloading FFmpeg {requested_version} source…")
+            with tarfile.open(archive, "r:xz") as package:
+                members = package.getmembers()
+                if any(member.name.startswith("/") or ".." in Path(member.name).parts for member in members):
+                    raise RuntimeError("The FFmpeg archive contains an unsafe path")
+                package.extractall(staging)
+            source = next((item for item in staging.iterdir() if item.is_dir()), staging)
+            if root.exists():
+                shutil.rmtree(root)
+            configure = ["./configure", f"--prefix={root}", "--disable-debug", "--disable-doc", "--disable-static", "--enable-shared"]
+            self._update(job_id, progress=34, message="Configuring FFmpeg for this server…", log=["$ " + " ".join(configure)])
+            configured = subprocess.run(configure, cwd=source, capture_output=True, text=True, check=False)
+            config_output = (configured.stdout + configured.stderr).splitlines()
+            if config_output:
+                self._update(job_id, log=config_output[-100:])
+            if configured.returncode != 0:
+                raise RuntimeError("FFmpeg configuration failed; see the job output for the missing library or compiler error.")
+            command = ["make", f"-j{max(2, os.cpu_count() or 2)}"]
+            self._update(job_id, progress=48, message="Building FFmpeg from source…", log=["$ " + " ".join(command)])
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=source)
+            assert process.stdout is not None
+            for line in process.stdout:
+                line = line.rstrip()
+                if line:
+                    self._update(job_id, log=[line])
+            if process.wait() != 0:
+                raise RuntimeError("FFmpeg source build failed; see the job output for the compiler error.")
+            install = ["make", "install"]
+            self._update(job_id, progress=84, message="Installing the isolated FFmpeg runtime…", log=["$ " + " ".join(install)])
+            result = subprocess.run(install, cwd=source, capture_output=True, text=True, check=False)
+            output = (result.stdout + result.stderr).splitlines()
+            if output:
+                self._update(job_id, log=output[-100:])
+            if result.returncode != 0:
+                raise RuntimeError("FFmpeg source installation failed; see the job output for the install error.")
+            (root / ".serverengine-version").write_text(requested_version + "\n")
+            self._update(job_id, status="succeeded", progress=100, message=f"FFmpeg {requested_version} was built from source in {root}; no host FFmpeg package was changed.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+            archive.unlink(missing_ok=True)
+
+    def _run_git_binary(self, job_id: str, requested_version: str):
+        """Build Git from the official source archive into its own service root."""
+        source_url = git_source_for(requested_version)
+        if not source_url:
+            try:
+                definition, _, _ = refresh_service_versions("git")
+                if any(item.version == requested_version for item in definition.versions):
+                    source_url = git_source_for(requested_version)
+            except Exception:
+                source_url = None
+        if not source_url:
+            self._update(job_id, status="failed", message=f"Git {requested_version} is not available from the official source archive. Refresh compatible versions and try again.")
+            return
+        if os.geteuid() != 0:
+            self._update(job_id, status="failed", message="The isolated Git installer must run with privileges to stage the runtime.")
+            return
+        missing = [tool for tool in ("make", "cc", "xz") if not shutil.which(tool)]
+        if missing:
+            self._update(job_id, status="failed", message=f"Git source builds require these build tools: {', '.join(missing)}. Install the Server Engine build dependencies, then retry.")
+            return
+        root = service_root("git")
+        staging = root.parent / f".git-{job_id}-staging"
+        archive = root.parent / f"git-{requested_version}.tar.xz"
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True, exist_ok=True)
+            archive.unlink(missing_ok=True)
+            self._update(job_id, status="running", progress=2, message=f"Downloading Git {requested_version} source…", log=[])
+            request = urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"})
+            with urllib.request.urlopen(request, timeout=90) as response, archive.open("wb") as output:
+                total = int(response.headers.get("Content-Length", "0") or 0)
+                downloaded = 0
+                while True:
+                    self._raise_if_cancelled(job_id)
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    output.write(chunk)
+                    downloaded += len(chunk)
+                    progress = 4 + round(downloaded * 26 / total) if total else 12
+                    self._update(job_id, progress=min(30, progress), message=f"Downloading Git {requested_version} source…")
+            with tarfile.open(archive, "r:xz") as package:
+                members = package.getmembers()
+                if any(member.name.startswith("/") or ".." in Path(member.name).parts for member in members):
+                    raise RuntimeError("The Git archive contains an unsafe path")
+                package.extractall(staging)
+            source = next((item for item in staging.iterdir() if item.is_dir()), staging)
+            if root.exists():
+                shutil.rmtree(root)
+            command = ["make", f"prefix={root}", "NO_TCLTK=YesPlease", "all"]
+            self._update(job_id, progress=34, message="Building Git from source…", log=["$ " + " ".join(command)])
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=source)
+            assert process.stdout is not None
+            for line in process.stdout:
+                line = line.rstrip()
+                if line:
+                    self._update(job_id, log=[line])
+            if process.wait() != 0:
+                raise RuntimeError("Git source build failed; see the job output for the compiler error.")
+            install = ["make", f"prefix={root}", "NO_TCLTK=YesPlease", "install"]
+            self._update(job_id, progress=78, message="Installing the isolated Git runtime…", log=["$ " + " ".join(install)])
+            result = subprocess.run(install, cwd=source, capture_output=True, text=True, check=False)
+            output = (result.stdout + result.stderr).splitlines()
+            if output:
+                self._update(job_id, log=output[-100:])
+            if result.returncode != 0:
+                raise RuntimeError("Git source installation failed; see the job output for the install error.")
+            (root / ".serverengine-version").write_text(requested_version + "\n")
+            self._update(job_id, status="succeeded", progress=100, message=f"Git {requested_version} was built from source in {root}; no host Git package was changed.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+            archive.unlink(missing_ok=True)
+
+    def _run_imagemagick_binary(self, job_id: str, requested_version: str):
+        """Build ImageMagick from its official source archive into its own root."""
+        source_url = imagemagick_source_for(requested_version)
+        if not source_url:
+            try:
+                definition, _, _ = refresh_service_versions("imagemagick")
+                if any(item.version == requested_version for item in definition.versions):
+                    source_url = imagemagick_source_for(requested_version)
+            except Exception:
+                source_url = None
+        if not source_url:
+            self._update(job_id, status="failed", message=f"ImageMagick {requested_version} is not available from the official source archive. Refresh compatible versions and try again.")
+            return
+        if os.geteuid() != 0:
+            self._update(job_id, status="failed", message="The isolated ImageMagick installer must run with privileges to stage the runtime.")
+            return
+        missing = [tool for tool in ("make", "cc", "pkg-config", "xz") if not shutil.which(tool)]
+        if missing:
+            self._update(job_id, status="failed", message=f"ImageMagick source builds require these build tools: {', '.join(missing)}. Install the Server Engine build dependencies, then retry.")
+            return
+        root = service_root("imagemagick")
+        staging = root.parent / f".imagemagick-{job_id}-staging"
+        archive = root.parent / f"ImageMagick-{requested_version}.tar.xz"
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True, exist_ok=True)
+            archive.unlink(missing_ok=True)
+            self._update(job_id, status="running", progress=2, message=f"Downloading ImageMagick {requested_version} source…", log=[])
+            request = urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"})
+            with urllib.request.urlopen(request, timeout=90) as response, archive.open("wb") as output:
+                total = int(response.headers.get("Content-Length", "0") or 0)
+                downloaded = 0
+                while True:
+                    self._raise_if_cancelled(job_id)
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    output.write(chunk)
+                    downloaded += len(chunk)
+                    progress = 4 + round(downloaded * 26 / total) if total else 12
+                    self._update(job_id, progress=min(30, progress), message=f"Downloading ImageMagick {requested_version} source…")
+            with tarfile.open(archive, "r:xz") as package:
+                members = package.getmembers()
+                if any(member.name.startswith("/") or ".." in Path(member.name).parts for member in members):
+                    raise RuntimeError("The ImageMagick archive contains an unsafe path")
+                package.extractall(staging)
+            source = next((item for item in staging.iterdir() if item.is_dir()), staging)
+            if root.exists():
+                shutil.rmtree(root)
+            configure = ["./configure", f"--prefix={root}", "--with-modules", "--disable-static", "--without-perl"]
+            self._update(job_id, progress=34, message="Configuring ImageMagick for this server…", log=["$ " + " ".join(configure)])
+            configured = subprocess.run(configure, cwd=source, capture_output=True, text=True, check=False)
+            config_output = (configured.stdout + configured.stderr).splitlines()
+            if config_output:
+                self._update(job_id, log=config_output[-100:])
+            if configured.returncode != 0:
+                raise RuntimeError("ImageMagick configuration failed; see the job output for the missing library or compiler error.")
+            command = ["make", f"-j{max(2, os.cpu_count() or 2)}"]
+            self._update(job_id, progress=48, message="Building ImageMagick from source…", log=["$ " + " ".join(command)])
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=source)
+            assert process.stdout is not None
+            for line in process.stdout:
+                line = line.rstrip()
+                if line:
+                    self._update(job_id, log=[line])
+            if process.wait() != 0:
+                raise RuntimeError("ImageMagick source build failed; see the job output for the compiler error.")
+            install = ["make", "install"]
+            self._update(job_id, progress=84, message="Installing the isolated ImageMagick runtime…", log=["$ " + " ".join(install)])
+            result = subprocess.run(install, cwd=source, capture_output=True, text=True, check=False)
+            output = (result.stdout + result.stderr).splitlines()
+            if output:
+                self._update(job_id, log=output[-100:])
+            if result.returncode != 0:
+                raise RuntimeError("ImageMagick source installation failed; see the job output for the install error.")
+            (root / ".serverengine-version").write_text(requested_version + "\n")
+            self._update(job_id, status="succeeded", progress=100, message=f"ImageMagick {requested_version} was built from source in {root}; no host ImageMagick package was changed.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+            archive.unlink(missing_ok=True)
+
+    def _run_certbot_binary(self, job_id: str, requested_version: str):
+        """Build Certbot from its official source distribution in its own venv."""
+        source_url = certbot_source_for(requested_version)
+        if not source_url:
+            try:
+                definition, _, _ = refresh_service_versions("certbot")
+                if any(item.version == requested_version for item in definition.versions):
+                    source_url = certbot_source_for(requested_version)
+            except Exception:
+                source_url = None
+        if not source_url:
+            self._update(job_id, status="failed", message=f"Certbot {requested_version} is not available from the official Python source index. Refresh compatible versions and try again.")
+            return
+        if os.geteuid() != 0:
+            self._update(job_id, status="failed", message="The isolated Certbot installer must run with privileges to stage the runtime.")
+            return
+        python = shutil.which("python3") or shutil.which("python")
+        if not python:
+            self._update(job_id, status="failed", message="Certbot source installation requires Python 3 and the venv module.")
+            return
+        root = service_root("certbot")
+        staging = root.parent / f".certbot-{job_id}-staging"
+        archive = root.parent / f"certbot-{requested_version}.tar.gz"
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True, exist_ok=True)
+            archive.unlink(missing_ok=True)
+            self._update(job_id, status="running", progress=2, message=f"Downloading Certbot {requested_version} source…", log=[])
+            request = urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"})
+            with urllib.request.urlopen(request, timeout=60) as response, archive.open("wb") as output:
+                total = int(response.headers.get("Content-Length", "0") or 0)
+                downloaded = 0
+                while True:
+                    self._raise_if_cancelled(job_id)
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    output.write(chunk)
+                    downloaded += len(chunk)
+                    progress = 4 + round(downloaded * 26 / total) if total else 12
+                    self._update(job_id, progress=min(30, progress), message=f"Downloading Certbot {requested_version} source…")
+            with tarfile.open(archive, "r:gz") as package:
+                members = package.getmembers()
+                if any(member.name.startswith("/") or ".." in Path(member.name).parts for member in members):
+                    raise RuntimeError("The Certbot archive contains an unsafe path")
+                package.extractall(staging)
+            source = next((item for item in staging.iterdir() if item.is_dir()), staging)
+            if root.exists():
+                shutil.rmtree(root)
+            root.mkdir(parents=True, exist_ok=True)
+            venv = root / "venv"
+            self._update(job_id, progress=35, message="Creating the isolated Certbot Python environment…")
+            subprocess.run([python, "-m", "venv", str(venv)], check=True, capture_output=True, text=True)
+            pip = venv / "bin/pip"
+            command = [str(pip), "install", "--disable-pip-version-check", "--no-cache-dir", "--no-binary", ":all:", str(source)]
+            self._update(job_id, progress=42, message="Building Certbot and its Python dependencies from source…", log=["$ " + " ".join(shlex.quote(item) for item in command)])
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=staging)
+            output = []
+            assert process.stdout is not None
+            for line in process.stdout:
+                line = line.rstrip()
+                if line:
+                    output.append(line)
+                    self._update(job_id, log=[line])
+            if process.wait() != 0:
+                raise RuntimeError("Certbot source build failed; see the job output for the compiler or Python dependency error.")
+            for directory in (root / "config", root / "work", root / "logs", root / "run"):
+                directory.mkdir(parents=True, exist_ok=True)
+            (root / ".serverengine-version").write_text(requested_version + "\n")
+            config = root / "conf/cli.ini"
+            config.parent.mkdir(parents=True, exist_ok=True)
+            config.write_text("# Server Engine Certbot defaults\nagree-tos = true\nnon-interactive = true\npreferred-challenges = http\n" f"config-dir = {root / 'config'}\nwork-dir = {root / 'work'}\nlogs-dir = {root / 'logs'}\n")
+            self._update(job_id, status="succeeded", progress=100, message=f"Certbot {requested_version} was built from source in {root}; no host Certbot package was changed.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+            archive.unlink(missing_ok=True)
+
+    def _run_rabbitmq_binary(self, job_id: str, requested_version: str):
+        """Build RabbitMQ's generic UNIX package from the official source tree."""
+        source_url = rabbitmq_source_for(requested_version)
+        if not source_url:
+            try:
+                definition, _, _ = refresh_service_versions("rabbitmq")
+                if any(item.version == requested_version for item in definition.versions):
+                    source_url = rabbitmq_source_for(requested_version)
+            except Exception:
+                source_url = None
+        if not source_url:
+            self._update(job_id, status="failed", message=f"RabbitMQ {requested_version} is not available from the official source repository. Refresh compatible versions and try again.")
+            return
+        if os.geteuid() != 0:
+            self._update(job_id, status="failed", message="The isolated RabbitMQ installer must run with privileges to stage the runtime.")
+            return
+        missing = [tool for tool in ("make", "erl", "xsltproc", "xmlto") if not shutil.which(tool)]
+        if missing:
+            self._update(job_id, status="failed", message=f"RabbitMQ source builds require these build tools: {', '.join(missing)}. Install the Server Engine build dependencies, then retry.")
+            return
+        root = service_root("rabbitmq")
+        staging = root.parent / f".rabbitmq-{job_id}-staging"
+        archive = root.parent / f"rabbitmq-{requested_version}.tar.gz"
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True, exist_ok=True)
+            archive.unlink(missing_ok=True)
+            self._update(job_id, status="running", progress=2, message=f"Downloading RabbitMQ {requested_version} source…", log=[])
+            request = urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"})
+            with urllib.request.urlopen(request, timeout=90) as response, archive.open("wb") as output:
+                total = int(response.headers.get("Content-Length", "0") or 0)
+                downloaded = 0
+                while True:
+                    self._raise_if_cancelled(job_id)
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    output.write(chunk)
+                    downloaded += len(chunk)
+                    progress = 4 + round(downloaded * 26 / total) if total else 12
+                    self._update(job_id, progress=min(30, progress), message=f"Downloading RabbitMQ {requested_version} source…")
+            with tarfile.open(archive, "r:gz") as package:
+                members = package.getmembers()
+                if any(member.name.startswith("/") or ".." in Path(member.name).parts for member in members):
+                    raise RuntimeError("The RabbitMQ archive contains an unsafe path")
+                package.extractall(staging)
+            source = next((item for item in staging.iterdir() if item.is_dir()), staging)
+            self._update(job_id, progress=34, message="Building RabbitMQ and its generic UNIX package from source…")
+            command = ["make", "package-generic-unix", f"RABBITMQ_VERSION={requested_version}"]
+            self._update(job_id, log=["$ " + " ".join(command)])
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=source)
+            assert process.stdout is not None
+            for line in process.stdout:
+                line = line.rstrip()
+                if line:
+                    self._update(job_id, log=[line])
+            if process.wait() != 0:
+                raise RuntimeError("RabbitMQ source build failed; see the job output for the Erlang or packaging error.")
+            package_archive = next(iter(sorted(source.glob("rabbitmq-server-generic-unix-*.tar.xz"))), None)
+            if package_archive is None:
+                raise RuntimeError("RabbitMQ completed its build but did not produce a generic UNIX package.")
+            if root.exists():
+                shutil.rmtree(root)
+            root.mkdir(parents=True, exist_ok=True)
+            with tarfile.open(package_archive, "r:xz") as binary_package:
+                members = binary_package.getmembers()
+                if any(member.name.startswith("/") or ".." in Path(member.name).parts for member in members):
+                    raise RuntimeError("The RabbitMQ binary archive contains an unsafe path")
+                binary_package.extractall(root)
+            nested = next((item for item in root.iterdir() if item.is_dir()), None)
+            if nested and (nested / "sbin/rabbitmq-server").exists():
+                for item in nested.iterdir():
+                    target = root / item.name
+                    if target.exists():
+                        shutil.rmtree(target) if target.is_dir() else target.unlink()
+                    shutil.move(str(item), target)
+                nested.rmdir()
+            for directory in (root / "etc/rabbitmq", root / "var/lib/rabbitmq", root / "var/log/rabbitmq", root / "var/run/rabbitmq"):
+                directory.mkdir(parents=True, exist_ok=True)
+            (root / ".serverengine-version").write_text(requested_version + "\n")
+            self._update(job_id, status="succeeded", progress=100, message=f"RabbitMQ {requested_version} was built from source in {root}; no host RabbitMQ package was changed.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+            archive.unlink(missing_ok=True)
+
+    def _run_python_binary(self, job_id: str, requested_version: str):
+        """Install a portable CPython build without touching the system Python."""
+        asset_url = python_asset_for(requested_version)
+        if not asset_url:
+            try:
+                definition, _, _ = refresh_service_versions("python")
+                if any(item.version == requested_version for item in definition.versions):
+                    asset_url = python_asset_for(requested_version)
+            except Exception:
+                asset_url = None
+        if not asset_url:
+            self._update(job_id, status="failed", message=f"Python {requested_version} is not available for this host architecture. Refresh compatible versions and try again.")
+            return
+        if os.geteuid() != 0:
+            self._update(job_id, status="failed", message="The isolated Python installer must run with privileges to stage the runtime.")
+            return
+        root = service_root("python", requested_version)
+        archive = root.parent / f".python-{requested_version}.tar.gz"
+        staging = root.parent / f".python-{requested_version}.staging"
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True)
+            if staging.exists():
+                shutil.rmtree(staging)
+            staging.mkdir(parents=True)
+            archive.unlink(missing_ok=True)
+            self._update(job_id, status="running", progress=3, message=f"Downloading portable Python {requested_version}…", log=[])
+            request = urllib.request.Request(asset_url, headers={"User-Agent": "Server-Engine-Control-Panel"})
+            with urllib.request.urlopen(request, timeout=30) as response, archive.open("wb") as output:
+                total = int(response.headers.get("Content-Length", "0") or 0)
+                downloaded = 0
+                while True:
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    output.write(chunk)
+                    downloaded += len(chunk)
+                    progress = 5 + round(downloaded * 55 / total) if total else 20
+                    self._update(job_id, progress=min(60, progress), message=f"Downloading portable Python {requested_version}…")
+            self._update(job_id, progress=64, message=f"Extracting Python {requested_version} into its managed runtime…")
+            with tarfile.open(archive, "r:gz") as bundle:
+                staging_root = staging.resolve()
+                for member in bundle.getmembers():
+                    target = (staging_root / member.name).resolve()
+                    if target != staging_root and staging_root not in target.parents:
+                        raise RuntimeError("The Python archive contains an unsafe path")
+                    bundle.extract(member, staging_root)
+            extracted = staging / "python"
+            source = extracted if extracted.exists() else staging
+            if root.exists():
+                shutil.rmtree(root)
+            shutil.move(str(source), str(root))
+            binary = binary_path("python", requested_version)
+            if not binary.exists():
+                raise RuntimeError("The downloaded Python archive did not contain a usable interpreter")
+            (root / ".serverengine-version").write_text(requested_version)
+            (root / "logs").mkdir(exist_ok=True)
+            (root / "run").mkdir(exist_ok=True)
+            archive.unlink(missing_ok=True)
+            if staging.exists():
+                shutil.rmtree(staging)
+            version_result = subprocess.run([str(binary), "--version"], capture_output=True, text=True, check=False)
+            detected = (version_result.stdout or version_result.stderr).strip()
+            self._update(job_id, status="succeeded", progress=100, message=f"Python {requested_version} is installed and ready in {root}. {detected}")
+        except Exception as error:
+            archive.unlink(missing_ok=True)
+            if staging.exists():
+                shutil.rmtree(staging, ignore_errors=True)
+            self._update(job_id, status="failed", message=str(error))
+
+    def _run_redis_binary(self, job_id: str, requested_version: str):
+        """Build Redis from its official source into the managed service root."""
+        source_url = redis_source_for(requested_version)
+        if not source_url:
+            try:
+                definition, _, _ = refresh_service_versions("redis")
+                if any(item.version == requested_version for item in definition.versions):
+                    source_url = redis_source_for(requested_version)
+            except Exception:
+                source_url = None
+        if not source_url:
+            self._update(job_id, status="failed", message=f"Redis {requested_version} is not available from the official Redis release catalog. Refresh compatible versions and try again.")
+            return
+        if os.geteuid() != 0:
+            self._update(job_id, status="failed", message="The isolated Redis installer must run with privileges to stage the runtime.")
+            return
+        make = shutil.which("make")
+        compiler = shutil.which("cc") or shutil.which("gcc")
+        if not make or not compiler:
+            self._update(job_id, status="failed", message="Redis needs a compiler and make to build its isolated binary. Install the host build tools, then retry; no Redis system package is required.")
+            return
+        root = service_root("redis")
+        staging = root.parent / f".redis-{job_id}-staging"
+        archive = root.parent / f"redis-{requested_version}.tar.gz"
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True, exist_ok=True)
+            archive.unlink(missing_ok=True)
+            self._update(job_id, status="running", progress=3, message=f"Downloading Redis {requested_version} source…", log=[])
+            request = urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"})
+            with urllib.request.urlopen(request, timeout=60) as response, archive.open("wb") as output:
+                total = int(response.headers.get("Content-Length", "0") or 0)
+                downloaded = 0
+                while True:
+                    self._raise_if_cancelled(job_id)
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    output.write(chunk)
+                    downloaded += len(chunk)
+                    progress = 5 + round(downloaded * 35 / total) if total else 15
+                    self._update(job_id, progress=min(40, progress), message=f"Downloading Redis {requested_version} source…")
+            self._update(job_id, progress=43, message=f"Extracting Redis {requested_version} into a temporary build area…")
+            with tarfile.open(archive, "r:gz") as package:
+                members = package.getmembers()
+                if any(member.name.startswith("/") or ".." in Path(member.name).parts for member in members):
+                    raise RuntimeError("The Redis archive contains an unsafe path")
+                package.extractall(staging)
+            source = next((item for item in staging.iterdir() if item.is_dir()), staging)
+            self._update(job_id, progress=48, message=f"Building Redis {requested_version} in the managed service area…")
+            build = subprocess.Popen([make, "-j2", "BUILD_TLS=no"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            output = []
+            for line in build.stdout or []:
+                if line.strip():
+                    output.append(line.rstrip())
+                    self._update(job_id, progress=50, message=f"Building Redis {requested_version}…", log=output[-80:])
+            if build.wait() != 0:
+                raise RuntimeError("Redis source build failed: " + (output[-1] if output else "make returned a non-zero exit code"))
+            if root.exists():
+                shutil.rmtree(root)
+            root.mkdir(parents=True, exist_ok=True)
+            install = subprocess.run([make, "PREFIX=" + str(root), "install"], cwd=source, capture_output=True, text=True, check=False)
+            if install.returncode != 0:
+                raise RuntimeError((install.stderr or install.stdout).strip() or "Redis installation into the managed directory failed")
+            (root / ".serverengine-version").write_text(requested_version)
+            for directory in (root / "conf", root / "data", root / "logs", root / "run"):
+                directory.mkdir(parents=True, exist_ok=True)
+            config = root / "conf/redis.conf"
+            if not config.exists():
+                config.write_text(f"bind 127.0.0.1 ::1\nprotected-mode yes\nport 6379\ndir {root / 'data'}\nlogfile {root / 'logs/redis.log'}\npidfile {root / 'run/redis.pid'}\ndaemonize no\n")
+            self._update(job_id, status="succeeded", progress=100, message=f"Redis {requested_version} is installed in {root}; the host Redis package and service were not changed.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+        finally:
+            archive.unlink(missing_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+
+    def _run_postgresql_binary(self, job_id: str, requested_version: str):
+        """Build PostgreSQL from the official source archive in its managed root."""
+        source_url = postgresql_source_for(requested_version)
+        if not source_url:
+            try:
+                definition, _, _ = refresh_service_versions("postgresql")
+                if any(item.version == requested_version for item in definition.versions):
+                    source_url = postgresql_source_for(requested_version)
+            except Exception:
+                source_url = None
+        if not source_url:
+            self._update(job_id, status="failed", message=f"PostgreSQL {requested_version} is not available from the official release archive. Refresh compatible versions and try again.")
+            return
+        if os.geteuid() != 0:
+            self._update(job_id, status="failed", message="The isolated PostgreSQL installer must run with privileges to stage the runtime.")
+            return
+        make = shutil.which("make")
+        compiler = shutil.which("cc") or shutil.which("gcc")
+        configure = shutil.which("configure")
+        if not make or not compiler:
+            self._update(job_id, status="failed", message="PostgreSQL needs a compiler and make to build its isolated binary. Install the host build tools, then retry; no PostgreSQL system package is required.")
+            return
+        root = service_root("postgresql")
+        staging = root.parent / f".postgresql-{job_id}-staging"
+        archive = root.parent / f"postgresql-{requested_version}.tar.gz"
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True, exist_ok=True)
+            archive.unlink(missing_ok=True)
+            self._update(job_id, status="running", progress=3, message=f"Downloading PostgreSQL {requested_version} source…", log=[])
+            request = urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"})
+            with urllib.request.urlopen(request, timeout=60) as response, archive.open("wb") as output:
+                total = int(response.headers.get("Content-Length", "0") or 0)
+                downloaded = 0
+                while True:
+                    self._raise_if_cancelled(job_id)
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    output.write(chunk)
+                    downloaded += len(chunk)
+                    progress = 5 + round(downloaded * 30 / total) if total else 15
+                    self._update(job_id, progress=min(35, progress), message=f"Downloading PostgreSQL {requested_version} source…")
+            with tarfile.open(archive, "r:gz") as package:
+                members = package.getmembers()
+                if any(member.name.startswith("/") or ".." in Path(member.name).parts for member in members):
+                    raise RuntimeError("The PostgreSQL archive contains an unsafe path")
+                package.extractall(staging)
+            source = next((item for item in staging.iterdir() if item.is_dir()), staging)
+            self._update(job_id, progress=40, message=f"Preparing PostgreSQL {requested_version} build…")
+            configured = subprocess.run([str(source / "configure"), f"--prefix={root}", "--without-readline", "--without-zlib"], cwd=source, capture_output=True, text=True, check=False)
+            if configured.returncode != 0:
+                raise RuntimeError((configured.stderr or configured.stdout).strip() or "PostgreSQL configure failed")
+            build = subprocess.Popen([make, "-j2"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            output = []
+            for line in build.stdout or []:
+                if line.strip():
+                    output.append(line.rstrip())
+                    self._update(job_id, progress=55, message=f"Building PostgreSQL {requested_version}…", log=output[-80:])
+            if build.wait() != 0:
+                raise RuntimeError("PostgreSQL source build failed: " + (output[-1] if output else "make returned a non-zero exit code"))
+            if root.exists():
+                shutil.rmtree(root)
+            install = subprocess.run([make, "install"], cwd=source, capture_output=True, text=True, check=False)
+            if install.returncode != 0:
+                raise RuntimeError((install.stderr or install.stdout).strip() or "PostgreSQL installation into the managed directory failed")
+            (root / ".serverengine-version").write_text(requested_version)
+            for directory in (root / "conf", root / "data", root / "logs", root / "run"):
+                directory.mkdir(parents=True, exist_ok=True)
+            self._update(job_id, status="succeeded", progress=100, message=f"PostgreSQL {requested_version} is installed in {root}; the host PostgreSQL package and service were not changed.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+        finally:
+            archive.unlink(missing_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+
+    def _run_caddy_binary(self, job_id: str, requested_version: str):
+        source_url = caddy_source_for(requested_version)
+        if not source_url:
+            try:
+                definition, _, _ = refresh_service_versions("caddy")
+                source_url = caddy_source_for(requested_version) if any(item.version == requested_version for item in definition.versions) else None
+            except Exception:
+                source_url = None
+        go = shutil.which("go")
+        if not source_url or not go:
+            self._update(job_id, status="failed", message="Caddy source or Go 1.20+ is unavailable. Install the isolated build toolchain, then refresh and retry.")
+            return
+        root = service_root("caddy")
+        staging = root.parent / f".caddy-{job_id}-staging"
+        archive = root.parent / f"caddy-{requested_version}.tar.gz"
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True, exist_ok=True)
+            archive.unlink(missing_ok=True)
+            self._update(job_id, status="running", progress=3, message=f"Downloading Caddy {requested_version} source…", log=[])
+            with urllib.request.urlopen(urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"}), timeout=60) as response, archive.open("wb") as output:
+                output.write(response.read())
+            with tarfile.open(archive, "r:gz") as package:
+                package.extractall(staging, filter="data")
+            source = next((item for item in staging.iterdir() if item.is_dir()), staging)
+            root.mkdir(parents=True, exist_ok=True)
+            (root / "bin").mkdir(parents=True, exist_ok=True)
+            command = [go, "build", "-trimpath", "-ldflags", f"-X github.com/caddyserver/caddy/v2.CustomVersion=v{requested_version}", "-o", str(root / "bin/caddy"), "./cmd/caddy"]
+            self._update(job_id, progress=35, message=f"Building Caddy {requested_version} from source…", log=[f"$ {' '.join(command)}"])
+            build = subprocess.Popen(command, cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            output = []
+            for line in build.stdout or []:
+                if line.strip():
+                    output.append(line.rstrip())
+                    self._update(job_id, progress=60, message=f"Building Caddy {requested_version}…", log=output[-80:])
+            if build.wait() != 0:
+                raise RuntimeError(output[-1] if output else "Caddy source build failed")
+            (root / "conf").mkdir(exist_ok=True)
+            for directory in (root / "data", root / "www", root / "logs", root / "run"):
+                directory.mkdir(parents=True, exist_ok=True)
+            config = root / "conf/Caddyfile"
+            if not config.exists():
+                config.write_text(f"{{\n    storage file-system {root / 'data'}\n}}\n\n:80 {{\n    root * {root / 'www'}\n    encode zstd gzip\n    file_server\n    log {{ output file {root / 'logs/access.log'} }}\n}}\n")
+            (root / ".serverengine-version").write_text(requested_version)
+            self._update(job_id, status="succeeded", progress=100, message=f"Caddy {requested_version} was built from source in {root}; the host Caddy package was not changed.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+        finally:
+            archive.unlink(missing_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+
+    def _run_mariadb_binary(self, job_id: str, requested_version: str):
+        source_url = mariadb_source_for(requested_version)
+        if not source_url:
+            try:
+                definition, _, _ = refresh_service_versions("mariadb")
+                source_url = mariadb_source_for(requested_version) if any(item.version == requested_version for item in definition.versions) else None
+            except Exception:
+                source_url = None
+        cmake = shutil.which("cmake")
+        make = shutil.which("make")
+        compiler = shutil.which("c++") or shutil.which("g++")
+        if not source_url or not cmake or not make or not compiler:
+            self._update(job_id, status="failed", message="MariaDB source or the CMake/C++ build toolchain is unavailable. Install the isolated build toolchain, then refresh and retry.")
+            return
+        root = service_root("mariadb")
+        staging = root.parent / f".mariadb-{job_id}-staging"
+        archive = root.parent / f"mariadb-{requested_version}.tar.gz"
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True, exist_ok=True)
+            archive.unlink(missing_ok=True)
+            self._update(job_id, status="running", progress=3, message=f"Downloading MariaDB {requested_version} source…", log=[])
+            with urllib.request.urlopen(urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"}), timeout=90) as response, archive.open("wb") as output:
+                output.write(response.read())
+            with tarfile.open(archive, "r:gz") as package:
+                package.extractall(staging, filter="data")
+            source = next((item for item in staging.iterdir() if item.is_dir()), staging)
+            build_dir = staging / "build"
+            configure = [cmake, "-S", str(source), "-B", str(build_dir), f"-DCMAKE_INSTALL_PREFIX={root}", "-DWITHOUT_TOKUDB=1", "-DWITH_WSREP=0", "-DWITH_UNIT=OFF", "-DPLUGIN_ROCKSDB=NO"]
+            self._update(job_id, progress=30, message=f"Configuring MariaDB {requested_version} source build…", log=[f"$ {' '.join(configure)}"])
+            configured = subprocess.run(configure, capture_output=True, text=True, check=False)
+            if configured.returncode != 0:
+                raise RuntimeError((configured.stdout + configured.stderr).strip()[-2000:] or "MariaDB CMake configuration failed")
+            self._update(job_id, progress=45, message=f"Compiling MariaDB {requested_version}…", log=[f"$ {cmake} --build {build_dir} -j2"])
+            build = subprocess.Popen([cmake, "--build", str(build_dir), "-j2"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            output = []
+            for line in build.stdout or []:
+                if line.strip():
+                    output.append(line.rstrip())
+                    self._update(job_id, progress=65, message=f"Compiling MariaDB {requested_version}…", log=output[-80:])
+            if build.wait() != 0:
+                raise RuntimeError(output[-1] if output else "MariaDB source build failed")
+            if root.exists():
+                shutil.rmtree(root)
+            subprocess.run([cmake, "--install", str(build_dir)], check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            (root / ".serverengine-version").write_text(requested_version)
+            for directory in (root / "conf", root / "logs", root / "run", root / "data"):
+                directory.mkdir(parents=True, exist_ok=True)
+            self._update(job_id, status="succeeded", progress=100, message=f"MariaDB {requested_version} was built from source in {root}; the host MariaDB package was not changed.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+        finally:
+            archive.unlink(missing_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+
+    def _run_powerdns_binary(self, job_id: str, requested_version: str):
+        source_url = powerdns_source_for(requested_version)
+        if not source_url:
+            try:
+                definition, _, _ = refresh_service_versions("powerdns")
+                source_url = powerdns_source_for(requested_version) if any(item.version == requested_version for item in definition.versions) else None
+            except Exception:
+                source_url = None
+        make = shutil.which("make")
+        compiler = shutil.which("c++") or shutil.which("g++")
+        if not source_url or not make or not compiler:
+            self._update(job_id, status="failed", message="PowerDNS source or the C++ build toolchain is unavailable. Install the isolated build toolchain, then refresh and retry.")
+            return
+        root = service_root("powerdns")
+        staging = root.parent / f".powerdns-{job_id}-staging"
+        archive = root.parent / f"powerdns-{requested_version}.tar.bz2"
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True, exist_ok=True)
+            archive.unlink(missing_ok=True)
+            self._update(job_id, status="running", progress=3, message=f"Downloading PowerDNS {requested_version} source…", log=[])
+            with urllib.request.urlopen(urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"}), timeout=90) as response, archive.open("wb") as output:
+                output.write(response.read())
+            with tarfile.open(archive, "r:bz2") as package:
+                package.extractall(staging, filter="data")
+            source = next((item for item in staging.iterdir() if item.is_dir()), staging)
+            configure = [str(source / "configure"), f"--prefix={root}", f"--sysconfdir={root / 'conf'}", f"--localstatedir={root / 'data'}", "--disable-static", "--without-lua"]
+            self._update(job_id, progress=30, message=f"Configuring PowerDNS {requested_version} source build…", log=[f"$ {' '.join(configure)}"])
+            configured = subprocess.run(configure, cwd=source, capture_output=True, text=True, check=False)
+            if configured.returncode != 0:
+                raise RuntimeError((configured.stdout + configured.stderr).strip()[-2000:] or "PowerDNS configure failed")
+            self._update(job_id, progress=45, message=f"Compiling PowerDNS {requested_version}…", log=[f"$ {make} -j2"])
+            build = subprocess.Popen([make, "-j2"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            output = []
+            for line in build.stdout or []:
+                if line.strip():
+                    output.append(line.rstrip())
+                    self._update(job_id, progress=65, message=f"Compiling PowerDNS {requested_version}…", log=output[-80:])
+            if build.wait() != 0:
+                raise RuntimeError(output[-1] if output else "PowerDNS source build failed")
+            if root.exists():
+                shutil.rmtree(root)
+            install = subprocess.Popen([make, "install"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            output = []
+            for line in install.stdout or []:
+                if line.strip():
+                    output.append(line.rstrip())
+                    self._update(job_id, progress=90, message=f"Installing PowerDNS {requested_version}…", log=output[-80:])
+            if install.wait() != 0:
+                raise RuntimeError(output[-1] if output else "PowerDNS installation failed")
+            (root / ".serverengine-version").write_text(requested_version)
+            (root / "logs").mkdir(exist_ok=True)
+            (root / "run").mkdir(exist_ok=True)
+            config = root / "conf/pdns.conf"
+            config.parent.mkdir(parents=True, exist_ok=True)
+            if not config.exists():
+                config.write_text("launch=gsqlite3\ngsqlite3-database=" + str(root / "data/pdns.sqlite3") + "\nlocal-address=127.0.0.1\nlocal-port=53\napi=yes\nwebserver=yes\nwebserver-address=127.0.0.1\nwebserver-port=8081\n")
+            self._update(job_id, status="succeeded", progress=100, message=f"PowerDNS {requested_version} was built from source in {root}; the host PowerDNS package was not changed.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+        finally:
+            archive.unlink(missing_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+
+    def _run_haproxy_binary(self, job_id: str, requested_version: str):
+        source_url = haproxy_source_for(requested_version)
+        if not source_url:
+            try:
+                definition, _, _ = refresh_service_versions("haproxy")
+                source_url = haproxy_source_for(requested_version) if any(item.version == requested_version for item in definition.versions) else None
+            except Exception:
+                source_url = None
+        make = shutil.which("make")
+        compiler = shutil.which("cc") or shutil.which("gcc")
+        if not source_url or not make or not compiler:
+            self._update(job_id, status="failed", message="HAProxy source or the C build toolchain is unavailable. Install the isolated build toolchain, then refresh and retry.")
+            return
+        root = service_root("haproxy")
+        staging = root.parent / f".haproxy-{job_id}-staging"
+        archive = root.parent / f"haproxy-{requested_version}.tar.gz"
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True, exist_ok=True)
+            archive.unlink(missing_ok=True)
+            self._update(job_id, status="running", progress=3, message=f"Downloading HAProxy {requested_version} source…", log=[])
+            with urllib.request.urlopen(urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"}), timeout=60) as response, archive.open("wb") as output:
+                output.write(response.read())
+            with tarfile.open(archive, "r:gz") as package:
+                package.extractall(staging, filter="data")
+            source = next((item for item in staging.iterdir() if item.is_dir()), staging)
+            configure = [make, "-j2", "TARGET=linux-glibc", "USE_OPENSSL=1", "USE_PCRE2=1", "USE_ZLIB=1"]
+            self._update(job_id, progress=30, message=f"Compiling HAProxy {requested_version}…", log=[f"$ {' '.join(configure)}"])
+            build = subprocess.Popen(configure, cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            output = []
+            for line in build.stdout or []:
+                if line.strip():
+                    output.append(line.rstrip())
+                    self._update(job_id, progress=65, message=f"Compiling HAProxy {requested_version}…", log=output[-80:])
+            if build.wait() != 0:
+                raise RuntimeError(output[-1] if output else "HAProxy source build failed")
+            if root.exists():
+                shutil.rmtree(root)
+            install = subprocess.run([make, "install-bin", f"PREFIX={root}"], cwd=source, capture_output=True, text=True, check=False)
+            if install.returncode != 0:
+                raise RuntimeError((install.stdout + install.stderr).strip()[-2000:] or "HAProxy installation failed")
+            (root / ".serverengine-version").write_text(requested_version)
+            for directory in (root / "conf", root / "logs", root / "run"):
+                directory.mkdir(parents=True, exist_ok=True)
+            config = root / "conf/haproxy.cfg"
+            if not config.exists():
+                config.write_text(f"global\n    daemon\n    pidfile {root / 'run/haproxy.pid'}\n\ndefaults\n    mode http\n    timeout connect 5s\n    timeout client 30s\n    timeout server 30s\n\nfrontend http\n    bind *:80\n    default_backend app\n\nbackend app\n    server app1 127.0.0.1:8080 check\n")
+            self._update(job_id, status="succeeded", progress=100, message=f"HAProxy {requested_version} was built from source in {root}; the host HAProxy package was not changed.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+        finally:
+            archive.unlink(missing_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+
+    def _run_memcached_binary(self, job_id: str, requested_version: str):
+        source_url = memcached_source_for(requested_version)
+        if not source_url:
+            try:
+                definition, _, _ = refresh_service_versions("memcached")
+                source_url = memcached_source_for(requested_version) if any(item.version == requested_version for item in definition.versions) else None
+            except Exception:
+                source_url = None
+        make = shutil.which("make")
+        compiler = shutil.which("cc") or shutil.which("gcc")
+        if not source_url or not make or not compiler:
+            self._update(job_id, status="failed", message="Memcached source or the C build toolchain is unavailable. Install the isolated build toolchain, then refresh and retry.")
+            return
+        root = service_root("memcached")
+        staging = root.parent / f".memcached-{job_id}-staging"
+        archive = root.parent / f"memcached-{requested_version}.tar.gz"
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True, exist_ok=True)
+            archive.unlink(missing_ok=True)
+            self._update(job_id, status="running", progress=3, message=f"Downloading Memcached {requested_version} source…", log=[])
+            with urllib.request.urlopen(urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"}), timeout=60) as response, archive.open("wb") as output:
+                output.write(response.read())
+            with tarfile.open(archive, "r:gz") as package:
+                package.extractall(staging, filter="data")
+            source = next((item for item in staging.iterdir() if item.is_dir()), staging)
+            root.mkdir(parents=True, exist_ok=True)
+            configure = [str(source / "configure"), f"--prefix={root}", "--disable-sasl"]
+            self._update(job_id, progress=30, message=f"Configuring Memcached {requested_version} source build…", log=[f"$ {' '.join(configure)}"])
+            configured = subprocess.run(configure, cwd=source, capture_output=True, text=True, check=False)
+            if configured.returncode != 0:
+                raise RuntimeError((configured.stdout + configured.stderr).strip()[-2000:] or "Memcached configure failed")
+            build = subprocess.Popen([make, "-j2"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            output = []
+            for line in build.stdout or []:
+                if line.strip():
+                    output.append(line.rstrip())
+                    self._update(job_id, progress=65, message=f"Compiling Memcached {requested_version}…", log=output[-80:])
+            if build.wait() != 0:
+                raise RuntimeError(output[-1] if output else "Memcached source build failed")
+            if root.exists():
+                shutil.rmtree(root)
+            install = subprocess.run([make, "install"], cwd=source, capture_output=True, text=True, check=False)
+            if install.returncode != 0:
+                raise RuntimeError((install.stdout + install.stderr).strip()[-2000:] or "Memcached installation failed")
+            (root / ".serverengine-version").write_text(requested_version)
+            for directory in (root / "conf", root / "logs", root / "run"):
+                directory.mkdir(parents=True, exist_ok=True)
+            (root / "conf/memcached.conf").write_text(f"-m 128\n-p 11211\n-l 127.0.0.1\n-P {root / 'run/memcached.pid'}\n")
+            self._update(job_id, status="succeeded", progress=100, message=f"Memcached {requested_version} was built from source in {root}; the host Memcached package was not changed.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+        finally:
+            archive.unlink(missing_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+
+    def _run_valkey_binary(self, job_id: str, requested_version: str):
+        source_url = valkey_source_for(requested_version)
+        if not source_url:
+            try:
+                definition, _, _ = refresh_service_versions("valkey")
+                source_url = valkey_source_for(requested_version) if any(item.version == requested_version for item in definition.versions) else None
+            except Exception:
+                source_url = None
+        make = shutil.which("make")
+        compiler = shutil.which("cc") or shutil.which("gcc")
+        if not source_url or not make or not compiler:
+            self._update(job_id, status="failed", message="Valkey source or the C build toolchain is unavailable. Install the isolated build toolchain, then refresh and retry.")
+            return
+        root = service_root("valkey")
+        staging = root.parent / f".valkey-{job_id}-staging"
+        archive = root.parent / f"valkey-{requested_version}.tar.gz"
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True, exist_ok=True)
+            archive.unlink(missing_ok=True)
+            self._update(job_id, status="running", progress=3, message=f"Downloading Valkey {requested_version} source…", log=[])
+            with urllib.request.urlopen(urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"}), timeout=60) as response, archive.open("wb") as output:
+                output.write(response.read())
+            with tarfile.open(archive, "r:gz") as package:
+                package.extractall(staging, filter="data")
+            source = next((item for item in staging.iterdir() if item.is_dir()), staging)
+            self._update(job_id, progress=30, message=f"Compiling Valkey {requested_version}…", log=[f"$ {make} -j2"])
+            build = subprocess.Popen([make, "-j2"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            output = []
+            for line in build.stdout or []:
+                if line.strip():
+                    output.append(line.rstrip())
+                    self._update(job_id, progress=65, message=f"Compiling Valkey {requested_version}…", log=output[-80:])
+            if build.wait() != 0:
+                raise RuntimeError(output[-1] if output else "Valkey source build failed")
+            if root.exists():
+                shutil.rmtree(root)
+            install = subprocess.run([make, "PREFIX=" + str(root), "install"], cwd=source, capture_output=True, text=True, check=False)
+            if install.returncode != 0:
+                raise RuntimeError((install.stdout + install.stderr).strip()[-2000:] or "Valkey installation failed")
+            (root / ".serverengine-version").write_text(requested_version)
+            for directory in (root / "conf", root / "logs", root / "run", root / "data"):
+                directory.mkdir(parents=True, exist_ok=True)
+            (root / "conf/valkey.conf").write_text(f"bind 127.0.0.1\nport 6379\ndaemonize no\npidfile {root / 'run/valkey.pid'}\nlogfile {root / 'logs/valkey.log'}\ndir {root / 'data'}\n")
+            self._update(job_id, status="succeeded", progress=100, message=f"Valkey {requested_version} was built from source in {root}; the host Valkey package was not changed.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+        finally:
+            archive.unlink(missing_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+
+    def _run_vsftpd_binary(self, job_id: str, requested_version: str):
+        source_url = vsftpd_source_for(requested_version)
+        if not source_url:
+            try:
+                definition, _, _ = refresh_service_versions("vsftpd")
+                source_url = vsftpd_source_for(requested_version) if any(item.version == requested_version for item in definition.versions) else None
+            except Exception:
+                source_url = None
+        make = shutil.which("make")
+        compiler = shutil.which("cc") or shutil.which("gcc")
+        if not source_url or not make or not compiler:
+            self._update(job_id, status="failed", message="vsftpd source or the C build toolchain is unavailable. Install the isolated build toolchain, then refresh and retry.")
+            return
+        root = service_root("vsftpd")
+        staging = root.parent / f".vsftpd-{job_id}-staging"
+        archive = root.parent / f"vsftpd-{requested_version}.tar.gz"
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True, exist_ok=True)
+            archive.unlink(missing_ok=True)
+            self._update(job_id, status="running", progress=3, message=f"Downloading vsftpd {requested_version} source…", log=[])
+            with urllib.request.urlopen(urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"}), timeout=60) as response, archive.open("wb") as output:
+                output.write(response.read())
+            with tarfile.open(archive, "r:gz") as package:
+                package.extractall(staging, filter="data")
+            source = next((item for item in staging.iterdir() if item.is_dir()), staging)
+            self._update(job_id, progress=35, message=f"Compiling vsftpd {requested_version}…", log=[f"$ {make} -j2"])
+            build = subprocess.Popen([make, "-j2"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            output = []
+            for line in build.stdout or []:
+                if line.strip():
+                    output.append(line.rstrip())
+                    self._update(job_id, progress=70, message=f"Compiling vsftpd {requested_version}…", log=output[-80:])
+            if build.wait() != 0:
+                raise RuntimeError(output[-1] if output else "vsftpd source build failed")
+            if root.exists():
+                shutil.rmtree(root)
+            (root / "usr/sbin").mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source / "vsftpd", root / "usr/sbin/vsftpd")
+            (root / "usr/sbin/vsftpd").chmod(0o755)
+            (root / ".serverengine-version").write_text(requested_version)
+            for directory in (root / "conf", root / "logs", root / "run"):
+                directory.mkdir(parents=True, exist_ok=True)
+            (root / "conf/vsftpd.conf").write_text(f"listen=YES\nlisten_port=21\nlocal_enable=YES\nwrite_enable=YES\nlocal_root={root / 'www'}\nchroot_local_user=YES\n")
+            (root / "www").mkdir(exist_ok=True)
+            self._update(job_id, status="succeeded", progress=100, message=f"vsftpd {requested_version} was built from source in {root}; the host vsftpd package was not changed.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+        finally:
+            archive.unlink(missing_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+
+    def _run_supervisor_binary(self, job_id: str, requested_version: str):
+        """Build Supervisor from its official PyPI source distribution in a venv."""
+        source_url = supervisor_source_for(requested_version)
+        if not source_url:
+            try:
+                definition, _, _ = refresh_service_versions("supervisor")
+                if any(item.version == requested_version for item in definition.versions): source_url = supervisor_source_for(requested_version)
+            except Exception: source_url = None
+        python = shutil.which("python3") or shutil.which("python")
+        if not source_url: self._update(job_id, status="failed", message=f"Supervisor {requested_version} is not available from PyPI. Refresh compatible versions and try again."); return
+        if not python: self._update(job_id, status="failed", message="Supervisor requires Python 3 to build its isolated runtime."); return
+        root = service_root("supervisor"); staging = root.parent / f".supervisor-{job_id}-staging"; archive = root.parent / f"supervisor-{requested_version}.tar.gz"
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True); shutil.rmtree(staging, ignore_errors=True); staging.mkdir(parents=True); archive.unlink(missing_ok=True)
+            self._update(job_id, status="running", progress=3, message=f"Downloading Supervisor {requested_version} source…", log=[])
+            with urllib.request.urlopen(urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"}), timeout=120) as response, archive.open("wb") as output: output.write(response.read())
+            with tarfile.open(archive, "r:gz") as package: package.extractall(staging)
+            source = next((item for item in staging.iterdir() if item.is_dir()), staging)
+            if root.exists(): shutil.rmtree(root)
+            root.mkdir(parents=True, exist_ok=True)
+            venv = root / "venv"
+            self._update(job_id, progress=35, message=f"Creating the isolated Supervisor {requested_version} runtime…")
+            subprocess.run([python, "-m", "venv", str(venv)], check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            command = [str(venv / "bin/pip"), "install", "--disable-pip-version-check", "--no-cache-dir", "--no-binary", ":all:", str(source)]
+            self._update(job_id, progress=50, message=f"Building Supervisor {requested_version} from source…", log=[f"$ {' '.join(command)}"])
+            result = subprocess.run(command, capture_output=True, text=True, check=False)
+            if result.returncode != 0: raise RuntimeError((result.stderr or result.stdout).strip() or "Supervisor source installation failed")
+            for directory in (root / "conf", root / "logs", root / "run"): directory.mkdir(parents=True, exist_ok=True)
+            (root / ".serverengine-version").write_text(requested_version + "\n")
+            self._update(job_id, status="succeeded", progress=100, message=f"Supervisor {requested_version} was built from source in {root}; no host process manager package was changed.")
+        except Exception as error: self._update(job_id, status="failed", message=str(error))
+        finally: archive.unlink(missing_ok=True); shutil.rmtree(staging, ignore_errors=True)
+
+    def _run_lynis_binary(self, job_id: str, requested_version: str):
+        """Install the portable Lynis source tree in its managed service root."""
+        source_url = lynis_source_for(requested_version)
+        if not source_url:
+            try:
+                definition, _, _ = refresh_service_versions("lynis")
+                if any(item.version == requested_version for item in definition.versions): source_url = lynis_source_for(requested_version)
+            except Exception: source_url = None
+        if not source_url: self._update(job_id, status="failed", message=f"Lynis {requested_version} is not available from the official source repository. Refresh compatible versions and try again."); return
+        root = service_root("lynis"); staging = root.parent / f".lynis-{job_id}-staging"; archive = root.parent / f"lynis-{requested_version}.tar.gz"
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True); shutil.rmtree(staging, ignore_errors=True); staging.mkdir(parents=True); archive.unlink(missing_ok=True)
+            self._update(job_id, status="running", progress=3, message=f"Downloading Lynis {requested_version} source…", log=[])
+            with urllib.request.urlopen(urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"}), timeout=120) as response, archive.open("wb") as output: output.write(response.read())
+            with tarfile.open(archive, "r:gz") as package: package.extractall(staging)
+            source = next((item for item in staging.iterdir() if item.is_dir()), staging)
+            if root.exists(): shutil.rmtree(root)
+            shutil.move(str(source), str(root)); (root / "bin").mkdir(exist_ok=True)
+            launcher = root / "bin/lynis"
+            launcher.write_text(f"#!/bin/sh\nexec {shlex.quote(str(root / 'lynis'))} \"$@\"\n"); launcher.chmod(0o755)
+            (root / "logs").mkdir(exist_ok=True); (root / ".serverengine-version").write_text(requested_version + "\n")
+            self._update(job_id, status="succeeded", progress=100, message=f"Lynis {requested_version} is installed in {root}; the host Lynis package was not changed.")
+        except Exception as error: self._update(job_id, status="failed", message=str(error))
+        finally: archive.unlink(missing_ok=True); shutil.rmtree(staging, ignore_errors=True)
+
+    def _run_rspamd_binary(self, job_id: str, requested_version: str):
+        """Build Rspamd from its official CMake source tree."""
+        source_url = rspamd_source_for(requested_version)
+        if not source_url:
+            try:
+                definition, _, _ = refresh_service_versions("rspamd")
+                if any(item.version == requested_version for item in definition.versions): source_url = rspamd_source_for(requested_version)
+            except Exception: source_url = None
+        cmake = shutil.which("cmake"); make = shutil.which("make"); compiler = shutil.which("cc") or shutil.which("gcc")
+        if not source_url: self._update(job_id, status="failed", message=f"Rspamd {requested_version} is not available from the official source repository. Refresh compatible versions and try again."); return
+        if not cmake or not make or not compiler: self._update(job_id, status="failed", message="Rspamd source builds require CMake, make, and a compiler. Install the Server Engine build dependencies, then retry; no host Rspamd package is required."); return
+        root = service_root("rspamd"); staging = root.parent / f".rspamd-{job_id}-staging"; archive = root.parent / f"rspamd-{requested_version}.tar.gz"
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True); shutil.rmtree(staging, ignore_errors=True); staging.mkdir(parents=True); archive.unlink(missing_ok=True)
+            self._update(job_id, status="running", progress=3, message=f"Downloading Rspamd {requested_version} source…", log=[])
+            with urllib.request.urlopen(urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"}), timeout=120) as response, archive.open("wb") as output: output.write(response.read())
+            with tarfile.open(archive, "r:gz") as package: package.extractall(staging)
+            source = next((item for item in staging.iterdir() if item.is_dir()), staging); build_dir = staging / "build"
+            configure = [cmake, "-S", str(source), "-B", str(build_dir), f"-DCMAKE_INSTALL_PREFIX={root}", "-DENABLE_SYSTEMD_UNITS=OFF", "-DENABLE_HYPERSCAN=OFF"]
+            self._update(job_id, progress=35, message=f"Configuring Rspamd {requested_version}…", log=[f"$ {' '.join(configure)}"])
+            result = subprocess.run(configure, capture_output=True, text=True, check=False)
+            if result.returncode != 0: raise RuntimeError((result.stderr or result.stdout).strip() or "Rspamd CMake configuration failed")
+            command = [cmake, "--build", str(build_dir), "-j2"]
+            self._update(job_id, progress=48, message=f"Compiling Rspamd {requested_version}…", log=[f"$ {' '.join(command)}"])
+            build = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1); output = []
+            for line in build.stdout or []:
+                if line.strip(): output.append(line.rstrip()); self._update(job_id, progress=60, message=f"Compiling Rspamd {requested_version}…", log=output[-120:])
+            if build.wait() != 0: raise RuntimeError("Rspamd source build failed: " + (output[-1] if output else "CMake returned a non-zero exit code"))
+            result = subprocess.run([cmake, "--install", str(build_dir)], capture_output=True, text=True, check=False)
+            if result.returncode != 0: raise RuntimeError((result.stderr or result.stdout).strip() or "Rspamd isolated installation failed")
+            for directory in (root / "conf", root / "data", root / "logs", root / "run"): directory.mkdir(parents=True, exist_ok=True)
+            (root / ".serverengine-version").write_text(requested_version + "\n")
+            self._update(job_id, status="succeeded", progress=100, message=f"Rspamd {requested_version} was built from source in {root}; no host mail package was changed.")
+        except Exception as error: self._update(job_id, status="failed", message=str(error))
+        finally: archive.unlink(missing_ok=True); shutil.rmtree(staging, ignore_errors=True)
+
+    def _run_bind9_binary(self, job_id: str, requested_version: str):
+        """Build BIND 9 from the official ISC source archive."""
+        source_url = bind9_source_for(requested_version)
+        if not source_url:
+            try:
+                definition, _, _ = refresh_service_versions("bind9")
+                if any(item.version == requested_version for item in definition.versions): source_url = bind9_source_for(requested_version)
+            except Exception: source_url = None
+        make = shutil.which("make"); compiler = shutil.which("cc") or shutil.which("gcc")
+        if not source_url: self._update(job_id, status="failed", message=f"BIND 9 {requested_version} is not available from the official ISC source archive. Refresh compatible versions and try again."); return
+        if not make or not compiler: self._update(job_id, status="failed", message="BIND 9 source builds require a compiler and make. Install the Server Engine build dependencies, then retry; no host BIND package is required."); return
+        root = service_root("bind9"); staging = root.parent / f".bind9-{job_id}-staging"; archive = root.parent / f"bind9-{requested_version}.tar.xz"
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True); shutil.rmtree(staging, ignore_errors=True); staging.mkdir(parents=True); archive.unlink(missing_ok=True)
+            self._update(job_id, status="running", progress=3, message=f"Downloading BIND 9 {requested_version} source…", log=[])
+            with urllib.request.urlopen(urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"}), timeout=120) as response, archive.open("wb") as output: output.write(response.read())
+            with tarfile.open(archive, "r:xz") as package: package.extractall(staging)
+            source = next((item for item in staging.iterdir() if item.is_dir()), staging)
+            configure = [str(source / "configure"), f"--prefix={root}", f"--sysconfdir={root / 'conf'}", f"--localstatedir={root / 'var'}", "--disable-doh"]
+            self._update(job_id, progress=35, message=f"Configuring BIND 9 {requested_version}…", log=[f"$ {' '.join(configure)}"])
+            result = subprocess.run(configure, cwd=source, capture_output=True, text=True, check=False)
+            if result.returncode != 0: raise RuntimeError((result.stderr or result.stdout).strip() or "BIND 9 configure failed")
+            build = subprocess.Popen([make, "-j2"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1); output = []
+            for line in build.stdout or []:
+                if line.strip(): output.append(line.rstrip()); self._update(job_id, progress=60, message=f"Compiling BIND 9 {requested_version}…", log=output[-120:])
+            if build.wait() != 0: raise RuntimeError("BIND 9 source build failed: " + (output[-1] if output else "make returned a non-zero exit code"))
+            result = subprocess.run([make, "install"], cwd=source, capture_output=True, text=True, check=False)
+            if result.returncode != 0: raise RuntimeError((result.stderr or result.stdout).strip() or "BIND 9 isolated installation failed")
+            for directory in (root / "data", root / "logs", root / "run"): directory.mkdir(parents=True, exist_ok=True)
+            (root / ".serverengine-version").write_text(requested_version + "\n")
+            self._update(job_id, status="succeeded", progress=100, message=f"BIND 9 {requested_version} was built from source in {root}; no host DNS package was changed.")
+        except Exception as error: self._update(job_id, status="failed", message=str(error))
+        finally: archive.unlink(missing_ok=True); shutil.rmtree(staging, ignore_errors=True)
+
+    def _run_unbound_binary(self, job_id: str, requested_version: str):
+        """Build Unbound from the official NLnet Labs source archive."""
+        source_url = unbound_source_for(requested_version)
+        if not source_url:
+            try:
+                definition, _, _ = refresh_service_versions("unbound")
+                if any(item.version == requested_version for item in definition.versions): source_url = unbound_source_for(requested_version)
+            except Exception: source_url = None
+        make = shutil.which("make"); compiler = shutil.which("cc") or shutil.which("gcc")
+        if not source_url: self._update(job_id, status="failed", message=f"Unbound {requested_version} is not available from the official source archive. Refresh compatible versions and try again."); return
+        if not make or not compiler: self._update(job_id, status="failed", message="Unbound source builds require a compiler and make. Install the Server Engine build dependencies, then retry; no host Unbound package is required."); return
+        root = service_root("unbound"); staging = root.parent / f".unbound-{job_id}-staging"; archive = root.parent / f"unbound-{requested_version}.tar.gz"
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True); shutil.rmtree(staging, ignore_errors=True); staging.mkdir(parents=True); archive.unlink(missing_ok=True)
+            self._update(job_id, status="running", progress=3, message=f"Downloading Unbound {requested_version} source…", log=[])
+            with urllib.request.urlopen(urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"}), timeout=120) as response, archive.open("wb") as output: output.write(response.read())
+            with tarfile.open(archive, "r:gz") as package: package.extractall(staging)
+            source = next((item for item in staging.iterdir() if item.is_dir()), staging)
+            configure = [str(source / "configure"), f"--prefix={root}", f"--sysconfdir={root / 'conf'}", f"--localstatedir={root / 'var'}", "--with-ssl"]
+            self._update(job_id, progress=35, message=f"Configuring Unbound {requested_version}…", log=[f"$ {' '.join(configure)}"])
+            result = subprocess.run(configure, cwd=source, capture_output=True, text=True, check=False)
+            if result.returncode != 0: raise RuntimeError((result.stderr or result.stdout).strip() or "Unbound configure failed")
+            build = subprocess.Popen([make, "-j2"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1); output = []
+            for line in build.stdout or []:
+                if line.strip(): output.append(line.rstrip()); self._update(job_id, progress=60, message=f"Compiling Unbound {requested_version}…", log=output[-120:])
+            if build.wait() != 0: raise RuntimeError("Unbound source build failed: " + (output[-1] if output else "make returned a non-zero exit code"))
+            result = subprocess.run([make, "install"], cwd=source, capture_output=True, text=True, check=False)
+            if result.returncode != 0: raise RuntimeError((result.stderr or result.stdout).strip() or "Unbound isolated installation failed")
+            for directory in (root / "data", root / "logs", root / "run"): directory.mkdir(parents=True, exist_ok=True)
+            (root / ".serverengine-version").write_text(requested_version + "\n")
+            self._update(job_id, status="succeeded", progress=100, message=f"Unbound {requested_version} was built from source in {root}; no host DNS package was changed.")
+        except Exception as error: self._update(job_id, status="failed", message=str(error))
+        finally: archive.unlink(missing_ok=True); shutil.rmtree(staging, ignore_errors=True)
+
+    def _run_clamav_binary(self, job_id: str, requested_version: str):
+        """Build ClamAV from its official CMake source archive."""
+        source_url = clamav_source_for(requested_version)
+        if not source_url:
+            try:
+                definition, _, _ = refresh_service_versions("clamav")
+                if any(item.version == requested_version for item in definition.versions): source_url = clamav_source_for(requested_version)
+            except Exception: source_url = None
+        cmake = shutil.which("cmake"); make = shutil.which("make"); compiler = shutil.which("cc") or shutil.which("gcc")
+        if not source_url: self._update(job_id, status="failed", message=f"ClamAV {requested_version} is not available from the official source archive. Refresh compatible versions and try again."); return
+        if not cmake or not make or not compiler: self._update(job_id, status="failed", message="ClamAV source builds require CMake, make, and a compiler. Install the Server Engine build dependencies, then retry; no host ClamAV package is required."); return
+        root = service_root("clamav"); staging = root.parent / f".clamav-{job_id}-staging"; archive = root.parent / f"clamav-{requested_version}.tar.gz"
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True); shutil.rmtree(staging, ignore_errors=True); staging.mkdir(parents=True); archive.unlink(missing_ok=True)
+            self._update(job_id, status="running", progress=3, message=f"Downloading ClamAV {requested_version} source…", log=[])
+            with urllib.request.urlopen(urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"}), timeout=120) as response, archive.open("wb") as output: output.write(response.read())
+            with tarfile.open(archive, "r:gz") as package: package.extractall(staging)
+            source = next((item for item in staging.iterdir() if item.is_dir()), staging); build_dir = staging / "build"
+            configure = [cmake, "-S", str(source), "-B", str(build_dir), f"-DCMAKE_INSTALL_PREFIX={root}", f"-DAPP_CONFIG_DIRECTORY={root / 'conf'}", f"-DDATABASE_DIRECTORY={root / 'data'}", "-DENABLE_SYSTEMD=OFF", "-DENABLE_JSON_SHARED=OFF"]
+            self._update(job_id, progress=35, message=f"Configuring ClamAV {requested_version}…", log=[f"$ {' '.join(configure)}"])
+            result = subprocess.run(configure, capture_output=True, text=True, check=False)
+            if result.returncode != 0: raise RuntimeError((result.stderr or result.stdout).strip() or "ClamAV CMake configuration failed")
+            command = [cmake, "--build", str(build_dir), "-j2"]
+            self._update(job_id, progress=48, message=f"Compiling ClamAV {requested_version}…", log=[f"$ {' '.join(command)}"])
+            build = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1); output = []
+            for line in build.stdout or []:
+                if line.strip(): output.append(line.rstrip()); self._update(job_id, progress=60, message=f"Compiling ClamAV {requested_version}…", log=output[-120:])
+            if build.wait() != 0: raise RuntimeError("ClamAV source build failed: " + (output[-1] if output else "CMake returned a non-zero exit code"))
+            result = subprocess.run([cmake, "--install", str(build_dir)], capture_output=True, text=True, check=False)
+            if result.returncode != 0: raise RuntimeError((result.stderr or result.stdout).strip() or "ClamAV isolated installation failed")
+            for directory in (root / "logs", root / "run"): directory.mkdir(parents=True, exist_ok=True)
+            (root / ".serverengine-version").write_text(requested_version + "\n")
+            self._update(job_id, status="succeeded", progress=100, message=f"ClamAV {requested_version} was built from source in {root}; no host antivirus package was changed.")
+        except Exception as error: self._update(job_id, status="failed", message=str(error))
+        finally: archive.unlink(missing_ok=True); shutil.rmtree(staging, ignore_errors=True)
+
+    def _run_opensearch_binary(self, job_id: str, requested_version: str):
+        """Build OpenSearch from its Gradle source distribution into its service root."""
+        source_url = opensearch_source_for(requested_version)
+        if not source_url:
+            try:
+                definition, _, _ = refresh_service_versions("opensearch")
+                if any(item.version == requested_version for item in definition.versions):
+                    source_url = opensearch_source_for(requested_version)
+            except Exception:
+                source_url = None
+        java = shutil.which("java")
+        javac = shutil.which("javac")
+        if not source_url:
+            self._update(job_id, status="failed", message=f"OpenSearch {requested_version} is not available from the official source repository. Refresh compatible versions and try again.")
+            return
+        if not java or not javac:
+            self._update(job_id, status="failed", message="OpenSearch source builds require a JDK. Install the Server Engine build dependencies, then retry; no host OpenSearch package is required.")
+            return
+        root = service_root("opensearch")
+        staging = root.parent / f".opensearch-{job_id}-staging"
+        archive = root.parent / f"opensearch-{requested_version}.tar.gz"
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True); shutil.rmtree(staging, ignore_errors=True); staging.mkdir(parents=True); archive.unlink(missing_ok=True)
+            self._update(job_id, status="running", progress=2, message=f"Downloading OpenSearch {requested_version} source…", log=[])
+            with urllib.request.urlopen(urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"}), timeout=180) as response, archive.open("wb") as output:
+                output.write(response.read())
+            with tarfile.open(archive, "r:gz") as package:
+                members = package.getmembers()
+                if any(item.name.startswith("/") or ".." in Path(item.name).parts for item in members): raise RuntimeError("The OpenSearch archive contains an unsafe path")
+                package.extractall(staging)
+            source = next((item for item in staging.iterdir() if item.is_dir()), staging)
+            arch_task = "linux-arm64-tar" if platform.machine().lower() in {"aarch64", "arm64"} else "linux-tar"
+            wrapper = source / "gradlew"
+            if not wrapper.exists(): raise RuntimeError("The OpenSearch source tree does not contain its Gradle wrapper")
+            wrapper.chmod(0o755)
+            command = [str(wrapper), f":distribution:archives:{arch_task}:assemble"]
+            self._update(job_id, progress=35, message=f"Compiling OpenSearch {requested_version} with Gradle…", log=[f"$ {' '.join(command)}"])
+            build = subprocess.Popen(command, cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            output = []
+            for line in build.stdout or []:
+                if line.strip(): output.append(line.rstrip()); self._update(job_id, progress=45, message=f"Compiling OpenSearch {requested_version}…", log=output[-120:])
+            if build.wait() != 0: raise RuntimeError("OpenSearch source build failed: " + (output[-1] if output else "Gradle returned a non-zero exit code"))
+            bundles = sorted(source.glob(f"distribution/archives/{arch_task}/build/distributions/opensearch-*.tar.gz"))
+            if not bundles: raise RuntimeError("The OpenSearch source build did not produce a Linux distribution archive")
+            extracted = staging / "runtime"
+            extracted.mkdir()
+            with tarfile.open(bundles[-1], "r:gz") as package: package.extractall(extracted)
+            built = next((item for item in extracted.iterdir() if item.is_dir()), extracted)
+            if root.exists(): shutil.rmtree(root)
+            shutil.move(str(built), str(root))
+            (root / "data").mkdir(exist_ok=True); (root / "logs").mkdir(exist_ok=True); (root / "run").mkdir(exist_ok=True)
+            (root / ".serverengine-version").write_text(requested_version + "\n")
+            self._update(job_id, status="succeeded", progress=100, message=f"OpenSearch {requested_version} was built from source in {root}; no host OpenSearch package was changed.")
+        except Exception as error: self._update(job_id, status="failed", message=str(error))
+        finally: archive.unlink(missing_ok=True); shutil.rmtree(staging, ignore_errors=True)
+
+    def _run_wpcli_binary(self, job_id: str, requested_version: str):
+        """Install WP-CLI from its official source tree in an isolated tool root."""
+        source_url = wpcli_source_for(requested_version)
+        if not source_url:
+            try:
+                definition, _, _ = refresh_service_versions("wp-cli")
+                if any(item.version == requested_version for item in definition.versions): source_url = wpcli_source_for(requested_version)
+            except Exception: source_url = None
+        php = next((path for path in sorted(Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")).glob("php/versions/*/usr/bin/php*")) if path.is_file()), None)
+        composer = shutil.which("composer")
+        if not composer:
+            composer_candidates = sorted(Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")).glob("composer/versions/*/bin/composer"))
+            composer = str(composer_candidates[-1]) if composer_candidates else None
+        if not source_url: self._update(job_id, status="failed", message=f"WP-CLI {requested_version} is not available from the official source repository. Refresh compatible versions and try again."); return
+        if not php or not composer:
+            self._update(job_id, status="failed", message="WP-CLI source installation requires an installed isolated PHP runtime and Composer. Install PHP and Composer first, then retry."); return
+        root = service_root("wp-cli") / "versions" / requested_version; staging = root.parent / f".wp-cli-{job_id}-staging"; archive = root.parent / f"wp-cli-{requested_version}.tar.gz"
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True); shutil.rmtree(staging, ignore_errors=True); staging.mkdir(parents=True); archive.unlink(missing_ok=True)
+            self._update(job_id, status="running", progress=3, message=f"Downloading WP-CLI {requested_version} source…", log=[])
+            with urllib.request.urlopen(urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"}), timeout=120) as response, archive.open("wb") as output: output.write(response.read())
+            with tarfile.open(archive, "r:gz") as package: package.extractall(staging)
+            source = next((item for item in staging.iterdir() if item.is_dir()), staging)
+            command = [composer, "install", "--no-dev", "--prefer-dist", "--no-interaction", "--no-progress"]
+            self._update(job_id, progress=35, message=f"Resolving WP-CLI {requested_version} dependencies…", log=[f"$ {' '.join(command)}"])
+            result = subprocess.run(command, cwd=source, capture_output=True, text=True, check=False)
+            if result.returncode != 0: raise RuntimeError((result.stderr or result.stdout).strip() or "Composer failed to build WP-CLI")
+            entry = source / "bin/wp-cli.php"
+            if not entry.exists(): raise RuntimeError("The WP-CLI source tree did not contain bin/wp-cli.php")
+            if root.exists(): shutil.rmtree(root)
+            shutil.move(str(source), str(root)); (root / "bin").mkdir(exist_ok=True)
+            launcher = root / "bin/wp"
+            launcher.write_text("#!/bin/sh\nexec " + shlex.quote(str(php)) + " " + shlex.quote(str(root / "bin/wp-cli.php")) + ' "$@"\n'); launcher.chmod(0o755)
+            (root / ".serverengine-version").write_text(requested_version + "\n")
+            self._update(job_id, status="succeeded", progress=100, message=f"WP-CLI {requested_version} is installed in {root}; the host WP-CLI installation was not changed.")
+        except Exception as error: self._update(job_id, status="failed", message=str(error))
+        finally: archive.unlink(missing_ok=True); shutil.rmtree(staging, ignore_errors=True)
+
+    def _run_postfix_binary(self, job_id: str, requested_version: str):
+        """Build Postfix from its official source archive without host installation."""
+        source_url = postfix_source_for(requested_version)
+        if not source_url:
+            try:
+                definition, _, _ = refresh_service_versions("postfix")
+                if any(item.version == requested_version for item in definition.versions): source_url = postfix_source_for(requested_version)
+            except Exception: source_url = None
+        make = shutil.which("make"); compiler = shutil.which("cc") or shutil.which("gcc")
+        if not source_url: self._update(job_id, status="failed", message=f"Postfix {requested_version} is not available from the official source archive. Refresh compatible versions and try again."); return
+        if not make or not compiler: self._update(job_id, status="failed", message="Postfix source builds require a compiler and make. Install the Server Engine build dependencies, then retry; no host Postfix package is required."); return
+        root = service_root("postfix"); staging = root.parent / f".postfix-{job_id}-staging"; archive = root.parent / f"postfix-{requested_version}.tar.gz"
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True); shutil.rmtree(staging, ignore_errors=True); staging.mkdir(parents=True); archive.unlink(missing_ok=True)
+            self._update(job_id, status="running", progress=3, message=f"Downloading Postfix {requested_version} source…", log=[])
+            with urllib.request.urlopen(urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"}), timeout=120) as response, archive.open("wb") as output: output.write(response.read())
+            with tarfile.open(archive, "r:gz") as package: package.extractall(staging)
+            source = next((item for item in staging.iterdir() if item.is_dir()), staging)
+            config = ["make", "makefiles", f"config_directory={root / 'conf'}", f"daemon_directory={root / 'libexec'}", f"command_directory={root / 'bin'}", f"meta_directory={root / 'conf'}", f"data_directory={root / 'data'}", f"queue_directory={root / 'queue'}", "shared=yes"]
+            self._update(job_id, progress=35, message=f"Preparing Postfix {requested_version} build…", log=[f"$ {' '.join(config)}"])
+            result = subprocess.run(config, cwd=source, capture_output=True, text=True, check=False)
+            if result.returncode != 0: raise RuntimeError((result.stderr or result.stdout).strip() or "Postfix makefiles failed")
+            build = subprocess.Popen([make, "-j2"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1); output = []
+            for line in build.stdout or []:
+                if line.strip(): output.append(line.rstrip()); self._update(job_id, progress=55, message=f"Compiling Postfix {requested_version}…", log=output[-120:])
+            if build.wait() != 0: raise RuntimeError("Postfix source build failed: " + (output[-1] if output else "make returned a non-zero exit code"))
+            root.mkdir(parents=True, exist_ok=True)
+            install = subprocess.run([make, "install", "non_interactive=yes", f"install_root={root}"], cwd=source, capture_output=True, text=True, check=False)
+            if install.returncode != 0: raise RuntimeError((install.stderr or install.stdout).strip() or "Postfix isolated installation failed")
+            (root / "logs").mkdir(exist_ok=True); (root / "run").mkdir(exist_ok=True); (root / ".serverengine-version").write_text(requested_version + "\n")
+            self._update(job_id, status="succeeded", progress=100, message=f"Postfix {requested_version} was built from source in {root}; no host mail package was changed.")
+        except Exception as error: self._update(job_id, status="failed", message=str(error))
+        finally: archive.unlink(missing_ok=True); shutil.rmtree(staging, ignore_errors=True)
+
+    def _run_dovecot_binary(self, job_id: str, requested_version: str):
+        """Build Dovecot from its official source archive into its service root."""
+        source_url = dovecot_source_for(requested_version)
+        if not source_url:
+            try:
+                definition, _, _ = refresh_service_versions("dovecot")
+                if any(item.version == requested_version for item in definition.versions): source_url = dovecot_source_for(requested_version)
+            except Exception: source_url = None
+        make = shutil.which("make"); compiler = shutil.which("cc") or shutil.which("gcc")
+        if not source_url: self._update(job_id, status="failed", message=f"Dovecot {requested_version} is not available from the official source repository. Refresh compatible versions and try again."); return
+        if not make or not compiler: self._update(job_id, status="failed", message="Dovecot source builds require a compiler and make. Install the Server Engine build dependencies, then retry; no host Dovecot package is required."); return
+        root = service_root("dovecot"); staging = root.parent / f".dovecot-{job_id}-staging"; archive = root.parent / f"dovecot-{requested_version}.tar.gz"
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True); shutil.rmtree(staging, ignore_errors=True); staging.mkdir(parents=True); archive.unlink(missing_ok=True)
+            self._update(job_id, status="running", progress=3, message=f"Downloading Dovecot {requested_version} source…", log=[])
+            with urllib.request.urlopen(urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"}), timeout=120) as response, archive.open("wb") as output: output.write(response.read())
+            with tarfile.open(archive, "r:gz") as package: package.extractall(staging)
+            source = next((item for item in staging.iterdir() if item.is_dir()), staging)
+            configure = [str(source / "configure"), f"--prefix={root}", f"--sysconfdir={root / 'conf'}", f"--localstatedir={root / 'var'}", f"--with-rundir={root / 'run'}", "--with-ssldir=/etc/ssl"]
+            if not (source / "configure").exists():
+                subprocess.run([str(source / "autogen.sh")], cwd=source, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            self._update(job_id, progress=35, message=f"Configuring Dovecot {requested_version}…", log=[f"$ {' '.join(configure)}"])
+            configured = subprocess.run(configure, cwd=source, capture_output=True, text=True, check=False)
+            if configured.returncode != 0: raise RuntimeError((configured.stderr or configured.stdout).strip() or "Dovecot configure failed")
+            build = subprocess.Popen([make, "-j2"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1); output = []
+            for line in build.stdout or []:
+                if line.strip(): output.append(line.rstrip()); self._update(job_id, progress=55, message=f"Compiling Dovecot {requested_version}…", log=output[-120:])
+            if build.wait() != 0: raise RuntimeError("Dovecot source build failed: " + (output[-1] if output else "make returned a non-zero exit code"))
+            result = subprocess.run([make, "install"], cwd=source, capture_output=True, text=True, check=False)
+            if result.returncode != 0: raise RuntimeError((result.stderr or result.stdout).strip() or "Dovecot isolated installation failed")
+            (root / "logs").mkdir(exist_ok=True); (root / "data").mkdir(exist_ok=True); (root / ".serverengine-version").write_text(requested_version + "\n")
+            self._update(job_id, status="succeeded", progress=100, message=f"Dovecot {requested_version} was built from source in {root}; no host mail package was changed.")
+        except Exception as error: self._update(job_id, status="failed", message=str(error))
+        finally: archive.unlink(missing_ok=True); shutil.rmtree(staging, ignore_errors=True)
+
+    def _run_stalwart_binary(self, job_id: str, requested_version: str):
+        """Build Stalwart Mail Server from its official Rust source tree."""
+        source_url = stalwart_source_for(requested_version)
+        if not source_url:
+            try:
+                definition, _, _ = refresh_service_versions("stalwart")
+                if any(item.version == requested_version for item in definition.versions):
+                    source_url = stalwart_source_for(requested_version)
+            except Exception:
+                source_url = None
+        if not source_url:
+            self._update(job_id, status="failed", message=f"Stalwart {requested_version} is not available from the official source repository. Refresh compatible versions and try again.")
+            return
+        if os.geteuid() != 0:
+            self._update(job_id, status="failed", message="The isolated Stalwart installer must run with privileges to stage the runtime.")
+            return
+        cargo = shutil.which("cargo")
+        rustc = shutil.which("rustc")
+        if not cargo or not rustc:
+            self._update(job_id, status="failed", message="Stalwart needs the Rust compiler and Cargo to build its isolated binary. Install the Server Engine build dependencies, then retry; no host mail package is required.")
+            return
+        root = service_root("stalwart")
+        staging = root.parent / f".stalwart-{job_id}-staging"
+        archive = root.parent / f"stalwart-{requested_version}.tar.gz"
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True, exist_ok=True)
+            archive.unlink(missing_ok=True)
+            self._update(job_id, status="running", progress=2, message=f"Downloading Stalwart {requested_version} source…", log=[])
+            request = urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"})
+            with urllib.request.urlopen(request, timeout=120) as response, archive.open("wb") as output:
+                total = int(response.headers.get("Content-Length", "0") or 0)
+                downloaded = 0
+                while True:
+                    self._raise_if_cancelled(job_id)
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    output.write(chunk)
+                    downloaded += len(chunk)
+                    progress = 4 + round(downloaded * 28 / total) if total else 14
+                    self._update(job_id, progress=min(32, progress), message=f"Downloading Stalwart {requested_version} source…")
+            self._update(job_id, progress=35, message=f"Extracting Stalwart {requested_version} into a temporary build area…")
+            with tarfile.open(archive, "r:gz") as package:
+                members = package.getmembers()
+                if any(member.name.startswith("/") or ".." in Path(member.name).parts for member in members):
+                    raise RuntimeError("The Stalwart archive contains an unsafe path")
+                package.extractall(staging)
+            source = next((item for item in staging.iterdir() if item.is_dir()), staging)
+            command = [cargo, "build", "--release", "--locked", "--bin", "stalwart"]
+            self._update(job_id, progress=40, message=f"Compiling Stalwart {requested_version} with Cargo…", log=[f"$ {' '.join(command)}"])
+            build = subprocess.Popen(command, cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            output = []
+            for line in build.stdout or []:
+                if line.strip():
+                    output.append(line.rstrip())
+                    self._update(job_id, progress=40, message=f"Compiling Stalwart {requested_version}…", log=output[-120:])
+            if build.wait() != 0:
+                raise RuntimeError("Stalwart source build failed: " + (output[-1] if output else "cargo returned a non-zero exit code"))
+            built = source / "target/release/stalwart"
+            if not built.exists():
+                raise RuntimeError("The Stalwart source build did not produce target/release/stalwart")
+            if root.exists():
+                shutil.rmtree(root)
+            root.mkdir(parents=True, exist_ok=True)
+            (root / "bin").mkdir(parents=True, exist_ok=True)
+            shutil.copy2(built, root / "bin/stalwart")
+            (root / "bin/stalwart").chmod(0o755)
+            for directory in (root / "conf", root / "data", root / "logs", root / "run"):
+                directory.mkdir(parents=True, exist_ok=True)
+            (root / ".serverengine-version").write_text(requested_version + "\n")
+            self._update(job_id, status="succeeded", progress=100, message=f"Stalwart {requested_version} was built from source in {root}; no host mail package was changed.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+        finally:
+            archive.unlink(missing_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+
+    def _run_mongodb_binary(self, job_id: str, requested_version: str):
+        """Build MongoDB's server binary from the official Bazel source tree."""
+        source_url = mongodb_source_for(requested_version)
+        if not source_url:
+            try:
+                definition, _, _ = refresh_service_versions("mongodb")
+                if any(item.version == requested_version for item in definition.versions):
+                    source_url = mongodb_source_for(requested_version)
+            except Exception:
+                source_url = None
+        if not source_url:
+            self._update(job_id, status="failed", message=f"MongoDB {requested_version} is not available from the official source repository. Refresh compatible versions and try again.")
+            return
+        if os.geteuid() != 0:
+            self._update(job_id, status="failed", message="The isolated MongoDB installer must run with privileges to stage the runtime.")
+            return
+        python = shutil.which("python3") or shutil.which("python")
+        make = shutil.which("make")
+        compiler = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
+        if not python or not make or not compiler:
+            self._update(job_id, status="failed", message="MongoDB source builds require Python 3, make, and a modern C++ compiler. Install the Server Engine build dependencies, then retry; no host MongoDB package is required.")
+            return
+        root = service_root("mongodb")
+        staging = root.parent / f".mongodb-{job_id}-staging"
+        archive = root.parent / f"mongodb-{requested_version}.tar.gz"
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True, exist_ok=True)
+            archive.unlink(missing_ok=True)
+            self._update(job_id, status="running", progress=2, message=f"Downloading MongoDB {requested_version} source…", log=[])
+            request = urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"})
+            with urllib.request.urlopen(request, timeout=180) as response, archive.open("wb") as output:
+                total = int(response.headers.get("Content-Length", "0") or 0)
+                downloaded = 0
+                while True:
+                    self._raise_if_cancelled(job_id)
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    output.write(chunk)
+                    downloaded += len(chunk)
+                    progress = 4 + round(downloaded * 26 / total) if total else 12
+                    self._update(job_id, progress=min(30, progress), message=f"Downloading MongoDB {requested_version} source…")
+            self._update(job_id, progress=33, message=f"Extracting MongoDB {requested_version} into a temporary build area…")
+            with tarfile.open(archive, "r:gz") as package:
+                members = package.getmembers()
+                if any(member.name.startswith("/") or ".." in Path(member.name).parts for member in members):
+                    raise RuntimeError("The MongoDB archive contains an unsafe path")
+                package.extractall(staging)
+            source = next((item for item in staging.iterdir() if item.is_dir()), staging)
+            bazel = shutil.which("bazel") or shutil.which("bazelisk")
+            if not bazel:
+                installer = source / "buildscripts/install_bazel.py"
+                if not installer.exists():
+                    raise RuntimeError("The MongoDB source tree does not contain its Bazel installer")
+                self._update(job_id, progress=36, message="Installing the MongoDB-compatible Bazel build tool in the build environment…", log=[f"$ {python} buildscripts/install_bazel.py"])
+                installed = subprocess.run([python, str(installer)], cwd=source, capture_output=True, text=True, check=False)
+                if installed.returncode != 0:
+                    raise RuntimeError((installed.stderr or installed.stdout).strip() or "MongoDB Bazel bootstrap failed")
+                bazel = shutil.which("bazel") or str(Path.home() / ".local/bin/bazel")
+            if not Path(bazel).exists() and shutil.which(bazel) is None:
+                raise RuntimeError("MongoDB Bazel was not available after the source bootstrap")
+            command = [bazel, "build", "install-mongod", "--jobs=2"]
+            self._update(job_id, progress=40, message=f"Compiling MongoDB {requested_version} with Bazel…", log=[f"$ {' '.join(command)}"])
+            build = subprocess.Popen(command, cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            output = []
+            for line in build.stdout or []:
+                if line.strip():
+                    output.append(line.rstrip())
+                    self._update(job_id, progress=40, message=f"Compiling MongoDB {requested_version}…", log=output[-120:])
+            if build.wait() != 0:
+                raise RuntimeError("MongoDB source build failed: " + (output[-1] if output else "Bazel returned a non-zero exit code"))
+            candidates = [source / "bazel-bin/install-mongod/bin/mongod", source / "bazel-bin/install/bin/mongod", source / "bazel-bin/mongod"]
+            built = next((candidate for candidate in candidates if candidate.exists()), None)
+            if built is None:
+                built = next(source.glob("bazel-bin/**/mongod"), None)
+            if built is None:
+                raise RuntimeError("The MongoDB source build did not produce a mongod binary")
+            if root.exists():
+                shutil.rmtree(root)
+            root.mkdir(parents=True, exist_ok=True)
+            (root / "bin").mkdir(parents=True, exist_ok=True)
+            shutil.copy2(built, root / "bin/mongod")
+            (root / "bin/mongod").chmod(0o755)
+            for directory in (root / "conf", root / "data", root / "logs", root / "run"):
+                directory.mkdir(parents=True, exist_ok=True)
+            (root / "conf/mongod.conf").write_text(
+                f"systemLog:\n  destination: file\n  path: {root / 'logs/mongod.log'}\n  logAppend: true\nstorage:\n  dbPath: {root / 'data'}\nnet:\n  bindIp: 127.0.0.1\n  port: 27017\nprocessManagement:\n  fork: false\n"
+            )
+            (root / ".serverengine-version").write_text(requested_version + "\n")
+            self._update(job_id, status="succeeded", progress=100, message=f"MongoDB {requested_version} was built from source in {root}; no host MongoDB package was changed.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+        finally:
+            archive.unlink(missing_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+
+    def _run_nginx_binary(self, job_id: str, requested_version: str):
+        """Build Nginx from the official source archive inside its service root."""
+        source_url = nginx_source_for(requested_version)
+        if not source_url:
+            try:
+                definition, _, _ = refresh_service_versions("nginx")
+                if any(item.version == requested_version for item in definition.versions):
+                    source_url = nginx_source_for(requested_version)
+            except Exception:
+                source_url = None
+        if not source_url:
+            self._update(job_id, status="failed", message=f"Nginx {requested_version} is not available from the official release archive. Refresh compatible versions and try again.")
+            return
+        if os.geteuid() != 0:
+            self._update(job_id, status="failed", message="The isolated Nginx installer must run with privileges to stage the runtime.")
+            return
+        make = shutil.which("make")
+        compiler = shutil.which("cc") or shutil.which("gcc")
+        if not make or not compiler:
+            self._update(job_id, status="failed", message="Nginx needs a compiler and make to build its isolated binary. Install the host build tools, then retry; no Nginx system package is required.")
+            return
+        root = service_root("nginx")
+        staging = root.parent / f".nginx-{job_id}-staging"
+        archive = root.parent / f"nginx-{requested_version}.tar.gz"
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True, exist_ok=True)
+            archive.unlink(missing_ok=True)
+            self._update(job_id, status="running", progress=3, message=f"Downloading Nginx {requested_version} source…", log=[])
+            request = urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"})
+            with urllib.request.urlopen(request, timeout=60) as response, archive.open("wb") as output:
+                total = int(response.headers.get("Content-Length", "0") or 0)
+                downloaded = 0
+                while True:
+                    self._raise_if_cancelled(job_id)
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    output.write(chunk)
+                    downloaded += len(chunk)
+                    progress = 5 + round(downloaded * 30 / total) if total else 15
+                    self._update(job_id, progress=min(35, progress), message=f"Downloading Nginx {requested_version} source…")
+            with tarfile.open(archive, "r:gz") as package:
+                members = package.getmembers()
+                if any(member.name.startswith("/") or ".." in Path(member.name).parts for member in members):
+                    raise RuntimeError("The Nginx archive contains an unsafe path")
+                package.extractall(staging)
+            source = next((item for item in staging.iterdir() if item.is_dir()), staging)
+            configure = [
+                str(source / "configure"), f"--prefix={root}", f"--sbin-path={root / 'bin/nginx'}",
+                f"--conf-path={root / 'conf/nginx.conf'}", f"--pid-path={root / 'run/nginx.pid'}",
+                f"--error-log-path={root / 'logs/error.log'}", f"--http-log-path={root / 'logs/access.log'}",
+                f"--http-client-body-temp-path={root / 'data/client_temp'}", f"--http-proxy-temp-path={root / 'data/proxy_temp'}",
+                f"--http-fastcgi-temp-path={root / 'data/fastcgi_temp'}", "--with-http_ssl_module", "--with-http_v2_module",
+                "--with-http_gzip_static_module", "--with-threads", "--with-stream",
+            ]
+            self._update(job_id, progress=40, message=f"Preparing Nginx {requested_version} build…", log=[f"$ {' '.join(configure)}"])
+            configured = subprocess.Popen(configure, cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            output = []
+            for line in configured.stdout or []:
+                if line.strip():
+                    output.append(line.rstrip())
+                    self._update(job_id, progress=45, message=f"Configuring Nginx {requested_version}…", log=output[-80:])
+            if configured.wait() != 0:
+                raise RuntimeError("Nginx configure failed: " + (output[-1] if output else "configure returned a non-zero exit code"))
+            self._update(job_id, progress=50, message=f"Compiling Nginx {requested_version}…", log=[f"$ {make} -j2"])
+            build = subprocess.Popen([make, "-j2"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            output = []
+            for line in build.stdout or []:
+                if line.strip():
+                    output.append(line.rstrip())
+                    self._update(job_id, progress=60, message=f"Compiling Nginx {requested_version}…", log=output[-80:])
+            if build.wait() != 0:
+                raise RuntimeError("Nginx source build failed: " + (output[-1] if output else "make returned a non-zero exit code"))
+            if root.exists():
+                shutil.rmtree(root)
+            self._update(job_id, progress=92, message=f"Installing Nginx {requested_version} into the managed directory…", log=[f"$ {make} install"])
+            install = subprocess.Popen([make, "install"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            output = []
+            for line in install.stdout or []:
+                if line.strip():
+                    output.append(line.rstrip())
+                    self._update(job_id, progress=95, message=f"Installing Nginx {requested_version}…", log=output[-80:])
+            if install.wait() != 0:
+                raise RuntimeError("Nginx installation into the managed directory failed: " + (output[-1] if output else "make install returned a non-zero exit code"))
+            (root / ".serverengine-version").write_text(requested_version)
+            ensure_nginx_layout()
+            self._update(job_id, status="succeeded", progress=100, message=f"Nginx {requested_version} is installed in {root}; the host Nginx package and service were not changed.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+        finally:
+            archive.unlink(missing_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+
+    def _run_apache_binary(self, job_id: str, requested_version: str):
+        """Build Apache HTTP Server and its APR dependencies in its service root."""
+        if not requested_version.startswith("2."):
+            self._update(
+                job_id,
+                status="failed",
+                message="That Apache source release is not supported. Refresh versions and choose an Apache 2.x release.",
+            )
+            return
+        source_url = apache_source_for(requested_version)
+        if not source_url:
+            try:
+                definition, _, _ = refresh_service_versions("apache")
+                if any(item.version == requested_version for item in definition.versions):
+                    source_url = apache_source_for(requested_version)
+            except Exception:
+                source_url = None
+        if not source_url:
+            self._update(job_id, status="failed", message=f"Apache {requested_version} is not available from the official release archive. Refresh compatible versions and try again.")
+            return
+        if os.geteuid() != 0:
+            self._update(job_id, status="failed", message="The isolated Apache installer must run with privileges to stage the runtime.")
+            return
+        make = shutil.which("make")
+        compiler = shutil.which("cc") or shutil.which("gcc")
+        if not make or not compiler:
+            self._update(job_id, status="failed", message="Apache needs a compiler and make to build its isolated binary. Install the host build tools, then retry; no Apache system package is required.")
+            return
+        root = service_root("apache")
+        staging = root.parent / f".apache-{job_id}-staging"
+        archive = root.parent / f"apache-{requested_version}.tar.gz"
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True, exist_ok=True)
+            archive.unlink(missing_ok=True)
+            self._update(job_id, status="running", progress=2, message=f"Downloading Apache {requested_version} source…", log=[])
+            request = urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"})
+            with urllib.request.urlopen(request, timeout=60) as response, archive.open("wb") as output:
+                total = int(response.headers.get("Content-Length", "0") or 0)
+                downloaded = 0
+                while True:
+                    self._raise_if_cancelled(job_id)
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    output.write(chunk)
+                    downloaded += len(chunk)
+                    progress = 4 + round(downloaded * 26 / total) if total else 12
+                    self._update(job_id, progress=min(30, progress), message=f"Downloading Apache {requested_version} source…")
+            with tarfile.open(archive, "r:gz") as package:
+                members = package.getmembers()
+                if any(member.name.startswith("/") or ".." in Path(member.name).parts for member in members):
+                    raise RuntimeError("The Apache archive contains an unsafe path")
+                package.extractall(staging)
+            source = next((item for item in staging.iterdir() if item.is_dir()), staging)
+            # Older Apache source releases bundle obsolete GNU config scripts.
+            # Replace them with the current scripts so their isolated build can
+            # identify modern x86_64 and ARM64 hosts.
+            config_guess = next((item for item in (
+                Path("/usr/share/misc/config.guess"),
+                Path("/usr/share/automake-1.16/config.guess"),
+                Path("/usr/share/automake-1.15/config.guess"),
+            ) if item.exists()), None)
+            config_sub = next((item for item in (
+                Path("/usr/share/misc/config.sub"),
+                Path("/usr/share/automake-1.16/config.sub"),
+                Path("/usr/share/automake-1.15/config.sub"),
+            ) if item.exists()), None)
+            if config_guess and config_sub:
+                for config_dir in (source / "build", source / "srclib/apr/build", source / "srclib/apr-util/build"):
+                    config_dir.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(config_guess, config_dir / "config.guess")
+                    shutil.copy2(config_sub, config_dir / "config.sub")
+            srclib = source / "srclib"
+            srclib.mkdir(exist_ok=True)
+            self._update(job_id, progress=33, message="Downloading Apache APR build dependencies…", log=["APR and APR-util are built inside the Apache staging area."])
+            for dependency, version in (("apr", "1.7.6"), ("apr-util", "1.6.3")):
+                dependency_archive = staging / f"{dependency}-{version}.tar.gz"
+                dependency_url = f"https://archive.apache.org/dist/apr/{dependency}-{version}.tar.gz"
+                with urllib.request.urlopen(urllib.request.Request(dependency_url, headers={"User-Agent": "Server-Engine-Control-Panel"}), timeout=60) as response, dependency_archive.open("wb") as output:
+                    output.write(response.read())
+                with tarfile.open(dependency_archive, "r:gz") as dependency_package:
+                    dependency_package.extractall(srclib)
+                extracted = srclib / f"{dependency}-{version}"
+                target = srclib / dependency
+                if target.exists():
+                    shutil.rmtree(target)
+                extracted.rename(target)
+                dependency_archive.unlink(missing_ok=True)
+            apache_version = tuple(int(part) for part in requested_version.split("."))
+            legacy_ssl_root = None
+            if apache_version < (2, 4, 0):
+                legacy_ssl_root = self._ensure_isolated_openssl(job_id, "1.0.2u")
+            configure = [
+                str(source / "configure"), f"--prefix={root}", f"--sbindir={root / 'bin'}",
+                f"--sysconfdir={root / 'conf'}", "--with-mpm=event", "--enable-so",
+                "--enable-rewrite", "--enable-proxy", "--with-included-apr",
+            ]
+            if apache_version >= (2, 4, 0):
+                # Apache 2.4's mod_ssl supports the OpenSSL 3 toolchain used
+                # by current Ubuntu/Debian releases. Point configure at the
+                # system prefix so it does not mix headers and libraries from
+                # different SSL installations.
+                configure.extend(["--enable-ssl", "--with-ssl=/usr", "--enable-proxy-fcgi"])
+            else:
+                configure.extend(["--enable-ssl", f"--with-ssl={legacy_ssl_root}"])
+            if apache_version >= (2, 4, 17):
+                configure.append("--enable-http2")
+            self._update(job_id, progress=40, message=f"Configuring Apache {requested_version}…", log=[f"$ {' '.join(configure)}"])
+            configure_env = os.environ.copy()
+            # Older Apache's configure script puts -lpcre before its static
+            # objects. Modern linkers process archives left-to-right, so add
+            # PCRE at the end as well to resolve the final httpd link.
+            configure_env["LIBS"] = f"{configure_env.get('LIBS', '').strip()} -lpcre".strip()
+            configured = subprocess.Popen(configure, cwd=source, env=configure_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            output = []
+            for line in configured.stdout or []:
+                if line.strip():
+                    output.append(line.rstrip())
+                    self._update(job_id, progress=45, message=f"Configuring Apache {requested_version}…", log=output[-80:])
+            if configured.wait() != 0:
+                raise RuntimeError("Apache configure failed: " + (output[-1] if output else "configure returned a non-zero exit code"))
+            make_jobs = "-j1" if apache_version < (2, 4, 0) else "-j2"
+            self._update(job_id, progress=50, message=f"Compiling Apache {requested_version}…", log=[f"$ {make} {make_jobs}"])
+            build = subprocess.Popen([make, make_jobs], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            output = []
+            for line in build.stdout or []:
+                if line.strip():
+                    output.append(line.rstrip())
+                    self._update(job_id, progress=60, message=f"Compiling Apache {requested_version}…", log=output[-200:])
+            if build.wait() != 0:
+                self._update(job_id, log=output[-300:])
+                raise RuntimeError("Apache source build failed: " + (output[-1] if output else "make returned a non-zero exit code"))
+            if root.exists():
+                shutil.rmtree(root)
+            self._update(job_id, progress=92, message=f"Installing Apache {requested_version} into the managed directory…", log=[f"$ {make} install"])
+            install = subprocess.Popen([make, "install"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            output = []
+            for line in install.stdout or []:
+                if line.strip():
+                    output.append(line.rstrip())
+                    self._update(job_id, progress=95, message=f"Installing Apache {requested_version}…", log=output[-80:])
+            if install.wait() != 0:
+                raise RuntimeError("Apache installation into the managed directory failed: " + (output[-1] if output else "make install returned a non-zero exit code"))
+            (root / ".serverengine-version").write_text(requested_version)
+            self._update(job_id, status="succeeded", progress=100, message=f"Apache {requested_version} is installed in {root}; the host Apache package and service were not changed.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+        finally:
+            archive.unlink(missing_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+
+    def _ensure_isolated_openssl(self, job_id: str, requested_version: str) -> Path:
+        """Build and cache a reusable private OpenSSL runtime for legacy tools."""
+        root = service_root("openssl", requested_version)
+        marker = root / ".serverengine-version"
+        if marker.exists() and (root / "lib/libssl.a").exists() and (root / "lib/libcrypto.a").exists():
+            return root
+        make = shutil.which("make")
+        if not make:
+            raise RuntimeError("OpenSSL source builds require make and a compiler.")
+        staging = root.parent.parent / f".openssl-{job_id}-staging"
+        archive = staging / f"openssl-{requested_version}.tar.gz"
+        source = staging / f"openssl-{requested_version}"
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True, exist_ok=True)
+            self._update(job_id, progress=36, message=f"Building reusable OpenSSL {requested_version}…", log=[])
+            url = f"https://www.openssl.org/source/old/1.0.2/openssl-{requested_version}.tar.gz"
+            with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "Server-Engine-Control-Panel"}), timeout=60) as response, archive.open("wb") as output:
+                output.write(response.read())
+            with tarfile.open(archive, "r:gz") as package:
+                members = package.getmembers()
+                if any(member.name.startswith("/") or ".." in Path(member.name).parts for member in members):
+                    raise RuntimeError("The OpenSSL archive contains an unsafe path")
+                package.extractall(staging)
+            configure = ["./config", f"--prefix={root}", f"--openssldir={root / 'ssl'}", "no-shared", "no-tests", "no-ssl3"]
+            self._update(job_id, progress=38, message=f"Configuring reusable OpenSSL {requested_version}…", log=[f"$ {' '.join(configure)}"])
+            configured = subprocess.run(configure, cwd=source, capture_output=True, text=True, check=False)
+            if configured.returncode != 0:
+                raise RuntimeError("OpenSSL configure failed: " + (configured.stderr or configured.stdout).strip()[-1200:])
+            self._update(job_id, progress=39, message=f"Compiling reusable OpenSSL {requested_version}…", log=[f"$ {make} -j2"])
+            built = subprocess.run([make, "-j2"], cwd=source, capture_output=True, text=True, check=False)
+            if built.returncode != 0:
+                raise RuntimeError("OpenSSL build failed: " + (built.stderr or built.stdout).strip()[-1200:])
+            if root.exists():
+                shutil.rmtree(root)
+            installed = subprocess.run([make, "install_sw"], cwd=source, capture_output=True, text=True, check=False)
+            if installed.returncode != 0:
+                raise RuntimeError("OpenSSL installation failed: " + (installed.stderr or installed.stdout).strip()[-1200:])
+            marker.write_text(requested_version + "\n")
+            return root
+        finally:
+            archive.unlink(missing_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+
+    def _run_sqlserver_container(self, job_id: str, requested_version: str):
+        if platform.machine().lower() not in {"x86_64", "amd64"}:
+            self._update(job_id, status="failed", message="Microsoft SQL Server requires an x86_64 Linux host; ARM64 is not supported by the official Linux container.")
+            return
+        docker = shutil.which("docker")
+        if not docker:
+            self._update(job_id, status="failed", message="Docker Engine is required to install Microsoft SQL Server. Install Docker from Services first, then retry.")
+            return
+        tag = requested_version
+        root = service_root("sqlserver")
+        data = root / "data"
+        credentials = root / "sa-password"
+        container = "server-engine-sqlserver"
+        root.mkdir(parents=True, exist_ok=True)
+        data.mkdir(parents=True, exist_ok=True)
+        if not credentials.exists():
+            credentials.write_text(secrets.token_urlsafe(24) + "!Aa1")
+            credentials.chmod(0o600)
+        password = credentials.read_text().strip()
+        image = f"mcr.microsoft.com/mssql/server:{tag}"
+        try:
+            self._update(job_id, status="running", progress=5, message=f"Pulling Microsoft SQL Server {requested_version} container…", log=[])
+            pull = subprocess.Popen([docker, "pull", image], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            output = []
+            for line in pull.stdout or []:
+                if line.strip():
+                    output.append(line.rstrip())
+                    self._update(job_id, progress=40, message="Downloading Microsoft SQL Server image…", log=output[-80:])
+            if pull.wait() != 0:
+                raise RuntimeError("Unable to download the Microsoft SQL Server Docker image")
+            subprocess.run([docker, "rm", "-f", container], capture_output=True, text=True, check=False)
+            command = [
+                docker, "run", "-d", "--name", container, "--restart", "unless-stopped",
+                "-e", "ACCEPT_EULA=Y", "-e", "MSSQL_PID=Developer", "-e", f"MSSQL_SA_PASSWORD={password}",
+                "-p", "127.0.0.1:1433:1433", "-v", f"{data}:/var/opt/mssql", image,
+            ]
+            started = subprocess.run(command, capture_output=True, text=True, check=False)
+            if started.returncode != 0:
+                raise RuntimeError((started.stderr or started.stdout).strip() or "Unable to start the Microsoft SQL Server container")
+            (root / ".serverengine-version").write_text(requested_version)
+            self._update(job_id, status="succeeded", progress=100, message=f"Microsoft SQL Server {requested_version} is running in Docker on 127.0.0.1:1433. SA password: {credentials}")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+
     def _run_composer_binary(self, job_id: str, requested_version: str):
         if os.geteuid() != 0:
             self._update(job_id, status="failed", message="Composer installation requires privileges to create the isolated tool directory.")
@@ -1219,7 +3512,7 @@ class JobStore:
 
     def _run_mysql_binary(self, job_id: str, requested_version: str):
         releases = {"8.4": "8.4.11", "8.0": "8.0.46", "5.7": "5.7.44"}
-        release = releases.get(requested_version)
+        release = mysql_release_for(requested_version) or releases.get(requested_version)
         if not release:
             self._update(job_id, status="failed", message=f"MySQL {requested_version} is listed but has no binary adapter yet. Supported automatic binaries: {', '.join(releases)}.")
             return
@@ -1231,11 +3524,20 @@ class JobStore:
         if not architecture:
             self._update(job_id, status="failed", message=f"Official MySQL generic binaries are not available for host architecture {machine}.")
             return
+        if release.startswith("5.7") and architecture != "x86_64":
+            self._update(job_id, status="failed", message="MySQL 5.7.44's official generic binary is available for Linux x86_64 only; Oracle does not publish an ARM64 MySQL 5.7 archive. Choose MySQL 8.0/8.4 on ARM64 or use an x86_64 host.")
+            return
         root = service_root("mysql")
-        archive = root.parent / f"mysql-{release}-{architecture}.tar.xz"
+        legacy_mysql = release.startswith("5.7")
+        archive_suffix = ".tar.gz" if legacy_mysql else ".tar.xz"
+        archive = root.parent / f"mysql-{release}-{architecture}{archive_suffix}"
         staging = root.parent / f".mysql-{job_id}-staging"
         backup = root.parent / f".mysql-{job_id}-backup"
-        url = f"https://dev.mysql.com/get/Downloads/MySQL-{requested_version}/mysql-{release}-linux-glibc2.28-{architecture}.tar.xz"
+        series = ".".join(release.split(".")[:2])
+        if legacy_mysql:
+            url = f"https://dev.mysql.com/get/Downloads/MySQL-{series}/mysql-{release}-linux-glibc2.12-x86_64.tar.gz"
+        else:
+            url = f"https://dev.mysql.com/get/Downloads/MySQL-{series}/mysql-{release}-linux-glibc2.28-{architecture}.tar.xz"
         try:
             root.parent.mkdir(parents=True, exist_ok=True)
             shutil.rmtree(staging, ignore_errors=True)
@@ -1260,7 +3562,8 @@ class JobStore:
                         self._update(job_id, progress=progress, message=f"Downloading MySQL {release}… {progress}%")
             self._raise_if_cancelled(job_id)
             self._update(job_id, progress=72, message=f"Extracting MySQL {release} into a temporary isolated area; the global OS package database will not be changed.")
-            with tarfile.open(archive, mode="r:xz") as package:
+            archive_mode = "r:gz" if legacy_mysql else "r:xz"
+            with tarfile.open(archive, mode=archive_mode) as package:
                 members = package.getmembers()
                 if any(member.name.startswith("/") or ".." in Path(member.name).parts for member in members):
                     raise RuntimeError("The downloaded MySQL archive contains an unsafe path")
@@ -1336,32 +3639,13 @@ class JobStore:
             self._update(job_id, status="failed", message=str(error))
 
     def _run_legacy_install(self, job_id: str, service_id: str, requested_version: str):
-        package = {"nginx": "nginx", "apache": "apache2", "php": "php-fpm", "nodejs": "nodejs", "python": "python3", "mariadb": "mariadb-server", "mysql": "mysql-server", "postgresql": "postgresql", "redis": "redis-server", "memcached": "memcached", "certbot": "certbot", "vsftpd": "vsftpd", "fail2ban": "fail2ban"}.get(service_id)
-        if not package:
-            self._update(job_id, status="failed", message=f"No installer adapter exists for {service_id} yet.")
-            return
-        if os.geteuid() != 0:
-            self._update(job_id, status="failed", message="The installer agent must run as root or through a configured privileged helper.")
-            return
-        apt = shutil.which("apt-get")
-        if not apt:
-            self._update(job_id, status="failed", message="This test installer currently supports Debian/Ubuntu apt-based hosts.")
-            return
-        try:
-            self._update(job_id, status="running", message=f"Installing distro package {package}; requested version {requested_version}.", log=[])
-            for command in ([apt, "update"], [apt, "install", "-y", "--no-install-recommends", package]):
-                process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-                output = []
-                for line in process.stdout or []:
-                    line = line.rstrip()
-                    if line:
-                        output.append(line)
-                        self._update(job_id, log=output[-80:])
-                if process.wait() != 0:
-                    raise RuntimeError(f"Command failed: {' '.join(command)}")
-            self._update(job_id, status="succeeded", message=f"{package} installed. The distro selected the available package for requested version {requested_version}.")
-        except Exception as error:
-            self._update(job_id, status="failed", message=str(error))
+        # This method is retained only for old queued jobs. It must never be
+        # allowed to install a package into the host operating system.
+        self._update(
+            job_id,
+            status="failed",
+            message=f"The legacy installer for {service_id} was blocked because Server Engine never installs global OS packages. Use the isolated service installer instead.",
+        )
 
     def list(self) -> list[JobSummary]:
         with self._lock:
@@ -1398,7 +3682,7 @@ def enqueue_startup_services() -> None:
     apache_root = service_root("apache")
     if nginx["binary"].exists() and nginx["config"].exists() and not _managed_process_alive(nginx["pid"]):
         job_store.enqueue_action("startup-nginx", "nginx", "start")
-    elif (apache_root / "usr/sbin/apache2").exists() and (apache_root / "conf/httpd.conf").exists() and not _managed_process_alive(apache_root / "run/httpd.pid"):
+    elif binary_path("apache").exists() and (apache_root / "conf/httpd.conf").exists() and not _managed_process_alive(apache_root / "run/httpd.pid"):
         job_store.enqueue_action("startup-apache", "apache", "start")
 
     database = next((service_id for service_id in ("mysql", "mariadb") if binary_path(service_id).exists()), None)

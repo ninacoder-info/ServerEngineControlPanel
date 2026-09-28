@@ -1,7 +1,6 @@
 # Development/test environment only. Customer servers use ./install.sh natively.
 services:
   core:
-    platform: linux/amd64
     build: { context: ./core }
     environment:
       APP_ENV: "${APP_ENV:-development}"
@@ -14,7 +13,6 @@ services:
       timeout: 5s
       retries: 3
   web:
-    platform: linux/amd64
     build:
       context: ./web
       args:

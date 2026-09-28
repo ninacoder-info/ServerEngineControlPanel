@@ -260,7 +260,13 @@ function VirtualHosts({ message, setMessage }) {
 
 export default function ApacheConfigModal({ service, installed, onClose }) {
   const current = (Array.isArray(installed) ? installed : [installed]).filter(Boolean)[0];
-  const running = current?.status === "running";
+  const [runtimeStatus, setRuntimeStatus] = React.useState(current?.status || "not installed");
+  const [runtimeVersion, setRuntimeVersion] = React.useState(current?.version || "");
+  React.useEffect(() => {
+    setRuntimeStatus(current?.status || "not installed");
+    setRuntimeVersion(current?.version || "");
+  }, [current?.status, current?.version]);
+  const running = runtimeStatus === "running";
   const [tab, setTab] = React.useState("overview");
   const [config, setConfig] = React.useState(null);
   const [text, setText] = React.useState("");
@@ -311,13 +317,24 @@ export default function ApacheConfigModal({ service, installed, onClose }) {
     if (!response.ok || !body.job_id) { setMessage(body.message || "Apache action failed."); setAction(""); return; }
     let finalJob;
     for (let attempt = 0; attempt < 30; attempt += 1) { await new Promise((resolve) => window.setTimeout(resolve, 700)); const jobs = await apiRequest("/api/v1/jobs").then((result) => result.ok ? result.json() : []); finalJob = jobs.find((job) => job.id === body.job_id); if (finalJob && ["succeeded", "failed", "cancelled"].includes(finalJob.status)) break; }
-    setMessage(""); setAction("");
+    if (finalJob?.status === "succeeded") {
+      const refreshed = await apiRequest("/api/v1/services/installed");
+      if (refreshed.ok) {
+        const detected = await refreshed.json();
+        const next = detected.find((item) => item.id === "apache");
+        setRuntimeStatus(next?.status || "stopped");
+        setRuntimeVersion(next?.version || runtimeVersion);
+      }
+    } else if (finalJob?.message) {
+      setMessage(finalJob.message);
+    }
+    setAction("");
   }
   const primary = running ? "stop" : "start";
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/60 p-4 sm:p-8" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <section className="w-full max-w-3xl rounded-xl bg-white p-6 shadow-xl dark:bg-slate-900">
-        <div className="flex items-start justify-between gap-4"><div><h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Apache HTTP Server</h2><p className="mt-1 flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400"><span className={`h-2 w-2 rounded-full ${running ? "bg-emerald-500" : "bg-amber-500"}`} />{current?.status || "not installed"}{current?.version && ` · v${current.version}`}</p></div><button type="button" aria-label="Close Apache configuration" className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200" onClick={onClose}><X size={18} /></button></div>
+        <div className="flex items-start justify-between gap-4"><div><h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Apache HTTP Server</h2><p className="mt-1 flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400"><span className={`h-2 w-2 rounded-full ${running ? "bg-emerald-500" : "bg-amber-500"}`} />{runtimeStatus}{runtimeVersion && ` · v${runtimeVersion}`}</p></div><button type="button" aria-label="Close Apache configuration" className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200" onClick={onClose}><X size={18} /></button></div>
         <div className="mt-6 flex gap-5 overflow-x-auto border-b border-slate-200 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:border-slate-800">{tabs.map(([id, label, Icon]) => <button type="button" key={id} onClick={() => setTab(id)} className={`inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap border-b-2 px-1 pb-3 text-sm font-medium ${tab === id ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"}`}><Icon size={15} />{label}</button>)}</div>
         <div className="pt-5">
           {tab === "overview" && <Overview config={config} busy={busy} message={message} onSave={(values) => save(text.replace(/^Listen\s+\d+/m, `Listen ${values.listen}`))} />}

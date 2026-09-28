@@ -130,7 +130,7 @@ def catalog(user=Depends(require_user)):
 @router.post("/{service_id}/versions/refresh")
 def refresh_versions(service_id: str, user=Depends(require_user)):
     try:
-        definition, source, message = refresh_service_versions(service_id)
+        definition, source, message = refresh_service_versions(service_id, force=True)
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     return {
@@ -177,6 +177,14 @@ def installed(user=Depends(require_user)):
                     if version is not None:
                         detected.append(InstalledService(id=f"nodejs@{version_root.name}", name=f"Node.js {version_root.name}", version=version, status="stopped", managed=False))
             ensure_node_runtime(service_root("nodejs"))
+            continue
+        if service_id == "python":
+            versions_root = service_root("python") / "versions"
+            if versions_root.exists():
+                for version_root in sorted(item for item in versions_root.iterdir() if item.is_dir()):
+                    version = _installed_service_version("python", package, version_root.name)
+                    if version is not None:
+                        detected.append(InstalledService(id=f"python@{version_root.name}", name=f"Python {version_root.name}", version=version_root.name, status="installed", managed=False))
             continue
         version = _installed_service_version(service_id, package)
         if version is None:
@@ -277,7 +285,16 @@ def install(service_id: str, payload: InstallServiceRequest, user=Depends(requir
     if not service.installable:
         raise HTTPException(status_code=400, detail=f"{service.name} is managed from {service.management_label or 'its dedicated feature area'}, not installed as an isolated service package.")
     if not any(item.version == payload.version for item in service.versions):
-        raise HTTPException(status_code=400, detail="Requested version is not available for this provider")
+        # The frontend may have a cached provider list while this API process
+        # has just restarted and returned to its catalog defaults. Refresh the
+        # provider once before rejecting an otherwise valid cached selection.
+        try:
+            refreshed, _, _ = refresh_service_versions(service_id)
+            service = refreshed
+        except Exception:
+            pass
+    if not any(item.version == payload.version for item in service.versions):
+        raise HTTPException(status_code=400, detail=f"Requested {service.name} version {payload.version} is not available for this host. Refresh compatible versions and choose one from the current list.")
     if not payload.confirmed:
         return {"status": "confirmation_required", "service": service, "version": payload.version}
     job_id = f"preview-{service_id}-{payload.version}"

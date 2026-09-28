@@ -180,8 +180,8 @@ download_release_bundle() {
 install_system_dependencies() {
   [ "$INSTALL_SYSTEM_DEPS" = true ] || return 0
   case "$PM" in
-    apt) run env DEBIAN_FRONTEND=noninteractive apt-get update; run env DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl tar gzip build-essential python3 python3-venv python3-pip;;
-    dnf|yum) run "$PM" install -y ca-certificates curl tar gzip gcc gcc-c++ make python3 python3-pip;;
+    apt) run env DEBIAN_FRONTEND=noninteractive apt-get update; run env DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl tar gzip python3 python3-venv python3-pip;;
+    dnf|yum) run "$PM" install -y ca-certificates curl tar gzip python3 python3-pip;;
   esac
 }
 
@@ -193,7 +193,7 @@ install_certbot_runtime() {
   if [ ! -x "$certbot_bin" ]; then
     log "Installing Certbot in the Server Engine service root"
     "$PYTHON" -m venv "$certbot_venv"
-    run "$certbot_venv/bin/pip" install --disable-pip-version-check --no-cache-dir --upgrade certbot
+    run "$certbot_venv/bin/pip" install --disable-pip-version-check --no-cache-dir --no-binary :all: --upgrade certbot
   else
     log "Certbot already available at $certbot_bin"
   fi

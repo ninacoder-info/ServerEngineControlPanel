@@ -27,7 +27,7 @@ export default function InstallServiceModal({
     if (response.ok && body.versions?.length) {
       setVersions(body.versions);
       window.sessionStorage.setItem(
-        `server-engine:service-versions:${service.id}`,
+        `server-engine:service-versions:v10:${service.id}`,
         JSON.stringify(body.versions),
       );
       setVersion((current) =>
@@ -41,7 +41,7 @@ export default function InstallServiceModal({
           message: body.message || "Compatible versions refreshed.",
         });
       }
-    } else if (manual) {
+    } else {
       setToast({
         type: "error",
         message: body.message || "Unable to refresh compatible versions.",
@@ -51,7 +51,7 @@ export default function InstallServiceModal({
   }
 
   React.useEffect(() => {
-    const cacheKey = `server-engine:service-versions:${service.id}`;
+    const cacheKey = `server-engine:service-versions:v10:${service.id}`;
     try {
       const cached = JSON.parse(window.sessionStorage.getItem(cacheKey) || "null");
       if (Array.isArray(cached) && cached.length) {

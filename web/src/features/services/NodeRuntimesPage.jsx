@@ -48,10 +48,11 @@ export default function NodeRuntimesPage() {
         })
         .catch(() => {});
     load();
-    const timer = window.setInterval(load, 5000);
+    const refreshAfterJob = () => load();
+    window.addEventListener("serverengine:jobs-updated", refreshAfterJob);
     return () => {
       alive = false;
-      window.clearInterval(timer);
+      window.removeEventListener("serverengine:jobs-updated", refreshAfterJob);
     };
   }, []);
   if (!service)

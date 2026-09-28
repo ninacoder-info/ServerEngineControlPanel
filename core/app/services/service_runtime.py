@@ -2,17 +2,14 @@ import os
 import pwd
 from pathlib import Path
 
-SERVICE_PACKAGES = {"nginx": "nginx", "apache": "apache2", "openlitespeed": "openlitespeed", "caddy": "caddy", "haproxy": "haproxy", "php": "php-fpm", "nodejs": "nodejs", "python": "python3", "ruby": "ruby", "mariadb": "mariadb-server", "mysql": "mysql-server", "postgresql": "postgresql", "redis": "redis-server", "valkey": "valkey-server", "memcached": "memcached", "certbot": "certbot", "vsftpd": "vsftpd", "fail2ban": "fail2ban", "powerdns": "pdns-server", "rabbitmq": "rabbitmq-server", "docker": "docker.io", "git": "git", "imagemagick": "imagemagick", "ffmpeg": "ffmpeg", "supervisor": "supervisor", "postfix": "postfix", "dovecot": "dovecot-imapd", "rspamd": "rspamd", "bind9": "bind9", "unbound": "unbound", "clamav": "clamav", "auditd": "auditd", "lynis": "lynis", "logrotate": "logrotate", "node-exporter": "prometheus-node-exporter", "modsecurity": "libmodsecurity3"}
-SERVICE_BINARIES = {"nginx": "usr/sbin/nginx", "apache": "usr/sbin/apache2", "openlitespeed": "usr/local/lsws/bin/lshttpd", "caddy": "usr/bin/caddy", "haproxy": "usr/sbin/haproxy", "php": "usr/sbin/php-fpm8.2", "nodejs": "usr/bin/node", "python": "usr/bin/python3", "ruby": "usr/bin/ruby", "mariadb": "usr/sbin/mariadbd", "mysql": "bin/mysqld", "postgresql": "usr/lib/postgresql/15/bin/postgres", "redis": "usr/bin/redis-server", "valkey": "usr/bin/valkey-server", "memcached": "usr/bin/memcached", "certbot": "usr/bin/certbot", "vsftpd": "usr/sbin/vsftpd", "fail2ban": "usr/bin/fail2ban-server", "powerdns": "usr/sbin/pdns_server"}
+SERVICE_PACKAGES = {"nginx": "nginx", "apache": "apache2", "caddy": "caddy", "haproxy": "haproxy", "php": "php-fpm", "nodejs": "nodejs", "python": "python3", "mariadb": "mariadb-server", "mysql": "mysql-server", "postgresql": "postgresql", "redis": "redis-server", "valkey": "valkey-server", "memcached": "memcached", "certbot": "certbot", "vsftpd": "vsftpd", "fail2ban": "fail2ban", "powerdns": "pdns-server", "rabbitmq": "rabbitmq-server", "docker": "docker.io", "postfix": "postfix", "dovecot": "dovecot-imapd", "rspamd": "rspamd", "bind9": "bind9", "unbound": "unbound", "clamav": "clamav", "auditd": "auditd", "logrotate": "logrotate", "node-exporter": "prometheus-node-exporter", "modsecurity": "libmodsecurity3"}
+SERVICE_BINARIES = {"nginx": "usr/sbin/nginx", "apache": "usr/sbin/apache2", "openlitespeed": "usr/local/lsws/bin/lshttpd", "caddy": "usr/bin/caddy", "haproxy": "usr/sbin/haproxy", "php": "usr/sbin/php-fpm8.2", "nodejs": "usr/bin/node", "python": "usr/bin/python3", "ruby": "usr/bin/ruby", "mariadb": "usr/sbin/mariadbd", "mysql": "bin/mysqld", "postgresql": "usr/lib/postgresql/15/bin/postgres", "redis": "usr/bin/redis-server", "valkey": "usr/bin/valkey-server", "memcached": "usr/bin/memcached", "certbot": "usr/bin/certbot", "vsftpd": "usr/sbin/vsftpd", "fail2ban": "usr/bin/fail2ban-server", "powerdns": "usr/sbin/pdns_server", "rabbitmq": "sbin/rabbitmq-server", "stalwart": "bin/stalwart", "mongodb": "bin/mongod", "opensearch": "bin/opensearch", "wp-cli": "bin/wp", "postfix": "bin/postfix", "dovecot": "sbin/dovecot", "rspamd": "bin/rspamd", "bind9": "sbin/named", "unbound": "sbin/unbound", "clamav": "bin/clamscan", "supervisor": "venv/bin/supervisord", "lynis": "bin/lynis"}
 
 
 def service_root(service_id: str, version: str | None = None) -> Path:
-    if service_id == "php" and version:
+    if service_id in {"php", "nodejs", "python", "openssl"} and version:
         safe_version = version.replace("/", "-").replace("\\", "-")
-        return Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / "php" / "versions" / safe_version
-    if service_id == "nodejs" and version:
-        safe_version = version.replace("/", "-").replace("\\", "-")
-        return Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / "nodejs" / "versions" / safe_version
+        return Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / service_id / "versions" / safe_version
     return Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / service_id
 
 
@@ -22,15 +19,109 @@ def package_for(service_id: str) -> str | None:
 
 def binary_path(service_id: str, version: str | None = None) -> Path:
     root = service_root(service_id, version)
+    if service_id == "nginx":
+        candidates = [root / "bin/nginx", root / "usr/sbin/nginx"]
+        return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    if service_id == "apache":
+        candidates = [root / "bin/httpd", root / "usr/sbin/apache2"]
+        return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
     if service_id == "postgresql":
-        candidates = sorted(root.glob("usr/lib/postgresql/*/bin/postgres"), reverse=True)
-        return candidates[0] if candidates else root / "usr/lib/postgresql/15/bin/postgres"
+        candidates = [root / "bin/postgres", *sorted(root.glob("usr/lib/postgresql/*/bin/postgres"), reverse=True)]
+        return next((candidate for candidate in candidates if candidate.exists()), root / "bin/postgres")
     if service_id == "nodejs":
         current = root / "bin/node"
         legacy = root / "usr/bin/node"
         return current if current.exists() or not legacy.exists() else legacy
+    if service_id == "python" and version:
+        candidates = [
+            root / "bin/python",
+            root / "bin/python3",
+            root / "usr/bin/python",
+            root / "usr/bin/python3",
+            root / "python/bin/python",
+            root / "python/bin/python3",
+        ]
+        return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    if service_id == "redis":
+        candidates = [root / "bin/redis-server", root / "usr/bin/redis-server"]
+        return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
     if service_id == "certbot":
         candidates = [root / "venv/bin/certbot", root / "usr/bin/certbot", root / "bin/certbot"]
+        return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    if service_id == "rabbitmq":
+        candidates = [root / "sbin/rabbitmq-server", root / "bin/rabbitmq-server", root / "usr/sbin/rabbitmq-server"]
+        return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    if service_id == "openlitespeed":
+        candidates = [root / "bin/openlitespeed", root / "bin/lshttpd", root / "usr/local/lsws/bin/lshttpd"]
+        return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    if service_id == "git":
+        candidates = [root / "bin/git", root / "usr/bin/git"]
+        return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    if service_id == "imagemagick":
+        candidates = [root / "bin/magick", root / "bin/convert", root / "usr/bin/magick"]
+        return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    if service_id == "ruby":
+        candidates = [root / "bin/ruby", root / "usr/bin/ruby"]
+        return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    if service_id == "ffmpeg":
+        candidates = [root / "bin/ffmpeg", root / "usr/bin/ffmpeg"]
+        return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    if service_id == "caddy":
+        candidates = [root / "bin/caddy", root / "usr/bin/caddy"]
+        return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    if service_id == "mariadb":
+        candidates = [root / "bin/mariadbd", root / "sbin/mariadbd", root / "usr/sbin/mariadbd"]
+        return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    if service_id == "powerdns":
+        candidates = [root / "bin/pdns_server", root / "sbin/pdns_server", root / "usr/sbin/pdns_server"]
+        return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    if service_id == "haproxy":
+        candidates = [root / "bin/haproxy", root / "usr/sbin/haproxy"]
+        return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    if service_id == "memcached":
+        candidates = [root / "bin/memcached", root / "usr/bin/memcached"]
+        return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    if service_id == "valkey":
+        candidates = [root / "bin/valkey-server", root / "usr/bin/valkey-server"]
+        return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    if service_id == "vsftpd":
+        candidates = [root / "bin/vsftpd", root / "usr/sbin/vsftpd"]
+        return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    if service_id == "stalwart":
+        candidates = [root / "bin/stalwart", root / "usr/bin/stalwart"]
+        return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    if service_id == "mongodb":
+        candidates = [root / "bin/mongod", root / "usr/bin/mongod"]
+        return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    if service_id == "opensearch":
+        candidates = [root / "bin/opensearch", root / "bin/opensearch-keystore"]
+        return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    if service_id == "wp-cli":
+        candidates = [root / "versions" / "current" / "bin/wp", root / "bin/wp"]
+        return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    if service_id == "postfix":
+        candidates = [root / "bin/postfix", root / "usr/sbin/postfix"]
+        return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    if service_id == "dovecot":
+        candidates = [root / "sbin/dovecot", root / "usr/sbin/dovecot"]
+        return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    if service_id == "rspamd":
+        candidates = [root / "bin/rspamd", root / "usr/bin/rspamd"]
+        return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    if service_id == "bind9":
+        candidates = [root / "sbin/named", root / "usr/sbin/named", root / "bin/named"]
+        return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    if service_id == "unbound":
+        candidates = [root / "sbin/unbound", root / "usr/sbin/unbound", root / "bin/unbound"]
+        return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    if service_id == "clamav":
+        candidates = [root / "bin/clamscan", root / "usr/bin/clamscan"]
+        return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    if service_id == "supervisor":
+        candidates = [root / "venv/bin/supervisord", root / "bin/supervisord"]
+        return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    if service_id == "lynis":
+        candidates = [root / "bin/lynis", root / "lynis"]
         return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
     if service_id == "php" and version:
         candidates = sorted(root.glob("usr/sbin/php-fpm*")) + sorted(root.glob("usr/bin/php-fpm*"))
@@ -259,7 +350,8 @@ def ensure_php_fpm_layout(version: str) -> dict[str, Path]:
 
 def nginx_paths() -> dict[str, Path]:
     root = service_root("nginx")
-    return {"root": root, "binary": root / "usr/sbin/nginx", "config": root / "conf/nginx.conf", "pid": root / "run/nginx.pid", "access_log": root / "logs/access.log", "error_log": root / "logs/error.log", "www": Path(os.getenv("SE_WEB_ROOT", "/server-engine/www"))}
+    binary = root / "bin/nginx" if (root / "bin/nginx").exists() else root / "usr/sbin/nginx"
+    return {"root": root, "binary": binary, "config": root / "conf/nginx.conf", "pid": root / "run/nginx.pid", "access_log": root / "logs/access.log", "error_log": root / "logs/error.log", "www": Path(os.getenv("SE_WEB_ROOT", "/server-engine/www"))}
 
 
 def nginx_default_configuration(paths: dict[str, Path] | None = None) -> str:
@@ -325,6 +417,16 @@ def ensure_nginx_layout() -> dict[str, Path]:
     for key in ("config", "pid", "access_log", "error_log", "www"):
         paths[key].parent.mkdir(parents=True, exist_ok=True)
     paths["www"].mkdir(parents=True, exist_ok=True)
+    for directory in (
+        paths["root"] / "data/client_temp",
+        paths["root"] / "data/proxy_temp",
+        paths["root"] / "data/fastcgi_temp",
+        paths["root"] / "data/uwsgi_temp",
+        paths["root"] / "data/scgi_temp",
+        paths["root"] / "run",
+        paths["root"] / "logs",
+    ):
+        directory.mkdir(parents=True, exist_ok=True)
     if not paths["config"].exists():
         paths["config"].write_text(nginx_default_configuration(paths))
     (paths["root"] / "conf/sites").mkdir(parents=True, exist_ok=True)

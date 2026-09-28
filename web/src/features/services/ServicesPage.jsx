@@ -63,10 +63,11 @@ export default function ServicesPage() {
         })
         .catch(() => {});
     load();
-    const timer = setInterval(load, 5000);
+    const refreshAfterJob = () => load();
+    window.addEventListener("serverengine:jobs-updated", refreshAfterJob);
     return () => {
       alive = false;
-      clearInterval(timer);
+      window.removeEventListener("serverengine:jobs-updated", refreshAfterJob);
     };
   }, []);
   React.useEffect(() => {

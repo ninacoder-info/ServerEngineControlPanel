@@ -1227,7 +1227,7 @@ export default function ServiceManagerModal({
     if (response.ok && body.versions?.length) {
       setAvailableVersions(body.versions);
       window.sessionStorage.setItem(
-        `server-engine:service-versions:${service.id}`,
+        `server-engine:service-versions:v10:${service.id}`,
         JSON.stringify(body.versions),
       );
       if (!body.versions.some((item) => item.version === version)) {
@@ -1248,7 +1248,7 @@ export default function ServiceManagerModal({
     setVersionsRefreshing(false);
   };
   React.useEffect(() => {
-    const cacheKey = `server-engine:service-versions:${service.id}`;
+      const cacheKey = `server-engine:service-versions:v10:${service.id}`;
     try {
       const cached = JSON.parse(window.sessionStorage.getItem(cacheKey) || "null");
       if (Array.isArray(cached) && cached.length) {

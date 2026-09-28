@@ -1,7 +1,7 @@
 services:
   core-dev:
     image: ubuntu:24.04
-    platform: linux/amd64
+    platform: linux/arm64
     working_dir: /app
     ports:
       - "18000:8000"
@@ -13,6 +13,7 @@ services:
       - ./core:/app
       - core-dev-pip-cache:/root/.cache/pip
       - core-dev-state:/var/lib/server-engine
+      - core-dev-services:/opt/server-engine/services
     command: >-
       bash -lc "apt-get update &&
       apt-get install -y --no-install-recommends python3 python3-pip python3-venv openssh-client ca-certificates &&
@@ -22,7 +23,7 @@ services:
 
   web-dev:
     image: ubuntu:24.04
-    platform: linux/amd64
+    platform: linux/arm64
     working_dir: /app
     volumes:
       - ./web:/app
@@ -45,5 +46,6 @@ services:
 volumes:
   core-dev-pip-cache:
   core-dev-state:
+  core-dev-services:
   web-dev-node-modules:
   web-dev-npm-cache:

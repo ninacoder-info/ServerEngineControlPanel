@@ -1,6 +1,5 @@
 services:
   installer-test:
-    platform: linux/amd64
     build:
       context: .
       dockerfile: docker/test-installer.Dockerfile
@@ -11,7 +10,6 @@ services:
       - installer-npm-cache:/root/.npm
 
   panel-live:
-    platform: linux/amd64
     build:
       context: .
       dockerfile: docker/test-installer.Dockerfile

@@ -44,8 +44,9 @@ app.include_router(settings.router)
 app.include_router(websites.router)
 app.include_router(terminal.router)
 
-WEB_DIST = Path(os.getenv("SE_WEB_DIST", ""))
-if WEB_DIST.is_dir():
+WEB_DIST_VALUE = os.getenv("SE_WEB_DIST")
+WEB_DIST = Path(WEB_DIST_VALUE).resolve() if WEB_DIST_VALUE else None
+if WEB_DIST and (WEB_DIST / "index.html").is_file() and (WEB_DIST / "assets").is_dir():
     app.mount("/assets", StaticFiles(directory=WEB_DIST / "assets"), name="assets")
 
     @app.get("/{path:path}", include_in_schema=False)
