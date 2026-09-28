@@ -54,6 +54,25 @@ class AuthStore:
                     challenge TEXT NOT NULL,
                     expires_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS api_tokens (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    name TEXT NOT NULL,
+                    token_hash TEXT NOT NULL UNIQUE,
+                    token_prefix TEXT NOT NULL,
+                    scopes TEXT NOT NULL DEFAULT '[]',
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT,
+                    last_used_at TEXT
+                );
+                CREATE TABLE IF NOT EXISTS api_pairings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    code_hash TEXT NOT NULL UNIQUE,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    used_at TEXT
+                );
             """)
             if db.execute("SELECT 1 FROM users LIMIT 1").fetchone() is None:
                 db.execute("INSERT INTO users(username, password_hash, created_at) VALUES (?, ?, ?)", (self.bootstrap_user, hash_password(self.bootstrap_password), now().isoformat()))
@@ -89,6 +108,57 @@ class AuthStore:
         if token:
             with self.connection() as db:
                 db.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash(token),))
+
+    def create_api_token(self, user_id: int, name: str, scopes: list[str], expires_days: int | None):
+        token = f"se_{secrets.token_urlsafe(36)}"
+        created = now()
+        expires = created + timedelta(days=expires_days) if expires_days else None
+        with self.connection() as db:
+            cursor = db.execute(
+                "INSERT INTO api_tokens(user_id, name, token_hash, token_prefix, scopes, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (user_id, name, token_hash(token), token[:12], json.dumps(scopes), created.isoformat(), expires.isoformat() if expires else None),
+            )
+            token_id = cursor.lastrowid
+        return {"id": token_id, "name": name, "token": token, "scopes": scopes, "created_at": created.isoformat(), "expires_at": expires.isoformat() if expires else None}
+
+    def api_tokens_for_user(self, user_id: int):
+        with self.connection() as db:
+            rows = db.execute("SELECT id, name, token_prefix, scopes, created_at, expires_at, last_used_at FROM api_tokens WHERE user_id = ? ORDER BY created_at DESC", (user_id,)).fetchall()
+        return [{**dict(row), "scopes": json.loads(row["scopes"] or "[]")} for row in rows]
+
+    def revoke_api_token(self, user_id: int, token_id: int) -> bool:
+        with self.connection() as db:
+            result = db.execute("DELETE FROM api_tokens WHERE id = ? AND user_id = ?", (token_id, user_id))
+        return result.rowcount > 0
+
+    def user_for_api_token(self, token: str | None):
+        if not token:
+            return None
+        with self.connection() as db:
+            row = db.execute(
+                "SELECT users.id, users.username, api_tokens.id AS token_id FROM api_tokens JOIN users ON users.id = api_tokens.user_id WHERE api_tokens.token_hash = ? AND (api_tokens.expires_at IS NULL OR api_tokens.expires_at > ?)",
+                (token_hash(token), now().isoformat()),
+            ).fetchone()
+            if not row:
+                return None
+            db.execute("UPDATE api_tokens SET last_used_at = ? WHERE id = ?", (now().isoformat(), row["token_id"]))
+        return {"id": row["id"], "username": row["username"]}
+
+    def create_pairing(self, user_id: int):
+        code = secrets.token_urlsafe(18)
+        created = now()
+        expires = created + timedelta(minutes=5)
+        with self.connection() as db:
+            cursor = db.execute("INSERT INTO api_pairings(user_id, code_hash, created_at, expires_at) VALUES (?, ?, ?, ?)", (user_id, token_hash(code), created.isoformat(), expires.isoformat()))
+        return {"id": cursor.lastrowid, "code": code, "expires_at": expires.isoformat()}
+
+    def exchange_pairing(self, code: str, device_name: str):
+        with self.connection() as db:
+            row = db.execute("SELECT id, user_id FROM api_pairings WHERE code_hash = ? AND used_at IS NULL AND expires_at > ?", (token_hash(code), now().isoformat())).fetchone()
+            if not row:
+                return None
+            db.execute("UPDATE api_pairings SET used_at = ? WHERE id = ?", (now().isoformat(), row["id"]))
+        return self.create_api_token(row["user_id"], device_name or "Mobile device", ["read:*", "write:websites", "write:services"], 90)
 
     def save_challenge(self, purpose: str, challenge: str, user_id: int | None = None):
         expires = now() + timedelta(minutes=2)

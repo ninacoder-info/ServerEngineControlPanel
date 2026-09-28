@@ -32,12 +32,44 @@ import WebProtectionPage from "../waf/WebProtectionPage";
 import DockerPage from "../docker/DockerPage";
 import PlansPage from "../plans/PlansPage";
 import { useTranslation } from "../../lib/i18n";
+import { apiRequest } from "../../lib/api";
+import {
+  applyPanelPreferences,
+  readPanelPreferences,
+} from "../../lib/panelPreferences";
 export default function DashboardPage({ user, onLogout }) {
   const [menuOpen, setMenuOpen] = React.useState(false);
+  const [panelPreferences, setPanelPreferences] = React.useState(readPanelPreferences);
   const location = useLocation();
   const navigate = useNavigate();
   const theme = useTheme();
   const { t } = useTranslation();
+  React.useEffect(() => {
+    const update = (event) => setPanelPreferences(event.detail || readPanelPreferences());
+    window.addEventListener("serverengine:panel-settings-change", update);
+    return () => window.removeEventListener("serverengine:panel-settings-change", update);
+  }, []);
+  React.useEffect(() => {
+    let active = true;
+    apiRequest("/api/v1/settings/panel")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body) => {
+        if (active && body?.values) {
+          setPanelPreferences(body.values);
+          applyPanelPreferences(body.values);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+  React.useEffect(() => {
+    const landing = panelPreferences.panel_landing;
+    if (location.pathname === "/" && landing && landing !== "overview") {
+      navigate(`/${landing}`);
+    }
+  }, [location.pathname, navigate, panelPreferences.panel_landing]);
   const active = location.pathname.startsWith("/websites")
     ? "Websites"
     : location.pathname === "/services/php"
@@ -176,7 +208,10 @@ export default function DashboardPage({ user, onLogout }) {
     </>
   );
   return (
-    <div className={`app-shell ${theme.light ? "theme-light" : "dark"}`}>
+    <div
+      className={`app-shell ${theme.light ? "theme-light" : "dark"} density-${panelPreferences.panel_density || "comfortable"}`}
+      data-show-hints={panelPreferences.panel_show_hints !== false}
+    >
       <Sidebar
         open={menuOpen}
         active={active}

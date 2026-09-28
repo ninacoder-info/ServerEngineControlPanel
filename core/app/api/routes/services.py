@@ -1,6 +1,8 @@
 import os
 import shutil
 import subprocess
+import math
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -336,10 +338,18 @@ def restore_configuration(service_id: str, version: str | None = None, file: str
 
 
 @router.get("/{service_id}/logs")
-def logs(service_id: str, lines: int = 100, version: str | None = None, kind: str = "error", user=Depends(require_user)):
+def logs(
+    service_id: str,
+    page: int = 1,
+    page_size: int = 50,
+    version: str | None = None,
+    kind: str = "error",
+    user=Depends(require_user),
+):
     if get_service(service_id) is None:
         raise HTTPException(status_code=404, detail="Service is not in the provider catalog")
-    lines = max(10, min(lines, 500))
+    page = max(1, page)
+    page_size = max(25, min(page_size, 250))
     if service_id == "nginx" and kind == "response":
         log_path = nginx_paths().get("access_log", service_root(service_id) / "logs/access.log")
     elif service_id == "nginx":
@@ -356,8 +366,37 @@ def logs(service_id: str, lines: int = 100, version: str | None = None, kind: st
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch(exist_ok=True)
     if not path.exists():
-        return {"service": service_id, "path": str(path), "lines": [], "available": False}
-    return {"service": service_id, "path": str(path), "lines": path.read_text(errors="replace").splitlines()[-lines:], "available": True}
+        return {
+            "service": service_id,
+            "path": str(path),
+            "lines": [],
+            "available": False,
+            "page": page,
+            "page_size": page_size,
+            "total_lines": 0,
+            "total_pages": 0,
+        }
+    # Keep memory bounded while serving the newest page first. The browser
+    # never receives the whole log file, even when the service log is large.
+    recent = deque(maxlen=page * page_size)
+    total_lines = 0
+    with path.open("r", errors="replace") as stream:
+        for line in stream:
+            total_lines += 1
+            recent.append(line.rstrip("\n\r"))
+    items = list(recent)
+    end = len(items) - ((page - 1) * page_size)
+    start = max(0, end - page_size)
+    return {
+        "service": service_id,
+        "path": str(path),
+        "lines": items[start:end] if end > 0 else [],
+        "available": True,
+        "page": page,
+        "page_size": page_size,
+        "total_lines": total_lines,
+        "total_pages": math.ceil(total_lines / page_size),
+    }
 
 
 @router.post("/{service_id}/switch-version", status_code=status.HTTP_202_ACCEPTED)

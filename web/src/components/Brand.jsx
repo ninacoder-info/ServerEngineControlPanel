@@ -3,6 +3,9 @@ import { Server } from "lucide-react";
 
 export default function Brand() {
   const [version, setVersion] = useState(null);
+  const [name, setName] = useState(
+    () => localStorage.getItem("server-engine-panel-name") || "Server Engine",
+  );
 
   useEffect(() => {
     let active = true;
@@ -16,6 +19,16 @@ export default function Brand() {
       active = false;
     };
   }, []);
+  useEffect(() => {
+    const updateName = (event) => {
+      if (event.detail?.panel_name) {
+        setName(event.detail.panel_name);
+        localStorage.setItem("server-engine-panel-name", event.detail.panel_name);
+      }
+    };
+    window.addEventListener("serverengine:panel-settings-change", updateName);
+    return () => window.removeEventListener("serverengine:panel-settings-change", updateName);
+  }, []);
 
   return (
     <div className="flex items-center gap-3">
@@ -23,7 +36,7 @@ export default function Brand() {
         <Server size={21} />
       </div>
       <div>
-        <p className="font-semibold">Server Engine</p>
+        <p className="font-semibold">{name}</p>
         <p className="text-xs text-slate-500">Version {version ? `v${version}` : "—"}</p>
       </div>
     </div>

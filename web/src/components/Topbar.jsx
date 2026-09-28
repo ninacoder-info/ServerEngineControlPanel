@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { apiRequest } from "../lib/api";
 import Toast from "./Toast";
+import { formatPanelDate } from "../lib/panelPreferences";
 import englishFlag from "../assets/flags/en.svg";
 import vietnameseFlag from "../assets/flags/vi.svg";
 import frenchFlag from "../assets/flags/fr.svg";
@@ -72,6 +73,13 @@ export default function Topbar({
     window.addEventListener("serverengine:terminal-status", update);
     return () =>
       window.removeEventListener("serverengine:terminal-status", update);
+  }, []);
+  React.useEffect(() => {
+    const updateLanguage = (event) => {
+      if (event.detail?.language) setLanguage(event.detail.language);
+    };
+    window.addEventListener("serverengine:language-change", updateLanguage);
+    return () => window.removeEventListener("serverengine:language-change", updateLanguage);
   }, []);
   React.useEffect(() => {
     let alive = true;
@@ -215,7 +223,7 @@ export default function Topbar({
                         </div>
                         <p>
                           {job.status} ·{" "}
-                          {new Date(job.created_at).toLocaleTimeString()}
+                          {formatPanelDate(job.created_at)}
                         </p>
                         {job.progress != null &&
                           (job.status === "running" ||

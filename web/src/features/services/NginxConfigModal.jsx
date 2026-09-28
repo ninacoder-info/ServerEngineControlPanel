@@ -55,7 +55,7 @@ function IndexFilesField({ value, onChange }) {
         {items.map((item) => (
           <span key={item} className="inline-flex items-center gap-1 rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200">
             {item}
-            <button type="button" aria-label={`Remove ${item}`} className="cursor-pointer text-slate-400 hover:text-slate-700 dark:hover:text-slate-100" onClick={() => removeItem(item)}>×</button>
+            <button type="button" aria-label={`Remove ${item}`} className="cursor-pointer text-slate-400 hover:text-slate-700 dark:hover:text-slate-100" onMouseDown={(event) => event.preventDefault()} onClick={() => removeItem(item)}>×</button>
           </span>
         ))}
         <input className="min-w-[9rem] flex-1 border-0 bg-transparent px-1 py-1 text-sm text-slate-900 outline-none dark:text-slate-100" value={draft} placeholder="Type a file and press Enter" onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === ",") { event.preventDefault(); addItem(); } }} />

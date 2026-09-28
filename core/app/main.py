@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api.routes import auth, databases, file_manager, firewall, ftp, jobs, servers, services, settings, system, terminal, websites
+from app.api.routes import api_access, auth, databases, file_manager, firewall, ftp, jobs, servers, services, settings, system, terminal, websites
 from app.auth import AuthStore
 from app.services.auth_service import AuthService
 from app.services.job_service import enqueue_startup_services
@@ -27,6 +27,7 @@ async def lifespan(application: FastAPI):
 
 app = FastAPI(title="Server Engine Control Panel API", version=APP_VERSION, lifespan=lifespan)
 app.include_router(auth.router)
+app.include_router(api_access.router)
 app.include_router(databases.router)
 app.include_router(ftp.router)
 app.include_router(firewall.router)

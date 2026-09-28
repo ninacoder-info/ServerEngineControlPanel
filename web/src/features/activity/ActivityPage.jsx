@@ -21,6 +21,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { apiRequest } from "../../lib/api";
+import { formatPanelDate } from "../../lib/panelPreferences";
 
 const filters = [
   ["all", "All activity", ActivityIcon],
@@ -113,7 +114,7 @@ const statusStyles = {
 };
 
 function formatTime(value) {
-  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+  return formatPanelDate(value);
 }
 
 function Summary({ icon: Icon, label, value, detail, tone = "slate" }) {

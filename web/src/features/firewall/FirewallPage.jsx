@@ -117,6 +117,7 @@ function PortTagsField({ value, onChange }) {
               type="button"
               aria-label={`Remove ${item}`}
               className="cursor-pointer text-slate-400 hover:text-slate-700 dark:hover:text-slate-100"
+              onMouseDown={(event) => event.preventDefault()}
               onClick={() => removeItem(item)}
             >
               ×
