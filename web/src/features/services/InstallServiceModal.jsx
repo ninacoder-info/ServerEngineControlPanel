@@ -1,23 +1,24 @@
 import React from "react";
 import { RefreshCw, X } from "lucide-react";
 import { apiRequest, readApiError } from "../../lib/api";
+import Toast from "../../components/Toast";
 
 export default function InstallServiceModal({
   service,
   initialVersion,
   onClose,
 }) {
-  const [version, setVersion] = React.useState(
-    initialVersion || service.versions[0]?.version || "",
-  );
-  const [versions, setVersions] = React.useState(service.versions);
+  const [version, setVersion] = React.useState("");
+  const [versions, setVersions] = React.useState([]);
   const [message, setMessage] = React.useState("");
+  const [messageTone, setMessageTone] = React.useState("error");
   const [busy, setBusy] = React.useState(false);
   const [refreshing, setRefreshing] = React.useState(false);
+  const [toast, setToast] = React.useState(null);
 
-  async function refreshVersions() {
+  async function refreshVersions(manual = true) {
     setRefreshing(true);
-    setMessage("");
+    if (manual) setMessage("");
     const response = await apiRequest(
       `/api/v1/services/${service.id}/versions/refresh`,
       { method: "POST" },
@@ -25,15 +26,48 @@ export default function InstallServiceModal({
     const body = response.ok ? await response.json() : { message: await readApiError(response) };
     if (response.ok && body.versions?.length) {
       setVersions(body.versions);
-      if (!body.versions.some((item) => item.version === version)) {
-        setVersion(body.versions[0].version);
+      window.sessionStorage.setItem(
+        `server-engine:service-versions:${service.id}`,
+        JSON.stringify(body.versions),
+      );
+      setVersion((current) =>
+        body.versions.some((item) => item.version === current)
+          ? current
+          : body.versions[0].version,
+      );
+      if (manual) {
+        setToast({
+          type: "success",
+          message: body.message || "Compatible versions refreshed.",
+        });
       }
-      setMessage(body.message || "Compatible versions refreshed.");
-    } else {
-      setMessage(body.message || "Unable to refresh compatible versions.");
+    } else if (manual) {
+      setToast({
+        type: "error",
+        message: body.message || "Unable to refresh compatible versions.",
+      });
     }
     setRefreshing(false);
   }
+
+  React.useEffect(() => {
+    const cacheKey = `server-engine:service-versions:${service.id}`;
+    try {
+      const cached = JSON.parse(window.sessionStorage.getItem(cacheKey) || "null");
+      if (Array.isArray(cached) && cached.length) {
+        setVersions(cached);
+        setVersion((current) =>
+          cached.some((item) => item.version === current)
+            ? current
+            : cached[0].version,
+        );
+        return;
+      }
+    } catch {
+      window.sessionStorage.removeItem(cacheKey);
+    }
+    refreshVersions(false);
+  }, [service.id]);
 
   async function submit(event) {
     event.preventDefault();
@@ -49,6 +83,7 @@ export default function InstallServiceModal({
       onClose();
       return;
     }
+    setMessageTone("error");
     setMessage(body.message || "The installation request could not be queued.");
     setBusy(false);
   }
@@ -109,6 +144,9 @@ export default function InstallServiceModal({
                   {item.version} · {item.channel}
                 </option>
               ))}
+              {!versions.length && (
+                <option value="">{refreshing ? "Fetching compatible versions…" : "No compatible versions found"}</option>
+              )}
             </select>
           </label>
           <p className="text-sm leading-6 text-slate-500 dark:text-slate-400">
@@ -116,7 +154,7 @@ export default function InstallServiceModal({
             global system package database will not be changed.
           </p>
           {message && (
-            <p className="text-sm text-rose-600 dark:text-rose-400">
+            <p className={`text-sm ${messageTone === "success" ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
               {message}
             </p>
           )}
@@ -131,13 +169,18 @@ export default function InstallServiceModal({
             <button
               type="submit"
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={busy}
+              disabled={busy || !version}
             >
               {busy ? "Installing…" : "Install"}
             </button>
           </div>
         </form>
       </section>
+      <Toast
+        message={toast?.message}
+        type={toast?.type}
+        onClose={() => setToast(null)}
+      />
     </div>
   );
 }

@@ -4,11 +4,13 @@ import os
 import pwd
 import platform
 import tarfile
+import urllib.error
 import urllib.request
 import re
 import shutil
 import shlex
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 from threading import Event, Thread
@@ -731,6 +733,36 @@ class JobStore:
         if not apt:
             raise RuntimeError("apt-get is required to prepare the PHP package source")
         subprocess.run([apt, "update"], check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+
+    def _ensure_mariadb_package_source(self, requested_version: str):
+        """Configure MariaDB's official APT source for the requested release line."""
+        match = re.search(r"\d+\.\d+", requested_version)
+        release = match.group(0) if match else "11.8"
+        bash = shutil.which("bash")
+        if not bash:
+            raise RuntimeError("bash is required to configure the official MariaDB package source")
+        script_path = None
+        try:
+            with urllib.request.urlopen("https://downloads.mariadb.com/MariaDB/mariadb_repo_setup", timeout=30) as response:
+                script = response.read()
+            with tempfile.NamedTemporaryFile(prefix="server-engine-mariadb-repo-", suffix=".sh", delete=False) as handle:
+                handle.write(script)
+                script_path = Path(handle.name)
+            script_path.chmod(0o700)
+            result = subprocess.run(
+                [bash, str(script_path), f"--mariadb-server-version={release}"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode != 0:
+                detail = (result.stderr or result.stdout).strip().splitlines()
+                raise RuntimeError("Unable to configure the official MariaDB repository: " + (detail[-1] if detail else "setup failed"))
+        except urllib.error.URLError as error:
+            raise RuntimeError(f"Unable to download the official MariaDB repository setup: {error.reason}") from error
+        finally:
+            if script_path:
+                script_path.unlink(missing_ok=True)
     def _stop_process_by_binary(self, binary: Path, pid_file: Path | None = None):
         """Terminate a managed process without requiring pkill or pgrep."""
         pids = []
@@ -842,12 +874,46 @@ class JobStore:
             package_dir.mkdir(exist_ok=True)
             for old_archive in package_dir.glob("*.deb"):
                 old_archive.unlink(missing_ok=True)
-            self._update(job_id, status="running", progress=2, message=f"Preparing {service_id} {requested_version}…", log=[])
+            if service_id == "mariadb":
+                self._update(job_id, status="running", progress=3, message=f"Preparing the official MariaDB {requested_version} repository…", log=[])
+                try:
+                    self._ensure_mariadb_package_source(requested_version)
+                except RuntimeError as error:
+                    self._update(job_id, progress=4, message=f"Official MariaDB repository unavailable; using the operating system repository. {error}")
+            else:
+                self._update(job_id, status="running", progress=2, message=f"Preparing {service_id} {requested_version}…", log=[])
             metadata = subprocess.run([apt, "update"], check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             metadata_log = [line.strip() for line in metadata.stdout.splitlines() if line.strip()][-20:]
             self._update(job_id, progress=8, message="Package metadata is ready. Resolving runtime dependencies…", log=metadata_log)
             apt_cache = shutil.which("apt-cache")
             packages = [item for item in packages if item]
+            if apt_cache and service_id == "mariadb" and requested_version not in {"latest", "managed"}:
+                available_versions = subprocess.run(
+                    [apt_cache, "madison", package],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                ).stdout.splitlines()
+                requested_prefix = requested_version.removeprefix("mariadb-")
+                matches = []
+                for line in available_versions:
+                    parts = [part.strip() for part in line.split("|")]
+                    if len(parts) < 2:
+                        continue
+                    candidate = parts[1].split(":", 1)[-1]
+                    if candidate == requested_prefix or candidate.startswith(f"{requested_prefix}."):
+                        matches.append(candidate)
+                if not matches:
+                    available = ", ".join(
+                        part[1].strip().split(":", 1)[-1]
+                        for line in available_versions
+                        for part in [[item.strip() for item in line.split("|")]]
+                        if len(part) >= 2 and part[1]
+                    ) or "none"
+                    raise RuntimeError(
+                        f"MariaDB {requested_version} is not available from this server's configured repositories. "
+                        f"Available versions: {available}. Refresh compatible versions or configure the official MariaDB repository."
+                    )
             if service_id == "php" and apt_cache:
                 available = subprocess.run([apt_cache, "show", package], capture_output=True, text=True, check=False)
                 if available.returncode != 0 or "Package:" not in available.stdout:

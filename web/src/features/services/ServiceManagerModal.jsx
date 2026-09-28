@@ -1199,6 +1199,8 @@ export default function ServiceManagerModal({
   const [version, setVersion] = React.useState(
     installed?.version || service.versions[0]?.version || "",
   );
+  const [availableVersions, setAvailableVersions] = React.useState(service.versions);
+  const [versionsRefreshing, setVersionsRefreshing] = React.useState(false);
   const [confirmed, setConfirmed] = React.useState(false);
   const [config, setConfig] = React.useState(null);
   const [text, setText] = React.useState("");
@@ -1210,6 +1212,57 @@ export default function ServiceManagerModal({
   const [phpTerminalEnabled, setPhpTerminalEnabled] = React.useState(false);
   const [phpTerminalPath, setPhpTerminalPath] = React.useState("");
   const [terminalToast, setTerminalToast] = React.useState(null);
+  React.useEffect(() => {
+    setAvailableVersions(service.versions);
+  }, [service.id, service.versions]);
+  const refreshVersions = async (manual = true) => {
+    setVersionsRefreshing(true);
+    const response = await apiRequest(
+      `/api/v1/services/${service.id}/versions/refresh`,
+      { method: "POST" },
+    );
+    const body = response.ok
+      ? await response.json()
+      : { message: await readApiError(response) };
+    if (response.ok && body.versions?.length) {
+      setAvailableVersions(body.versions);
+      window.sessionStorage.setItem(
+        `server-engine:service-versions:${service.id}`,
+        JSON.stringify(body.versions),
+      );
+      if (!body.versions.some((item) => item.version === version)) {
+        setVersion(body.versions[0].version);
+      }
+      if (manual) {
+        setTerminalToast({
+          type: "success",
+          message: body.message || "Versions refreshed successfully.",
+        });
+      }
+    } else if (manual) {
+      setTerminalToast({
+        type: "error",
+        message: body.message || "Unable to refresh versions.",
+      });
+    }
+    setVersionsRefreshing(false);
+  };
+  React.useEffect(() => {
+    const cacheKey = `server-engine:service-versions:${service.id}`;
+    try {
+      const cached = JSON.parse(window.sessionStorage.getItem(cacheKey) || "null");
+      if (Array.isArray(cached) && cached.length) {
+        setAvailableVersions(cached);
+        if (!cached.some((item) => item.version === version)) {
+          setVersion(cached[0].version);
+        }
+        return;
+      }
+    } catch {
+      window.sessionStorage.removeItem(cacheKey);
+    }
+    refreshVersions(false);
+  }, [service.id]);
   const query =
     isPhp && version ? `?version=${encodeURIComponent(version)}&file=ini` : "";
   React.useEffect(() => {
@@ -1591,19 +1644,35 @@ export default function ServiceManagerModal({
         )}
         {tab === "versions" && (
           <form className="manager-pane space-y-4" onSubmit={switchVersion}>
-            <Field label={`${service.name} version`}>
+            <div className="flex items-center justify-between gap-3">
+              <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                {service.name} version
+              </label>
+              {isMysql && (
+                <button
+                  type="button"
+                  className="inline-flex cursor-pointer items-center gap-1.5 text-xs font-semibold text-blue-600 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60 dark:text-blue-400 dark:hover:text-blue-300"
+                  onClick={refreshVersions}
+                  disabled={versionsRefreshing || busy}
+                >
+                  <RefreshCw size={13} className={versionsRefreshing ? "animate-spin" : ""} />
+                  {versionsRefreshing ? "Fetching…" : "Fetch compatible versions"}
+                </button>
+              )}
+            </div>
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
               <select
                 className={`${inputClass} bg-white dark:bg-slate-900`}
                 value={version}
                 onChange={(event) => setVersion(event.target.value)}
               >
-                {service.versions.map((item) => (
+                {availableVersions.map((item) => (
                   <option key={item.version} value={item.version}>
                     {item.version} · {item.channel}
                   </option>
                 ))}
               </select>
-            </Field>
+            </label>
             <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
               <input
                 className="h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 dark:border-slate-600 dark:bg-slate-800 dark:focus:ring-offset-slate-900"

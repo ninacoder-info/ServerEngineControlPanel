@@ -37,7 +37,6 @@ OS_VERSION=""
 OS_CODENAME=""
 ARCH=""
 PYTHON=""
-NODE=""
 
 usage() {
   cat <<'EOF'
@@ -157,7 +156,7 @@ detect_package_manager() {
 }
 
 has_source_tree() {
-  [ -f "$SOURCE_DIR/core/pyproject.toml" ] && [ -f "$SOURCE_DIR/web/server.mjs" ]
+  [ -f "$SOURCE_DIR/core/pyproject.toml" ] && [ -f "$SOURCE_DIR/web/dist/index.html" ]
 }
 
 download_release_bundle() {
@@ -181,8 +180,8 @@ download_release_bundle() {
 install_system_dependencies() {
   [ "$INSTALL_SYSTEM_DEPS" = true ] || return 0
   case "$PM" in
-    apt) run env DEBIAN_FRONTEND=noninteractive apt-get update; run env DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl tar gzip build-essential python3 python3-venv python3-pip nodejs npm;;
-    dnf|yum) run "$PM" install -y ca-certificates curl tar gzip gcc gcc-c++ make python3 python3-pip nodejs npm;;
+    apt) run env DEBIAN_FRONTEND=noninteractive apt-get update; run env DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl tar gzip build-essential python3 python3-venv python3-pip;;
+    dnf|yum) run "$PM" install -y ca-certificates curl tar gzip gcc gcc-c++ make python3 python3-pip;;
   esac
 }
 
@@ -203,15 +202,11 @@ install_certbot_runtime() {
 
 detect_runtimes() {
   has python3 || die "python3 is required; rerun with --install-system-deps"
-  has node || die "Node.js is required; rerun with --install-system-deps"
-  has npm || die "npm is required; rerun with --install-system-deps"
-  PYTHON="$(command -v python3)"; NODE="$(command -v node)"
-  local pyv nodev
+  PYTHON="$(command -v python3)"
+  local pyv
   pyv="$($PYTHON -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
-  nodev="$(node --version | sed 's/^v//')"
   version_ge "$pyv" "3.10" || die "Python 3.10+ is required (found $pyv)"
-  version_ge "$nodev" "20.19.0" || die "Node.js 20.19+ is required (found $nodev)"
-  log "Runtime: Python $pyv / Node v$nodev / npm $(npm --version)"
+  log "Runtime: Python $pyv"
 }
 
 check_existing_state() {
@@ -235,8 +230,7 @@ create_release() {
   "$RELEASE_DIR/core/.venv/bin/python" -m pip install --upgrade pip
   "$RELEASE_DIR/core/.venv/bin/pip" install --no-cache-dir "$RELEASE_DIR/core"
   if [ ! -f "$RELEASE_DIR/web/dist/index.html" ]; then
-    has npm || die "npm is required when installing from a source checkout"
-    (cd "$RELEASE_DIR/web" && npm install --ignore-scripts && npm run build)
+    die "release bundle does not contain a production web build; install a prebuilt release bundle"
   fi
   # The installed panel serves the compiled frontend only. Do not ship React
   # source files, Vite configuration, or development dependencies in a release.
@@ -260,15 +254,10 @@ cat > "$RELEASE_DIR/core/run.sh" <<EOF
 export SE_SERVICE_ROOT="$PREFIX/services"
 export SE_WEB_ROOT="$WEB_ROOT"
 export SE_STATE_DIR="$STATE_DIR"
+export SE_WEB_DIST="$RELEASE_DIR/web/dist"
 exec "$RELEASE_DIR/core/.venv/bin/uvicorn" app.main:app --host "$API_HOST" --port "$API_PORT"
 EOF
-cat > "$RELEASE_DIR/web/run.sh" <<EOF
-#!/usr/bin/env bash
-export PORT="$WEB_PORT"
-export API_URL="http://127.0.0.1:$API_PORT"
-exec "$NODE" "$RELEASE_DIR/web/server.mjs"
-EOF
-  chmod 0755 "$RELEASE_DIR/core/run.sh" "$RELEASE_DIR/web/run.sh"
+  chmod 0755 "$RELEASE_DIR/core/run.sh"
   install -d -m 0755 "$RELEASE_DIR/bin"
   cp "$SOURCE_DIR/bin/serverengine" "$RELEASE_DIR/bin/serverengine"
   chmod 0755 "$RELEASE_DIR/bin/serverengine"
@@ -290,13 +279,12 @@ configure_services() {
   [ "$NO_SERVICE" = true ] && return 0
   has systemctl || die "systemd is required unless --no-service is used"
   install -m 0644 "$SOURCE_DIR/deploy/server-engine-core.service" /etc/systemd/system/server-engine-core.service
-  install -m 0644 "$SOURCE_DIR/deploy/server-engine-web.service" /etc/systemd/system/server-engine-web.service
   sed -i "s#^WorkingDirectory=.*#WorkingDirectory=$PREFIX/current/core#; s#^ExecStart=.*#ExecStart=$PREFIX/current/core/run.sh#" /etc/systemd/system/server-engine-core.service
-  sed -i "s#^WorkingDirectory=.*#WorkingDirectory=$PREFIX/current/web#; s#^ExecStart=.*#ExecStart=$PREFIX/current/web/run.sh#" /etc/systemd/system/server-engine-web.service
+  systemctl disable --now server-engine-web.service >/dev/null 2>&1 || true
+  rm -f /etc/systemd/system/server-engine-web.service
   systemctl daemon-reload
-  systemctl enable server-engine-core.service server-engine-web.service
+  systemctl enable server-engine-core.service
   systemctl restart server-engine-core.service
-  systemctl restart server-engine-web.service
 }
 
 verify_installation() {
@@ -304,9 +292,8 @@ verify_installation() {
   [ "$NO_SERVICE" = true ] && return 0
   sleep 2
   systemctl is-active --quiet server-engine-core.service || { systemctl status server-engine-core.service --no-pager; die "core service failed"; }
-  systemctl is-active --quiet server-engine-web.service || { systemctl status server-engine-web.service --no-pager; die "web service failed"; }
   has curl && curl --fail --silent --show-error "http://127.0.0.1:$API_PORT/api/v1/health" >/dev/null || die "API health check failed"
-  has curl && curl --fail --silent --show-error "http://127.0.0.1:$WEB_PORT/" >/dev/null || die "web health check failed"
+  has curl && curl --fail --silent --show-error "http://127.0.0.1:$API_PORT/" >/dev/null || die "web health check failed"
 }
 
 primary_ip() {
@@ -341,13 +328,12 @@ print_success() {
   echo
   if [ "$NO_SERVICE" = true ]; then
     echo "  Services were not registered (--no-service)."
-    echo "    Start API:  $PREFIX/current/core/run.sh"
-    echo "    Start web:  $PREFIX/current/web/run.sh"
+    echo "    Start:      $PREFIX/current/core/run.sh"
   else
     echo "  Services"
-    echo "    Status:     systemctl status server-engine-core server-engine-web"
-    echo "    Logs:       journalctl -u server-engine-core -u server-engine-web -f"
-    echo "    Restart:    systemctl restart server-engine-core server-engine-web"
+    echo "    Status:     systemctl status server-engine-core"
+    echo "    Logs:       journalctl -u server-engine-core -f"
+    echo "    Restart:    systemctl restart server-engine-core"
   fi
   echo
   echo "  Next step: open the control panel URL in your browser."

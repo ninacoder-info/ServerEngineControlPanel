@@ -10,7 +10,6 @@ trap 'rm -rf "$WORK"' EXIT
 
 mkdir -p "$WORK/server-engine-release/core" "$WORK/server-engine-release/web" "$WORK/server-engine-release/deploy" "$WORK/server-engine-release/bin"
 cp -a "$ROOT/core/." "$WORK/server-engine-release/core/"
-cp -a "$ROOT/web/server.mjs" "$WORK/server-engine-release/web/server.mjs"
 cp -a "$ROOT/deploy/." "$WORK/server-engine-release/deploy/"
 cp "$ROOT/bin/serverengine" "$WORK/server-engine-release/bin/serverengine"
 

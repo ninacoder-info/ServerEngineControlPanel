@@ -1,4 +1,6 @@
 import json
+import shutil
+import subprocess
 import urllib.request
 
 from app.models.service import ServiceDefinition, ServiceVersion
@@ -92,33 +94,76 @@ def refresh_service_versions(service_id: str) -> tuple[ServiceDefinition, str, s
     definition = get_service(service_id)
     if definition is None:
         raise ValueError("Service is not in the provider catalog")
-    if service_id != "pm2":
-        return definition, "catalog", "This service currently uses the built-in compatibility catalog."
-    try:
-        request = urllib.request.Request(
-            "https://registry.npmjs.org/pm2",
-            headers={"Accept": "application/json", "User-Agent": "Server-Engine-Control-Panel"},
-        )
-        with urllib.request.urlopen(request, timeout=8) as response:
-            metadata = json.loads(response.read().decode("utf-8"))
-        versions = metadata.get("versions", {})
-        latest = metadata.get("dist-tags", {}).get("latest")
-        ordered = []
-        if latest in versions:
-            ordered.append(latest)
-        ordered.extend(version for version in reversed(list(versions)) if version != latest)
-        selected = []
-        for version in ordered:
-            if version.startswith("0.") or "-" in version:
-                continue
-            major = int(version.split(".", 1)[0])
-            channel = "stable" if version == latest else "security" if major >= max(1, int(str(latest).split(".", 1)[0]) - 1) else "legacy"
-            selected.append(v(version, channel))
-            if len(selected) == 12:
-                break
-        if selected:
-            definition.versions = selected
-            return definition, "npm", f"Fetched {len(selected)} PM2 releases from the official npm registry."
-    except Exception:
-        pass
-    return definition, "catalog", "The provider could not be reached. The saved compatibility list is still available."
+    if service_id == "pm2":
+        try:
+            request = urllib.request.Request(
+                "https://registry.npmjs.org/pm2",
+                headers={"Accept": "application/json", "User-Agent": "Server-Engine-Control-Panel"},
+            )
+            with urllib.request.urlopen(request, timeout=8) as response:
+                metadata = json.loads(response.read().decode("utf-8"))
+            versions = metadata.get("versions", {})
+            latest = metadata.get("dist-tags", {}).get("latest")
+            ordered = []
+            if latest in versions:
+                ordered.append(latest)
+            ordered.extend(version for version in reversed(list(versions)) if version != latest)
+            selected = []
+            for version in ordered:
+                if version.startswith("0.") or "-" in version:
+                    continue
+                major = int(version.split(".", 1)[0])
+                channel = "stable" if version == latest else "security" if major >= max(1, int(str(latest).split(".", 1)[0]) - 1) else "legacy"
+                selected.append(v(version, channel))
+                if len(selected) == 12:
+                    break
+            if selected:
+                definition.versions = selected
+                return definition, "npm", f"Fetched {len(selected)} PM2 releases from the official npm registry."
+        except Exception:
+            pass
+        return definition, "catalog", "The PM2 registry could not be reached. The saved compatibility list is still available."
+
+    # Debian/Ubuntu-backed services can use the host package metadata. This
+    # gives the installer versions that are actually available for this OS and
+    # architecture instead of pretending every upstream release is usable.
+    package_services = {
+        "nginx": "nginx", "apache": "apache2", "openlitespeed": "openlitespeed",
+        "caddy": "caddy", "haproxy": "haproxy", "python": "python3",
+        "ruby": "ruby", "mariadb": "mariadb-server", "postgresql": "postgresql",
+        "redis": "redis-server", "valkey": "valkey-server", "memcached": "memcached",
+        "certbot": "certbot", "vsftpd": "vsftpd", "fail2ban": "fail2ban",
+        "powerdns": "pdns-server", "rabbitmq": "rabbitmq-server", "docker": "docker.io",
+        "git": "git", "imagemagick": "imagemagick", "ffmpeg": "ffmpeg",
+        "supervisor": "supervisor", "postfix": "postfix", "dovecot": "dovecot-imapd",
+        "rspamd": "rspamd", "bind9": "bind9", "unbound": "unbound",
+        "clamav": "clamav", "auditd": "auditd", "lynis": "lynis",
+        "logrotate": "logrotate", "node-exporter": "prometheus-node-exporter",
+        "modsecurity": "libmodsecurity3",
+    }
+    package = package_services.get(service_id)
+    apt_cache = shutil.which("apt-cache")
+    if package and apt_cache:
+        try:
+            result = subprocess.run(
+                [apt_cache, "madison", package],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=8,
+            )
+            versions = []
+            for line in result.stdout.splitlines():
+                parts = [part.strip() for part in line.split("|")]
+                if len(parts) < 2 or not parts[1] or parts[1] in {item.version for item in versions}:
+                    continue
+                versions.append(v(parts[1].split(":", 1)[-1], "stable" if not versions else "security"))
+                if len(versions) == 12:
+                    break
+            if versions:
+                definition.versions = versions
+                message = f"Fetched {len(versions)} {definition.name} versions compatible with this APT host."
+                return definition, "apt", message
+        except Exception:
+            pass
+    return definition, "catalog", "This service uses the saved compatibility catalog because no live provider is available."

@@ -1,8 +1,11 @@
 import os
 import secrets
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import api_access, auth, databases, domains, file_manager, firewall, ftp, jobs, servers, services, settings, system, terminal, websites
 from app.auth import AuthStore
@@ -40,3 +43,14 @@ app.include_router(file_manager.router)
 app.include_router(settings.router)
 app.include_router(websites.router)
 app.include_router(terminal.router)
+
+WEB_DIST = Path(os.getenv("SE_WEB_DIST", ""))
+if WEB_DIST.is_dir():
+    app.mount("/assets", StaticFiles(directory=WEB_DIST / "assets"), name="assets")
+
+    @app.get("/{path:path}", include_in_schema=False)
+    async def frontend(path: str = ""):
+        requested = (WEB_DIST / path).resolve()
+        if requested.is_file() and WEB_DIST.resolve() in requested.parents:
+            return FileResponse(requested)
+        return FileResponse(WEB_DIST / "index.html")
