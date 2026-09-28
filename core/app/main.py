@@ -3,10 +3,11 @@ import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.api.dependencies import require_user
 from app.api.routes import api_access, auth, databases, domains, file_manager, firewall, ftp, jobs, servers, services, settings, system, terminal, websites
 from app.auth import AuthStore
 from app.services.auth_service import AuthService
@@ -43,6 +44,12 @@ app.include_router(file_manager.router)
 app.include_router(settings.router)
 app.include_router(websites.router)
 app.include_router(terminal.router)
+
+
+@app.get("/services/php/{version}/info", include_in_schema=False)
+def php_info_page(version: str, user=Depends(require_user)):
+    """Serve a real phpinfo document at the convenient browser URL."""
+    return services.render_php_runtime_info(version, user)
 
 WEB_DIST_VALUE = os.getenv("SE_WEB_DIST")
 WEB_DIST = Path(WEB_DIST_VALUE).resolve() if WEB_DIST_VALUE else None

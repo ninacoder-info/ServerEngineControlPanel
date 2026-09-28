@@ -34,6 +34,15 @@ export function VsftpdConfigModal({
   onSaved,
   onServiceAction,
 }) {
+  const installed = service.status !== "not-installed";
+  const statusLabel = installed
+    ? (service.status === "running" ? "running" : "stopped")
+    : "not installed";
+  const statusClass = service.status === "running"
+    ? "text-emerald-600 dark:text-emerald-400"
+    : service.status === "not-installed"
+      ? "text-slate-500 dark:text-slate-400"
+      : "text-amber-600 dark:text-amber-400";
   const [form, setForm] = React.useState({
     control_port: settings.control_port || 21,
     passive_min: settings.passive_min || 40000,
@@ -118,13 +127,9 @@ export function VsftpdConfigModal({
             </h2>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
               <span
-                className={
-                  service.status === "running"
-                    ? "text-emerald-600 dark:text-emerald-400"
-                    : "text-amber-600 dark:text-amber-400"
-                }
+                className={statusClass}
               >
-                {service.status || "stopped"}
+                {statusLabel}
               </span>
               {" · "}v{service.version || "3.0.5"}
             </p>
@@ -309,8 +314,8 @@ export function VsftpdConfigModal({
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="rounded-lg border border-slate-200 p-4 dark:border-slate-800">
                 <p className="text-xs text-slate-500">Service state</p>
-                <p className="mt-1 font-semibold text-amber-600">
-                  {service.status || "stopped"}
+                <p className={`mt-1 font-semibold ${statusClass}`}>
+                  {statusLabel}
                 </p>
               </div>
               <div className="rounded-lg border border-slate-200 p-4 dark:border-slate-800">
@@ -320,7 +325,11 @@ export function VsftpdConfigModal({
                 </p>
               </div>
             </div>
-            <div className="flex flex-wrap gap-3">
+            {!installed ? (
+              <div className="rounded-md border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400">
+                Install vsftpd from the Services page before starting it or managing its runtime.
+              </div>
+            ) : <div className="flex flex-wrap gap-3">
               {service.status === "running" ? (
                 <button
                   type="button"
@@ -350,7 +359,7 @@ export function VsftpdConfigModal({
                   <RotateCw size={14} /> Restart
                 </button>
               )}
-            </div>
+            </div>}
           </div>
         )}
         {tab === "error-log" && (
@@ -382,7 +391,7 @@ export function VsftpdConfigModal({
             </button>
             <button
               type="submit"
-              disabled={busy}
+              disabled={busy || !installed}
               className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
             >
               {busy ? "Saving…" : "Save configuration"}

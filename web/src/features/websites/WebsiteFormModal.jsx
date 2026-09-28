@@ -86,15 +86,39 @@ function EditWebsiteTab({ tab, form, change, serverType, siteId }) {
   return null;
 }
 
-function FolderPicker({ value, defaultRoot, onSelect, onClose }) {
+export function FolderPicker({ value, defaultRoot, onSelect, onClose }) {
   const [current, setCurrent] = React.useState(value || defaultRoot);
   const [data, setData] = React.useState({ directories: [], parent: null });
   const [newFolder, setNewFolder] = React.useState("");
   const [error, setError] = React.useState("");
-  const load = React.useCallback(() => apiRequest(`/api/v1/websites/directories?path=${encodeURIComponent(current)}`).then(async (response) => { if (!response.ok) throw new Error(await readApiError(response)); setData(await response.json()); }).catch((reason) => setError(reason.message)), [current]);
+  const [pathLoaded, setPathLoaded] = React.useState(false);
+  const load = React.useCallback(() => {
+    setPathLoaded(false);
+    setError("");
+    return apiRequest(`/api/v1/websites/directories?path=${encodeURIComponent(current)}`)
+      .then(async (response) => {
+        if (!response.ok) throw new Error(await readApiError(response));
+        setData(await response.json());
+        setPathLoaded(true);
+      })
+      .catch((reason) => {
+        if (current !== defaultRoot) {
+          setCurrent(defaultRoot);
+          setError("That folder no longer exists. Showing the website root instead.");
+        } else {
+          setError(reason.message);
+        }
+      });
+  }, [current, defaultRoot]);
   React.useEffect(() => { load(); }, [load]);
-  async function createFolder(event) { event.preventDefault(); if (!newFolder.trim()) return; const response = await apiRequest("/api/v1/websites/directories", { method: "POST", body: JSON.stringify({ path: current, name: newFolder.trim() }) }); if (!response.ok) setError(await readApiError(response)); else { setNewFolder(""); load(); } }
-  return <div className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-slate-950/60 p-4 sm:p-8"><section className="w-full max-w-xl rounded-xl bg-white shadow-xl dark:bg-slate-900"><div className="flex items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-800"><div><h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Choose project folder</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Only folders inside the website root are available.</p></div><button type="button" className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800" onClick={onClose}><X size={17} /></button></div><div className="space-y-4 px-5 py-5"><div className="flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:text-slate-300"><Folder size={16} className="text-blue-600" /><span className="min-w-0 flex-1 truncate">{current}</span><button type="button" className="cursor-pointer text-blue-600 hover:text-blue-700" onClick={() => onSelect(current)}>Select</button></div>{data.parent && <button type="button" className="inline-flex cursor-pointer items-center gap-1 text-sm font-medium text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100" onClick={() => setCurrent(data.parent)}><ChevronLeft size={15} />Parent folder</button>}<div className="divide-y divide-slate-200 border-y border-slate-200 dark:divide-slate-800 dark:border-slate-800">{data.directories.length ? data.directories.map((item) => <button type="button" key={item.path} className="flex w-full cursor-pointer items-center gap-3 py-3 text-left text-sm text-slate-700 hover:text-blue-600 dark:text-slate-300 dark:hover:text-blue-400" onClick={() => setCurrent(item.path)}><Folder size={16} />{item.name}</button>) : <p className="py-5 text-sm text-slate-500 dark:text-slate-400">No folders here yet.</p>}</div><form className="flex gap-2" onSubmit={createFolder}><input className="min-w-0 flex-1 rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-slate-700 dark:text-slate-100" value={newFolder} onChange={(event) => setNewFolder(event.target.value)} placeholder="New folder name" /><button type="submit" className={`${buttonClass} border border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300`}>Create folder</button></form>{error && <p className="text-sm text-rose-600 dark:text-rose-400">{error}</p>}</div></section></div>;
+  async function createFolder(event) {
+    event.preventDefault();
+    if (!pathLoaded || !newFolder.trim()) return;
+    const response = await apiRequest("/api/v1/websites/directories", { method: "POST", body: JSON.stringify({ path: current, name: newFolder.trim() }) });
+    if (!response.ok) setError(await readApiError(response));
+    else { setNewFolder(""); load(); }
+  }
+  return <div className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-slate-950/60 p-4 sm:p-8"><section className="w-full max-w-xl rounded-xl bg-white shadow-xl dark:bg-slate-900"><div className="flex items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-800"><div><h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Choose project folder</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Only folders inside the website root are available.</p></div><button type="button" className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800" onClick={onClose}><X size={17} /></button></div><div className="space-y-4 px-5 py-5"><div className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm text-slate-700 dark:text-slate-300 ${error ? "border-rose-500 dark:border-rose-500" : "border-slate-300 dark:border-slate-700"}`}><Folder size={16} className={error ? "text-rose-600 dark:text-rose-400" : "text-blue-600"} /><span className="min-w-0 flex-1 truncate">{current}</span><button type="button" disabled={!pathLoaded} className="cursor-pointer text-blue-600 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50" onClick={() => onSelect(current)}>Select</button></div>{error && <p className="-mt-2 text-xs font-normal text-rose-600 dark:text-rose-400">{error}</p>}{data.parent && <button type="button" className="inline-flex cursor-pointer items-center gap-1 text-sm font-medium text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100" onClick={() => setCurrent(data.parent)}><ChevronLeft size={15} />Parent folder</button>}<div className="divide-y divide-slate-200 border-y border-slate-200 dark:divide-slate-800 dark:border-slate-800">{data.directories.length ? data.directories.map((item) => <button type="button" key={item.path} className="flex w-full cursor-pointer items-center gap-3 py-3 text-left text-sm text-slate-700 hover:text-blue-600 dark:text-slate-300 dark:hover:text-blue-400" onClick={() => setCurrent(item.path)}><Folder size={16} />{item.name}</button>) : <p className="py-5 text-sm text-slate-500 dark:text-slate-400">No folders here yet.</p>}</div><form className="flex gap-2" onSubmit={createFolder}><input className="min-w-0 flex-1 rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-slate-700 dark:text-slate-100" value={newFolder} onChange={(event) => setNewFolder(event.target.value)} placeholder="New folder name" disabled={!pathLoaded} /><button type="submit" disabled={!pathLoaded} className={`${buttonClass} border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-300`}>Create folder</button></form></div></section></div>;
 }
 
 export default function WebsiteFormModal({ site, defaultRoot, phpVersions = [], serverType = "nginx", onClose, onSaved }) {

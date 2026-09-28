@@ -19,8 +19,8 @@ from threading import Event, Thread
 from threading import Lock
 
 from app.models.job import JobSummary
-from app.services.service_catalog import apache_source_for, bind9_source_for, certbot_source_for, caddy_source_for, clamav_source_for, dovecot_source_for, ffmpeg_source_for, git_source_for, haproxy_source_for, imagemagick_source_for, lynis_source_for, mariadb_source_for, memcached_source_for, mongodb_source_for, mysql_release_for, nginx_source_for, opensearch_source_for, openlitespeed_source_for, postfix_source_for, powerdns_source_for, postgresql_source_for, python_asset_for, rabbitmq_source_for, redis_source_for, refresh_service_versions, rspamd_source_for, ruby_source_for, stalwart_source_for, supervisor_source_for, unbound_source_for, valkey_source_for, vsftpd_source_for, wpcli_source_for
-from app.services.service_runtime import PHP_BASELINE_MODULES, SERVICE_PACKAGES, binary_path, enable_php_baseline_extensions, ensure_composer_cache, ensure_nginx_layout, ensure_node_runtime, ensure_php_fpm_layout, nginx_paths, package_for, php_cli_path, php_fpm_paths, service_root
+from app.services.service_catalog import apache_source_for, bind9_source_for, certbot_source_for, caddy_source_for, clamav_source_for, dovecot_source_for, ffmpeg_source_for, git_source_for, haproxy_source_for, imagemagick_source_for, lynis_source_for, mariadb_source_for, memcached_source_for, mongodb_source_for, mysql_release_for, nginx_source_for, opensearch_source_for, openlitespeed_source_for, php_source_for, postfix_source_for, powerdns_source_for, postgresql_source_for, prebuilt_package_for, python_asset_for, rabbitmq_source_for, redis_source_for, refresh_service_versions, rspamd_source_for, ruby_source_for, stalwart_source_for, supervisor_source_for, unbound_source_for, valkey_source_for, vsftpd_source_for, wpcli_source_for
+from app.services.service_runtime import PHP_BASELINE_MODULES, PHP_REQUIRED_EXTENSIONS, SERVICE_PACKAGES, binary_path, enable_php_baseline_extensions, ensure_composer_cache, ensure_nginx_layout, ensure_node_runtime, ensure_php_fpm_layout, ensure_php_runtime_configuration, ensure_php_runtime_launcher, nginx_paths, normalize_php_runtime_layout, package_for, php_cli_path, php_fpm_paths, php_runtime_library_path, service_root, version_sort_key
 
 
 class InstallCancelled(Exception):
@@ -35,6 +35,7 @@ class JobStore:
         self._cancel_events: dict[str, Event] = {}
         self._subscribers: set[tuple[asyncio.AbstractEventLoop, asyncio.Queue]] = set()
         self._lock = Lock()
+        self._extension_install_lock = Lock()
 
     def snapshot(self) -> list[dict]:
         with self._lock:
@@ -75,7 +76,7 @@ class JobStore:
                 event.set()
             cancelled = current.model_copy(update={
                 "status": "cancelled",
-                "message": "Cancellation requested. Rolling back staged files…",
+                "message": "Cancellation requested.",
                 "updated_at": datetime.now(timezone.utc),
             })
             self._jobs[job_id] = cancelled
@@ -91,9 +92,10 @@ class JobStore:
         if self._is_cancelled(job_id):
             raise InstallCancelled()
 
-    def enqueue_install(self, job_id: str, service_id: str, requested_version: str) -> JobSummary:
-        job = self.create(job_id, f"Install {service_id} {requested_version}")
-        Thread(target=self._run_install, args=(job_id, service_id, requested_version), daemon=True).start()
+    def enqueue_install(self, job_id: str, service_id: str, requested_version: str, install_method: str = "prebuilt", php_version: str | None = None, composer_version: str | None = None) -> JobSummary:
+        method_label = "Prebuilt package" if install_method == "prebuilt" else ("Official release" if service_id == "wp-cli" else "Build from source")
+        job = self.create(job_id, f"Install {service_id} {requested_version} · {method_label}")
+        Thread(target=self._run_install, args=(job_id, service_id, requested_version, install_method, php_version, composer_version), daemon=True).start()
         return job
 
     def enqueue_action(self, job_id: str, service_id: str, action: str, version: str | None = None) -> JobSummary:
@@ -107,15 +109,35 @@ class JobStore:
         return job
 
     def _run_extension_install(self, job_id: str, version: str, extension: str):
-        package = f"php{version}-{extension}"
-        self._run_isolated_package(job_id, "php", version, package_override=package)
+        minor = ".".join(version.removeprefix("php").split(".")[:2])
+        package = f"php{minor}-{extension}"
+        # APT is process-global. Serialize extension jobs so they cannot
+        # compete over the package database or run multiple updates at once.
+        with self._extension_install_lock:
+            self._run_isolated_package(job_id, "php", version, package_override=package)
         with self._lock:
             job = self._jobs.get(job_id)
         if not job or job.status != "succeeded":
             return
         root = service_root("php", version)
         module_names = PHP_BASELINE_MODULES.get(extension, (extension,))
-        shared_object = next((candidate for name in module_names for candidate in root.glob(f"usr/lib/php/*/{name}.so")), None)
+        module_files = []
+        for module_root in (
+            root / "usr/lib/php",
+            root / "lib/php",
+            root / "lib64/php",
+        ):
+            if module_root.exists():
+                module_files.extend(module_root.rglob("*.so"))
+        shared_object = next(
+            (
+                candidate
+                for name in module_names
+                for candidate in module_files
+                if candidate.name == f"{name}.so"
+            ),
+            None,
+        )
         if not shared_object:
             self._update(job_id, status="failed", message=f"Package {package} installed but its PHP module was not found.")
             return
@@ -214,8 +236,8 @@ class JobStore:
                     import time
                     time.sleep(0.4)
                 runtime_env = os.environ.copy()
-                library_paths = [php["root"] / item for item in ("lib", "usr/lib", "lib/aarch64-linux-gnu", "usr/lib/aarch64-linux-gnu", "lib/x86_64-linux-gnu", "usr/lib/x86_64-linux-gnu")]
-                runtime_env["LD_LIBRARY_PATH"] = ":".join(str(item) for item in library_paths if item.exists())
+                runtime_env["LD_LIBRARY_PATH"] = php_runtime_library_path(php["root"])
+                runtime_env["PHP_INI_SCAN_DIR"] = str(php["root"] / "conf/conf.d")
                 with php["error_log"].open("a") as log_file:
                     process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT, start_new_session=True, env=runtime_env)
                 import time
@@ -251,8 +273,7 @@ class JobStore:
         try:
             if not binary.exists():
                 raise RuntimeError("vsftpd is not installed")
-            for path in (config.parent, pid_file.parent, log_file.parent, root / "empty"):
-                path.mkdir(parents=True, exist_ok=True)
+            self._prepare_service_runtime(root, "conf", "run", "logs", "empty")
             state_path = Path(os.getenv("SE_FTP_STATE_PATH", str(Path(os.getenv("SE_STATE_DIR", "/var/lib/server-engine")) / "ftp.json")))
             settings = {}
             if state_path.exists():
@@ -268,6 +289,7 @@ class JobStore:
                 f"listen=YES\nlisten_ipv6=NO\nbackground=NO\nlisten_port={control_port}\n"
                 f"pasv_min_port={passive_min}\npasv_max_port={passive_max}\n"
                 f"secure_chroot_dir={root / 'empty'}\n"
+                "nopriv_user=serverengine\n"
                 f"xferlog_file={log_file}\n"
             )
             if action in {"stop", "restart"} and pid_file.exists():
@@ -302,10 +324,9 @@ class JobStore:
         try:
             if not binary.exists():
                 raise RuntimeError("PowerDNS is not installed")
-            config_dir.mkdir(parents=True, exist_ok=True)
-            log_file.parent.mkdir(parents=True, exist_ok=True)
+            self._prepare_service_runtime(root, "conf", "logs", "run")
             if not config.exists():
-                config.write_text("launch=local\nlocal-address=0.0.0.0\nlocal-port=53\n")
+                config.write_text("launch=local\nlocal-address=0.0.0.0\nlocal-port=53\nsetuid=serverengine\nsetgid=serverengine\n")
             if action in {"stop", "restart"}:
                 self._stop_process_by_binary(binary)
             if action == "stop":
@@ -354,8 +375,7 @@ class JobStore:
         try:
             if not binary.exists():
                 raise RuntimeError("Caddy is not installed")
-            for path in (config.parent, log_file.parent, pid_file.parent, root / "data", root / "www"):
-                path.mkdir(parents=True, exist_ok=True)
+            self._prepare_service_runtime(root, "conf", "logs", "run", "data", "www")
             if action in {"stop", "restart"}:
                 self._stop_process_by_binary(binary, pid_file)
             if action == "stop":
@@ -386,8 +406,7 @@ class JobStore:
         try:
             if not binary.exists():
                 raise RuntimeError("HAProxy is not installed")
-            for path in (config.parent, log_file.parent, pid_file.parent, root / "run"):
-                path.mkdir(parents=True, exist_ok=True)
+            self._prepare_service_runtime(root, "conf", "logs", "run")
             if action in {"stop", "restart"}:
                 self._stop_process_by_binary(binary, pid_file)
             if action == "stop":
@@ -473,8 +492,7 @@ class JobStore:
         try:
             if not server.exists():
                 raise RuntimeError("Fail2ban is not installed")
-            for path in (config.parent, log_file.parent, root / "run"):
-                path.mkdir(parents=True, exist_ok=True)
+            self._prepare_service_runtime(root, "conf", "logs", "run")
             if action == "stop":
                 result = subprocess.run([str(client), "stop"], capture_output=True, text=True, check=False)
                 if result.returncode != 0:
@@ -509,8 +527,7 @@ class JobStore:
         try:
             if not binary.exists():
                 raise RuntimeError("Valkey is not installed")
-            for path in (config.parent, log_file.parent, pid_file.parent, root / "data"):
-                path.mkdir(parents=True, exist_ok=True)
+            user = self._prepare_service_runtime(root, "conf", "logs", "run", "data")
             if action in {"stop", "restart"}:
                 self._stop_process_by_binary(binary, pid_file)
             if action == "stop":
@@ -519,6 +536,8 @@ class JobStore:
             if action not in {"start", "restart"}:
                 raise RuntimeError(f"Unsupported Valkey action: {action}")
             command = [str(binary), str(config)]
+            if os.geteuid() == 0 and shutil.which("runuser"):
+                command = ["runuser", "-u", user, "--", *command]
             self._update(job_id, status="running", message=f"Starting Valkey with {config}…", log=[])
             stream = log_file.open("a")
             process = subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True, cwd=root)
@@ -730,14 +749,41 @@ class JobStore:
             pwd.getpwnam("serverengine")
             return "serverengine"
         except KeyError:
-            # Never create a host user as a side effect of installing a
-            # service. The release installer creates serverengine during
-            # bootstrap; development containers may not have it, so use the
-            # current process account for the isolated data directory.
-            try:
-                return pwd.getpwuid(os.geteuid()).pw_name
-            except (KeyError, OSError) as error:
-                raise RuntimeError("No usable service account is available for the isolated database") from error
+            if os.geteuid() != 0:
+                raise RuntimeError("The serverengine service account is missing and cannot be created without root privileges")
+            useradd = shutil.which("useradd")
+            if not useradd:
+                raise RuntimeError("The serverengine service account is missing and useradd is unavailable")
+            result = subprocess.run(
+                [useradd, "--system", "--user-group", "--home-dir", "/var/lib/server-engine", "--shell", "/usr/sbin/nologin", "serverengine"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode != 0:
+                raise RuntimeError((result.stderr or result.stdout).strip() or "Unable to create the serverengine service account")
+            return "serverengine"
+
+    def _prepare_service_runtime(self, root: Path, *relative_paths: str) -> str:
+        """Create writable service paths and assign them to serverengine."""
+        user = self._ensure_service_user()
+        owner = pwd.getpwnam(user)
+        for relative in relative_paths:
+            path = root / relative
+            path.mkdir(parents=True, exist_ok=True)
+            if os.geteuid() == 0:
+                subprocess.run(
+                    ["chown", "-R", f"{user}:{user}", str(path)],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            else:
+                try:
+                    os.chown(path, owner.pw_uid, owner.pw_gid)
+                except OSError:
+                    pass
+        return user
 
     def _ensure_php_package_source(self):
         os_release = Path("/etc/os-release").read_text(errors="replace") if Path("/etc/os-release").exists() else ""
@@ -863,8 +909,149 @@ class JobStore:
             self._jobs[job_id] = updated
         self._broadcast(updated)
 
-    def _run_install(self, job_id: str, service_id: str, requested_version: str):
+    def _run_install(self, job_id: str, service_id: str, requested_version: str, install_method: str = "prebuilt", php_version: str | None = None, composer_version: str | None = None):
+        if service_id == "php" and install_method == "source":
+            self._run_php_source_binary(job_id, requested_version)
+            return
+        if service_id == "composer":
+            self._run_composer_binary(job_id, requested_version, php_version)
+            return
+        if service_id == "wp-cli":
+            self._run_wpcli_binary(job_id, requested_version, php_version)
+            return
+        if install_method == "prebuilt" and prebuilt_package_for(service_id):
+            if service_id == "redis":
+                self._run_redis_prebuilt(job_id, requested_version)
+            else:
+                self._run_debian_prebuilt(job_id, service_id, requested_version)
+            return
         self._run_isolated_package(job_id, service_id, requested_version)
+
+    def _resolve_apt_version(self, package: str, requested_version: str) -> str:
+        """Resolve the UI's epoch-free version to the exact APT version."""
+        apt_cache = shutil.which("apt-cache")
+        if not apt_cache:
+            return requested_version
+        result = subprocess.run(
+            [apt_cache, "madison", package],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=8,
+        )
+        for line in result.stdout.splitlines():
+            parts = [part.strip() for part in line.split("|")]
+            if len(parts) < 2 or not parts[1]:
+                continue
+            full_version = parts[1]
+            if full_version == requested_version or full_version.split(":", 1)[-1] == requested_version:
+                return full_version
+        return requested_version
+
+    def _run_debian_prebuilt(self, job_id: str, service_id: str, requested_version: str):
+        """Extract an exact Debian package into a managed service root."""
+        package = prebuilt_package_for(service_id)
+        apt = shutil.which("apt-get")
+        dpkg_deb = shutil.which("dpkg-deb")
+        if not package or not apt or not dpkg_deb:
+            self._update(job_id, status="failed", message=f"No compatible prebuilt {service_id} package provider is available on this host. Choose source build instead.")
+            return
+        root = service_root(service_id)
+        staging = root.parent / f".{service_id}-{job_id}-prebuilt"
+        package_dir = staging / "packages"
+        try:
+            shutil.rmtree(staging, ignore_errors=True)
+            package_dir.mkdir(parents=True, exist_ok=True)
+            exact_version = self._resolve_apt_version(package, requested_version)
+            self._update(job_id, status="running", progress=5, message=f"Downloading prebuilt {service_id} {requested_version}…", log=[f"$ apt-get download {package}={exact_version}"])
+            packages = [f"{package}={exact_version}"]
+            apt_cache = shutil.which("apt-cache")
+            if apt_cache:
+                pending = [package]
+                seen = set()
+                while pending:
+                    dependency_package = pending.pop(0)
+                    if dependency_package in seen:
+                        continue
+                    seen.add(dependency_package)
+                    dependency_output = subprocess.run([apt_cache, "depends", "--no-recommends", "--no-suggests", dependency_package], capture_output=True, text=True, check=False).stdout
+                    for line in dependency_output.splitlines():
+                        match = re.match(r"\s+\|?(?:Depends|PreDepends):\s+([^\s|<>]+)", line)
+                        if match and match.group(1) not in seen and match.group(1) not in packages:
+                            packages.append(match.group(1))
+                            pending.append(match.group(1))
+            self._update(
+                job_id,
+                progress=12,
+                message=f"Resolving {service_id} package dependencies…",
+                log=[f"$ apt-get download {' '.join(packages)}"],
+            )
+            downloaded = subprocess.run([apt, "download", *packages], cwd=package_dir, capture_output=True, text=True, check=False)
+            download_log = (downloaded.stdout + downloaded.stderr).strip().splitlines()
+            if download_log:
+                self._update(job_id, progress=32, message=f"Downloaded {len(download_log)} package log entries for {service_id}.", log=download_log[-80:])
+            if downloaded.returncode != 0:
+                raise RuntimeError((downloaded.stderr or downloaded.stdout).strip() or f"The selected {service_id} package is not available for this host")
+            archives = sorted(package_dir.glob("*.deb"))
+            if not archives:
+                raise RuntimeError(f"The package provider returned no {service_id} archive")
+            extracted = staging / "root"
+            extracted.mkdir(parents=True, exist_ok=True)
+            for index, archive in enumerate(archives, start=1):
+                self._update(job_id, progress=35 + round(index * 55 / len(archives)), message=f"Extracting package {index} of {len(archives)}: {archive.name}", log=[f"$ dpkg-deb -x {archive.name} {extracted}"])
+                unpacked = subprocess.run([dpkg_deb, "-x", str(archive), str(extracted)], capture_output=True, text=True, check=False)
+                if unpacked.returncode != 0:
+                    raise RuntimeError((unpacked.stderr or unpacked.stdout).strip() or f"{service_id} package extraction failed")
+            if root.exists():
+                shutil.rmtree(root)
+            root.mkdir(parents=True, exist_ok=True)
+            for item in extracted.iterdir():
+                target = root / item.name
+                # Debian packages commonly contain absolute or dangling
+                # documentation symlinks. Preserve those links instead of
+                # dereferencing them with copy2(), which makes an otherwise
+                # valid isolated install fail at the final copy step.
+                if item.is_symlink():
+                    target.symlink_to(os.readlink(item), target_is_directory=item.is_dir())
+                elif item.is_dir():
+                    shutil.copytree(item, target, dirs_exist_ok=True, symlinks=True)
+                else:
+                    shutil.copy2(item, target)
+            (root / ".serverengine-version").write_text(requested_version + "\n")
+            (root / ".serverengine-install-method").write_text("prebuilt\n")
+            for directory in (root / "conf", root / "data", root / "logs", root / "run"):
+                directory.mkdir(parents=True, exist_ok=True)
+            self._prepare_service_runtime(root, "conf", "data", "logs", "run")
+            if service_id == "nginx":
+                ensure_nginx_layout()
+            elif service_id == "apache":
+                apache_conf = root / "conf/httpd.conf"
+                if not apache_conf.exists():
+                    module_root = root / "usr/lib/apache2/modules"
+                    apache_conf.write_text(
+                        f'ServerRoot "{root}"\nListen 80\n'
+                        f'PidFile "{root / "run/httpd.pid"}"\n'
+                        f'ErrorLog "{root / "logs/error.log"}"\n'
+                        f"LoadModule mpm_event_module {module_root / 'mod_mpm_event.so'}\n"
+                        f"LoadModule unixd_module {module_root / 'mod_unixd.so'}\n"
+                        f"LoadModule authz_core_module {module_root / 'mod_authz_core.so'}\n"
+                        f"LoadModule dir_module {module_root / 'mod_dir.so'}\n"
+                        f"LoadModule mime_module {module_root / 'mod_mime.so'}\n"
+                        f"LoadModule rewrite_module {module_root / 'mod_rewrite.so'}\n"
+                        "TypesConfig /etc/mime.types\n"
+                        "DocumentRoot /server-engine/www\n"
+                        "<Directory /server-engine/www>\n  AllowOverride All\n  Require all granted\n</Directory>\n"
+                    )
+            elif service_id == "php":
+                self._ensure_service_user()
+                ensure_php_fpm_layout(requested_version)
+                ensure_php_runtime_launcher(requested_version)
+                enable_php_baseline_extensions(requested_version)
+            self._update(job_id, status="succeeded", progress=100, message=f"{service_id} {requested_version} was extracted into {root}; no host service was registered.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
 
     def _prepare_node_runtime(self, root: Path):
         node = root / "usr/bin/node"
@@ -885,8 +1072,12 @@ class JobStore:
         }
         dependencies = {
             "apache": base | {"automake", "libexpat1-dev", "libnghttp2-dev", "libpcre3-dev", "libpcre2-dev", "perl"},
+            "php": base | {"autoconf", "bison", "re2c", "libxml2-dev", "libcurl4-openssl-dev", "libsqlite3-dev", "libonig-dev", "libzip-dev", "libreadline-dev", "libxslt1-dev", "libjpeg-dev", "libpng-dev", "libwebp-dev", "libfreetype6-dev", "libicu-dev", "libpq-dev"},
             "stalwart": base | {"cargo", "rustc"},
-            "mongodb": base | {"python3", "libcurl4-openssl-dev", "liblzma-dev"},
+            # MongoDB's source bootstrap imports boto3 even when it falls back
+            # to its requests-based downloader. Keep both modules available so
+            # the upstream Bazel bootstrap can resolve tool archives.
+            "mongodb": base | {"python3", "python3-boto3", "python3-requests", "libcurl4-openssl-dev", "liblzma-dev"},
             "opensearch": {"openjdk-21-jdk-headless"},
             "rspamd": base | {"libglib2.0-dev", "libgmime-3.0-dev", "liblua5.4-dev", "libsodium-dev", "libicu-dev", "libevent-dev", "libpcre2-dev", "libcurl4-openssl-dev", "libzstd-dev"},
             "bind9": base | {"libuv1-dev", "libjson-c-dev", "libidn2-dev", "libnghttp2-dev", "libcap-dev"},
@@ -917,6 +1108,7 @@ class JobStore:
                 "libjson-c-dev": "json-c-devel", "libxml2-dev": "libxml2-devel", "libncurses-dev": "ncurses-devel",
                 "libpcre2-dev": "pcre2-devel", "libpam0g-dev": "pam-devel", "libcap-dev": "libcap-devel",
                 "libpcre3-dev": "pcre-devel",
+                "python3-boto3": "python3-boto3", "python3-requests": "python3-requests",
                 "libglib2.0-dev": "glib2-devel", "libgmime-3.0-dev": "gmime30-devel", "liblua5.4-dev": "lua-devel",
                 "libsodium-dev": "libsodium-devel", "libicu-dev": "libicu-devel", "libevent-dev": "libevent-devel",
                 "libzstd-dev": "libzstd-devel", "liblzma-dev": "xz-devel", "libuv1-dev": "libuv-devel",
@@ -932,6 +1124,76 @@ class JobStore:
             raise RuntimeError(output.strip()[-2000:] or f"Unable to install build dependencies for {service_id}")
         self._update(job_id, progress=3, message=f"Build dependencies for {service_id} are ready.", log=output.splitlines()[-80:])
 
+    def _run_php_source_binary(self, job_id: str, requested_version: str):
+        """Build PHP-FPM from the official source archive inside its version root."""
+        source_url = php_source_for(requested_version)
+        if not source_url:
+            try:
+                definition, _, _ = refresh_service_versions("php", install_method="source")
+                if any(item.version == requested_version for item in definition.versions):
+                    source_url = php_source_for(requested_version)
+            except Exception:
+                source_url = None
+        if not source_url:
+            self._update(job_id, status="failed", message=f"PHP {requested_version} is not available from the official source catalog. Refresh compatible versions and try again.")
+            return
+        root = service_root("php", requested_version)
+        staging = root.parent / f".php-{requested_version}-{job_id}-staging"
+        archive = root.parent / f"php-{requested_version}.tar.gz"
+        try:
+            self._ensure_source_build_dependencies(job_id, "php")
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True, exist_ok=True)
+            archive.unlink(missing_ok=True)
+            self._update(job_id, status="running", progress=5, message=f"Downloading PHP {requested_version} source…", log=[f"$ curl -L {source_url}"])
+            with urllib.request.urlopen(urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"}), timeout=120) as response, archive.open("wb") as output:
+                shutil.copyfileobj(response, output)
+            source = staging / f"php-{requested_version}"
+            source.mkdir(parents=True, exist_ok=True)
+            with tarfile.open(archive, "r:gz") as package:
+                package.extractall(staging)
+            source = next((item for item in staging.iterdir() if item.is_dir() and item.name.startswith("php-")), source)
+            runtime_user = self._ensure_service_user()
+            configure = [
+                "./configure", f"--prefix={root}", f"--with-config-file-path={root / 'conf'}",
+                f"--with-config-file-scan-dir={root / 'conf/conf.d'}", "--enable-fpm", f"--with-fpm-user={runtime_user}",
+                f"--with-fpm-group={runtime_user}", "--enable-mbstring", "--enable-bcmath", "--enable-opcache",
+                "--enable-zip", "--with-curl", "--with-openssl", "--with-zlib",
+                "--with-mysqli=mysqlnd", "--with-pdo-mysql=mysqlnd", "--with-pdo-pgsql", "--with-sqlite3",
+                "--enable-intl", "--enable-gd", "--enable-fileinfo", "--with-jpeg", "--with-webp", "--with-freetype", "--enable-soap",
+            ]
+            self._update(job_id, progress=25, message=f"Configuring PHP {requested_version} with FPM and web extensions…", log=[f"$ {' '.join(configure)}"])
+            result = subprocess.run(configure, cwd=source, capture_output=True, text=True, check=False)
+            if result.returncode != 0:
+                raise RuntimeError((result.stderr or result.stdout).strip()[-3000:] or "PHP configure failed")
+            jobs = str(max(1, min(os.cpu_count() or 1, 4)))
+            self._update(job_id, progress=45, message="Compiling PHP…", log=[f"$ make -j{jobs}"])
+            result = subprocess.run(["make", f"-j{jobs}"], cwd=source, capture_output=True, text=True, check=False)
+            if result.returncode != 0:
+                raise RuntimeError((result.stderr or result.stdout).strip()[-3000:] or "PHP compilation failed")
+            self._update(job_id, progress=80, message="Installing PHP into the isolated Server Engine runtime…", log=["$ make install"])
+            result = subprocess.run(["make", "install"], cwd=source, capture_output=True, text=True, check=False)
+            if result.returncode != 0:
+                raise RuntimeError((result.stderr or result.stdout).strip()[-3000:] or "PHP installation failed")
+            (root / "conf").mkdir(parents=True, exist_ok=True)
+            (root / "conf/conf.d").mkdir(parents=True, exist_ok=True)
+            production_ini = source / "php.ini-production"
+            if production_ini.exists():
+                shutil.copy2(production_ini, root / "conf/php.ini")
+            root, detected_version = normalize_php_runtime_layout(root)
+            requested_version = detected_version or requested_version
+            ensure_php_fpm_layout(requested_version)
+            enable_php_baseline_extensions(requested_version)
+            ensure_php_runtime_launcher(requested_version)
+            (root / ".serverengine-version").write_text(requested_version + "\n")
+            (root / ".serverengine-install-method").write_text("source\n")
+            self._update(job_id, status="succeeded", progress=100, message=f"PHP-FPM {requested_version} was built inside {root}; the host PHP installation was not changed.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+        finally:
+            archive.unlink(missing_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+
     def _run_isolated_package(self, job_id: str, service_id: str, requested_version: str, package_override: str | None = None):
         if service_id in {"apache", "stalwart", "mongodb", "opensearch", "wp-cli", "postfix", "dovecot", "rspamd", "bind9", "unbound", "clamav", "supervisor", "lynis"}:
             self._ensure_source_build_dependencies(job_id, service_id)
@@ -946,6 +1208,9 @@ class JobStore:
             return
         if service_id == "python":
             self._run_python_binary(job_id, requested_version)
+            return
+        if service_id == "pm2":
+            self._run_pm2_binary(job_id, requested_version)
             return
         if service_id == "redis":
             self._run_redis_binary(job_id, requested_version)
@@ -969,7 +1234,7 @@ class JobStore:
             self._run_opensearch_binary(job_id, requested_version)
             return
         if service_id == "wp-cli":
-            self._run_wpcli_binary(job_id, requested_version)
+            self._run_wpcli_binary(job_id, requested_version, php_version)
             return
         if service_id == "postfix":
             self._run_postfix_binary(job_id, requested_version)
@@ -1038,15 +1303,16 @@ class JobStore:
             self._run_openlitespeed_binary(job_id, requested_version)
             return
         if service_id == "composer":
-            self._run_composer_binary(job_id, requested_version)
+            self._run_composer_binary(job_id, requested_version, php_version)
             return
         package = package_for(service_id)
         root = service_root(service_id, requested_version if service_id == "nodejs" else None)
         packages = [package] if package else []
         if service_id == "php":
             normalized = requested_version.removeprefix("php")
-            package = package_override or f"php{normalized}-fpm"
-            packages = [package, f"php{normalized}-cli", f"php{normalized}-common", "unzip"]
+            minor = ".".join(normalized.split(".")[:2])
+            package = package_override or f"php{minor}-fpm"
+            packages = [package, f"php{minor}-cli", f"php{minor}-common", "unzip"]
             root = service_root("php", normalized)
         if package is None:
             self._update(job_id, status="failed", message=f"No isolated package adapter exists for {service_id}; no global package was changed.")
@@ -1073,9 +1339,17 @@ class JobStore:
                     self._update(job_id, progress=4, message=f"Official MariaDB repository unavailable; using the operating system repository. {error}")
             else:
                 self._update(job_id, status="running", progress=2, message=f"Preparing {service_id} {requested_version}…", log=[])
-            metadata = subprocess.run([apt, "update"], check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            metadata = subprocess.run([apt, "update"], check=False, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             metadata_log = [line.strip() for line in metadata.stdout.splitlines() if line.strip()][-20:]
-            self._update(job_id, progress=8, message="Package metadata is ready. Resolving runtime dependencies…", log=metadata_log)
+            if metadata.returncode:
+                self._update(
+                    job_id,
+                    progress=8,
+                    message="Package metadata refresh reported a warning; checking the available package cache…",
+                    log=metadata_log,
+                )
+            else:
+                self._update(job_id, progress=8, message="Package metadata is ready. Resolving runtime dependencies…", log=metadata_log)
             apt_cache = shutil.which("apt-cache")
             packages = [item for item in packages if item]
             if apt_cache and package and requested_version not in {"latest", "managed"} and service_id not in {"php", "nodejs", "python", "mysql", "sqlserver", "composer"}:
@@ -1138,6 +1412,25 @@ class JobStore:
                         f"Available versions: {available}. Refresh compatible versions or configure the official MariaDB repository."
                     )
             if service_id == "php" and apt_cache:
+                if not package_override and len(normalized.split(".")) >= 3:
+                    candidates = subprocess.run(
+                        [apt_cache, "madison", package],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    ).stdout.splitlines()
+                    exact_package = next(
+                        (
+                            parts[1]
+                            for line in candidates
+                            for parts in [[part.strip() for part in line.split("|")]]
+                            if len(parts) >= 2
+                            and parts[1].split(":", 1)[-1].startswith(f"{normalized}-")
+                        ),
+                        None,
+                    )
+                    if exact_package:
+                        packages[0] = f"{package}={exact_package}"
                 available = subprocess.run([apt_cache, "show", package], capture_output=True, text=True, check=False)
                 if available.returncode != 0 or "Package:" not in available.stdout:
                     self._update(job_id, message=f"PHP {normalized} is not in the current Debian repositories. Adding the PHP runtime source and retrying…")
@@ -1159,9 +1452,10 @@ class JobStore:
                             pending.append(match.group(1))
                 if service_id == "php":
                     normalized = requested_version.removeprefix("php")
-                    common_modules = ("cli", "mysql", "curl", "mbstring", "xml", "gd", "zip", "intl", "bcmath", "opcache", "igbinary", "redis")
+                    common_modules = ("cli", *PHP_REQUIRED_EXTENSIONS, "xml", "gd", "intl", "bcmath", "opcache", "igbinary", "redis")
+                    minor = ".".join(normalized.split(".")[:2])
                     for module in common_modules:
-                        candidate = f"php{normalized}-{module}"
+                        candidate = f"php{minor}-{module}"
                         available = subprocess.run([apt_cache, "show", candidate], capture_output=True, text=True, check=False)
                         if available.returncode == 0 and "Package:" in available.stdout and candidate not in packages:
                             packages.append(candidate)
@@ -1198,10 +1492,15 @@ class JobStore:
                 self._update(job_id, progress=min(88, 68 + round((index + 1) * 20 / len(debs))), message=f"Extracting {service_id} package {index + 1} of {len(debs)}…")
             if service_id == "nodejs":
                 self._prepare_node_runtime(root)
-            (root / ".serverengine-version").write_text(requested_version)
             for deb in debs:
                 deb.unlink(missing_ok=True)
             package_dir.rmdir()
+            if service_id == "php":
+                root, detected_version = normalize_php_runtime_layout(root)
+                normalized = detected_version or normalized
+            (root / ".serverengine-version").write_text(
+                (normalized if service_id == "php" else requested_version) + "\n"
+            )
             self._update(job_id, progress=92, message=f"Configuring {service_id} runtime files and default extensions…")
             if service_id == "nginx":
                 ensure_nginx_layout()
@@ -1913,6 +2212,66 @@ class JobStore:
             shutil.rmtree(staging, ignore_errors=True)
             archive.unlink(missing_ok=True)
 
+    def _run_pm2_binary(self, job_id: str, requested_version: str):
+        """Install PM2 into its own prefix using an installed isolated Node.js."""
+        node_versions = service_root("nodejs") / "versions"
+        candidates = sorted(
+            (item for item in node_versions.iterdir() if item.is_dir()),
+            key=lambda item: tuple(int(part) if part.isdigit() else 0 for part in re.split(r"[.-]", item.name)),
+            reverse=True,
+        ) if node_versions.exists() else []
+        node_root = next((item for item in candidates if binary_path("nodejs", item.name).exists()), None)
+        if node_root is None:
+            self._update(job_id, status="failed", message="Install an isolated Node.js runtime first. PM2 uses that runtime and does not install Node.js globally.")
+            return
+        ensure_node_runtime(node_root)
+        npm = node_root / "bin/npm"
+        node = binary_path("nodejs", node_root.name)
+        if not npm.exists() or not node.exists():
+            self._update(job_id, status="failed", message="The selected isolated Node.js runtime does not include npm. Reinstall that Node.js version, then retry PM2.")
+            return
+        root = service_root("pm2") / "versions" / requested_version
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+            self._update(
+                job_id,
+                status="running",
+                progress=10,
+                message=f"Installing PM2 {requested_version} into its isolated prefix…",
+                log=[f"$ {npm} install --prefix {root} pm2@{requested_version} --no-audit --no-fund --ignore-scripts"],
+            )
+            environment = os.environ.copy()
+            environment["PATH"] = f"{node_root / 'bin'}:{environment.get('PATH', '')}"
+            environment["npm_config_prefix"] = str(root)
+            result = subprocess.run(
+                [str(npm), "install", "--prefix", str(root), f"pm2@{requested_version}", "--no-audit", "--no-fund", "--ignore-scripts"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=300,
+                env=environment,
+            )
+            output = (result.stdout + result.stderr).strip().splitlines()
+            if output:
+                self._update(job_id, progress=85, message="PM2 package installation output received.", log=output[-100:])
+            if result.returncode != 0:
+                raise RuntimeError("\n".join(output[-30:]) or f"Unable to install PM2 {requested_version} with the isolated Node.js runtime")
+            package_launcher = root / "node_modules/.bin/pm2"
+            launcher = root / "bin/pm2"
+            if not package_launcher.exists():
+                raise RuntimeError("The PM2 package did not create its npm executable")
+            launcher.parent.mkdir(parents=True, exist_ok=True)
+            launcher.write_text(f'#!/bin/sh\nexec "{package_launcher}" "$@"\n')
+            launcher.chmod(0o755)
+            (root / ".serverengine-version").write_text(requested_version + "\n")
+            (root / ".serverengine-node-version").write_text(node_root.name + "\n")
+            version = subprocess.run([str(launcher), "--version"], capture_output=True, text=True, check=False, timeout=30, env=environment)
+            if version.returncode != 0:
+                raise RuntimeError((version.stderr or version.stdout).strip() or "The isolated PM2 executable could not start")
+            self._update(job_id, status="succeeded", progress=100, message=f"PM2 {requested_version} is installed in {root} and uses isolated Node.js {node_root.name}.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+
     def _run_python_binary(self, job_id: str, requested_version: str):
         """Install a portable CPython build without touching the system Python."""
         asset_url = python_asset_for(requested_version)
@@ -1981,6 +2340,57 @@ class JobStore:
             if staging.exists():
                 shutil.rmtree(staging, ignore_errors=True)
             self._update(job_id, status="failed", message=str(error))
+
+    def _run_redis_prebuilt(self, job_id: str, requested_version: str):
+        """Extract the distro Redis package without registering a host service."""
+        apt = shutil.which("apt-get")
+        dpkg_deb = shutil.which("dpkg-deb")
+        if not apt or not dpkg_deb:
+            self._update(job_id, status="failed", message="The prebuilt Redis option requires apt-get and dpkg-deb. Choose source build on this host.")
+            return
+        root = service_root("redis")
+        staging = root.parent / f".redis-{job_id}-prebuilt"
+        package_dir = staging / "packages"
+        try:
+            shutil.rmtree(staging, ignore_errors=True)
+            package_dir.mkdir(parents=True, exist_ok=True)
+            exact_version = self._resolve_apt_version("redis-server", requested_version)
+            self._update(job_id, status="running", progress=5, message=f"Downloading prebuilt Redis {requested_version}…", log=[f"$ apt-get download redis-server={exact_version}"])
+            result = subprocess.run([apt, "download", f"redis-server={exact_version}"], cwd=package_dir, capture_output=True, text=True, check=False)
+            download_log = (result.stdout + result.stderr).strip().splitlines()
+            if download_log:
+                self._update(job_id, progress=35, message="Redis package download output received.", log=download_log[-80:])
+            if result.returncode != 0:
+                raise RuntimeError((result.stderr or result.stdout).strip() or "The compatible Redis package could not be downloaded")
+            archives = sorted(package_dir.glob("redis-server_*.deb"))
+            if not archives:
+                raise RuntimeError("The package provider returned no Redis archive for this OS and architecture")
+            extracted = staging / "root"
+            extracted.mkdir()
+            self._update(job_id, progress=55, message="Extracting Redis into the Server Engine service area…")
+            unpacked = subprocess.run([dpkg_deb, "-x", str(archives[-1]), str(extracted)], capture_output=True, text=True, check=False)
+            if unpacked.returncode != 0:
+                raise RuntimeError((unpacked.stderr or unpacked.stdout).strip() or "Redis package extraction failed")
+            if root.exists():
+                shutil.rmtree(root)
+            root.mkdir(parents=True, exist_ok=True)
+            for item in extracted.iterdir():
+                target = root / item.name
+                if item.is_dir():
+                    shutil.copytree(item, target, dirs_exist_ok=True)
+                else:
+                    shutil.copy2(item, target)
+            (root / ".serverengine-version").write_text(requested_version + "\n")
+            for directory in (root / "conf", root / "data", root / "logs", root / "run"):
+                directory.mkdir(parents=True, exist_ok=True)
+            config = root / "conf/redis.conf"
+            if not config.exists():
+                config.write_text(f"bind 127.0.0.1 ::1\nprotected-mode yes\nport 6379\ndir {root / 'data'}\nlogfile {root / 'logs/redis.log'}\npidfile {root / 'run/redis.pid'}\ndaemonize no\n")
+            self._update(job_id, status="succeeded", progress=100, message=f"Redis {requested_version} was installed from a compatible prebuilt package in {root}; no host Redis service was registered.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
 
     def _run_redis_binary(self, job_id: str, requested_version: str):
         """Build Redis from its official source into the managed service root."""
@@ -2781,43 +3191,94 @@ class JobStore:
         except Exception as error: self._update(job_id, status="failed", message=str(error))
         finally: archive.unlink(missing_ok=True); shutil.rmtree(staging, ignore_errors=True)
 
-    def _run_wpcli_binary(self, job_id: str, requested_version: str):
-        """Install WP-CLI from its official source tree in an isolated tool root."""
-        source_url = wpcli_source_for(requested_version)
-        if not source_url:
-            try:
-                definition, _, _ = refresh_service_versions("wp-cli")
-                if any(item.version == requested_version for item in definition.versions): source_url = wpcli_source_for(requested_version)
-            except Exception: source_url = None
-        php = next((path for path in sorted(Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")).glob("php/versions/*/usr/bin/php*")) if path.is_file()), None)
-        composer = shutil.which("composer")
-        if not composer:
-            composer_candidates = sorted(Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")).glob("composer/versions/*/bin/composer"))
-            composer = str(composer_candidates[-1]) if composer_candidates else None
-        if not source_url: self._update(job_id, status="failed", message=f"WP-CLI {requested_version} is not available from the official source repository. Refresh compatible versions and try again."); return
-        if not php or not composer:
-            self._update(job_id, status="failed", message="WP-CLI source installation requires an installed isolated PHP runtime and Composer. Install PHP and Composer first, then retry."); return
-        root = service_root("wp-cli") / "versions" / requested_version; staging = root.parent / f".wp-cli-{job_id}-staging"; archive = root.parent / f"wp-cli-{requested_version}.tar.gz"
+    def _run_wpcli_binary(self, job_id: str, requested_version: str, selected_php_version: str | None = None):
+        """Install the official WP-CLI PHAR without resolving its development repository."""
+        versions_root = service_root("php") / "versions"
+        php_candidates = []
+        if versions_root.exists():
+            for runtime in versions_root.iterdir():
+                if runtime.is_dir():
+                    candidate = php_cli_path(runtime.name)
+                    if candidate.is_file():
+                        php_candidates.append((version_sort_key(runtime.name), candidate))
+        selected_php = php_cli_path(selected_php_version) if selected_php_version else None
+        php = selected_php if selected_php and selected_php.is_file() else (max(php_candidates, key=lambda item: item[0])[1] if php_candidates else None)
+        if not php:
+            self._update(job_id, status="failed", message="WP-CLI requires an installed PHP CLI runtime. Install PHP first, then retry.")
+            return
+
+        root = service_root("wp-cli") / "versions" / requested_version
+        staging = root.parent / f".wp-cli-{job_id}-staging"
+        archive = staging / "wp-cli.phar"
+        source_url = f"https://github.com/wp-cli/wp-cli/releases/download/v{requested_version}/wp-cli-{requested_version}.phar"
         try:
-            root.parent.mkdir(parents=True, exist_ok=True); shutil.rmtree(staging, ignore_errors=True); staging.mkdir(parents=True); archive.unlink(missing_ok=True)
-            self._update(job_id, status="running", progress=3, message=f"Downloading WP-CLI {requested_version} source…", log=[])
-            with urllib.request.urlopen(urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"}), timeout=120) as response, archive.open("wb") as output: output.write(response.read())
-            with tarfile.open(archive, "r:gz") as package: package.extractall(staging)
-            source = next((item for item in staging.iterdir() if item.is_dir()), staging)
-            command = [composer, "install", "--no-dev", "--prefer-dist", "--no-interaction", "--no-progress"]
-            self._update(job_id, progress=35, message=f"Resolving WP-CLI {requested_version} dependencies…", log=[f"$ {' '.join(command)}"])
-            result = subprocess.run(command, cwd=source, capture_output=True, text=True, check=False)
-            if result.returncode != 0: raise RuntimeError((result.stderr or result.stdout).strip() or "Composer failed to build WP-CLI")
-            entry = source / "bin/wp-cli.php"
-            if not entry.exists(): raise RuntimeError("The WP-CLI source tree did not contain bin/wp-cli.php")
-            if root.exists(): shutil.rmtree(root)
-            shutil.move(str(source), str(root)); (root / "bin").mkdir(exist_ok=True)
+            root.parent.mkdir(parents=True, exist_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True)
+            self._update(
+                job_id,
+                status="running",
+                progress=3,
+                message=f"Downloading official WP-CLI {requested_version} release…",
+                log=[f"$ curl -fL {source_url} -o {archive}"],
+            )
+            request = urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"})
+            with urllib.request.urlopen(request, timeout=120) as response, archive.open("wb") as output:
+                total = int(response.headers.get("Content-Length") or 0)
+                downloaded = 0
+                while True:
+                    chunk = response.read(1024 * 256)
+                    if not chunk:
+                        break
+                    output.write(chunk)
+                    downloaded += len(chunk)
+                    progress = min(60, 5 + int(downloaded * 55 / total)) if total else 25
+                    self._update(job_id, progress=progress, message=f"Downloading WP-CLI {requested_version}…", log=[f"Downloaded {downloaded // 1024} KiB"])
+            if archive.stat().st_size < 10_000:
+                raise RuntimeError("The WP-CLI release download was incomplete or invalid.")
+
+            php_root = php.parent.parent.parent
+            ensure_php_runtime_configuration(php_root.name)
+            self._update(job_id, progress=70, message=f"Checking WP-CLI {requested_version} with PHP…", log=[f"$ {php} {archive} --info"])
+            check = subprocess.run(
+                [str(php), str(archive), "--info"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=30,
+                env={
+                    **os.environ,
+                    "LD_LIBRARY_PATH": php_runtime_library_path(php_root),
+                    "PHP_INI_SCAN_DIR": str(php_root / "conf/conf.d"),
+                },
+            )
+            if check.returncode != 0:
+                raise RuntimeError((check.stderr or check.stdout).strip() or "The downloaded WP-CLI release could not be started by the selected PHP runtime.")
+            if root.exists():
+                shutil.rmtree(root)
+            root.mkdir(parents=True)
+            shutil.copy2(archive, root / "wp-cli.phar")
+            (root / "bin").mkdir()
             launcher = root / "bin/wp"
-            launcher.write_text("#!/bin/sh\nexec " + shlex.quote(str(php)) + " " + shlex.quote(str(root / "bin/wp-cli.php")) + ' "$@"\n'); launcher.chmod(0o755)
+            launcher.write_text(
+                "#!/bin/sh\n"
+                f'PHP={shlex.quote(str(php))}\n'
+                f'PHAR={shlex.quote(str(root / "wp-cli.phar"))}\n'
+                'if [ ! -x "$PHP" ]; then\n'
+                f'  for candidate in {shlex.quote(str(versions_root))}/*/usr/bin/php {shlex.quote(str(versions_root))}/*/bin/php; do\n'
+                '    if [ -x "$candidate" ]; then PHP="$candidate"; fi\n'
+                '  done\n'
+                'fi\n'
+                'exec "$PHP" "$PHAR" "$@"\n'
+            )
+            launcher.chmod(0o755)
             (root / ".serverengine-version").write_text(requested_version + "\n")
-            self._update(job_id, status="succeeded", progress=100, message=f"WP-CLI {requested_version} is installed in {root}; the host WP-CLI installation was not changed.")
-        except Exception as error: self._update(job_id, status="failed", message=str(error))
-        finally: archive.unlink(missing_ok=True); shutil.rmtree(staging, ignore_errors=True)
+            (root / ".serverengine-install-method").write_text("official-release\n")
+            self._update(job_id, status="succeeded", progress=100, message=f"WP-CLI {requested_version} is installed in {root}; it uses the latest available PHP CLI runtime.", log=[check.stdout.strip() or "WP-CLI release verified."])
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
 
     def _run_postfix_binary(self, job_id: str, requested_version: str):
         """Build Postfix from its official source archive without host installation."""
@@ -3018,21 +3479,33 @@ class JobStore:
                     raise RuntimeError("The MongoDB archive contains an unsafe path")
                 package.extractall(staging)
             source = next((item for item in staging.iterdir() if item.is_dir()), staging)
-            bazel = shutil.which("bazel") or shutil.which("bazelisk")
+            # MongoDB's installer writes Bazel and buildozer to
+            # ~/.local/bin. Give it a private HOME inside the temporary build
+            # area so it never writes to the host user's home directory and so
+            # the generated tools remain available to the following Bazel run.
+            build_home = staging / ".home"
+            local_bin = build_home / ".local/bin"
+            local_bin.mkdir(parents=True, exist_ok=True)
+            build_env = os.environ.copy()
+            build_env["HOME"] = str(build_home)
+            build_env["PATH"] = f"{local_bin}:{build_env.get('PATH', '')}"
+
+            bazel = shutil.which("bazel", path=build_env["PATH"]) or shutil.which("bazelisk", path=build_env["PATH"])
             if not bazel:
                 installer = source / "buildscripts/install_bazel.py"
                 if not installer.exists():
                     raise RuntimeError("The MongoDB source tree does not contain its Bazel installer")
                 self._update(job_id, progress=36, message="Installing the MongoDB-compatible Bazel build tool in the build environment…", log=[f"$ {python} buildscripts/install_bazel.py"])
-                installed = subprocess.run([python, str(installer)], cwd=source, capture_output=True, text=True, check=False)
+                installed = subprocess.run([python, str(installer)], cwd=source, env=build_env, capture_output=True, text=True, check=False)
                 if installed.returncode != 0:
-                    raise RuntimeError((installed.stderr or installed.stdout).strip() or "MongoDB Bazel bootstrap failed")
-                bazel = shutil.which("bazel") or str(Path.home() / ".local/bin/bazel")
-            if not Path(bazel).exists() and shutil.which(bazel) is None:
+                    output = (installed.stderr or installed.stdout).strip()
+                    raise RuntimeError(output[-4000:] or "MongoDB Bazel bootstrap failed")
+                bazel = shutil.which("bazel", path=build_env["PATH"]) or shutil.which("bazelisk", path=build_env["PATH"])
+            if not bazel or (not Path(bazel).exists() and shutil.which(bazel, path=build_env["PATH"]) is None):
                 raise RuntimeError("MongoDB Bazel was not available after the source bootstrap")
             command = [bazel, "build", "install-mongod", "--jobs=2"]
             self._update(job_id, progress=40, message=f"Compiling MongoDB {requested_version} with Bazel…", log=[f"$ {' '.join(command)}"])
-            build = subprocess.Popen(command, cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            build = subprocess.Popen(command, cwd=source, env=build_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
             output = []
             for line in build.stdout or []:
                 if line.strip():
@@ -3402,15 +3875,15 @@ class JobStore:
         except Exception as error:
             self._update(job_id, status="failed", message=str(error))
 
-    def _run_composer_binary(self, job_id: str, requested_version: str):
+    def _run_composer_binary(self, job_id: str, requested_version: str, selected_php_version: str | None = None):
         if os.geteuid() != 0:
-            self._update(job_id, status="failed", message="Composer installation requires privileges to create the isolated tool directory.")
+            self._update(job_id, status="failed", message="Composer installation requires privileges to create its managed tool directory.")
             return
         php_root = service_root("php") / "versions"
-        php_versions = sorted((item for item in php_root.iterdir() if item.is_dir()), reverse=True) if php_root.exists() else []
-        php_version = next((item.name for item in php_versions if php_cli_path(item.name).exists()), None)
+        php_versions = sorted((item for item in php_root.iterdir() if item.is_dir()), key=lambda item: version_sort_key(item.name), reverse=True) if php_root.exists() else []
+        php_version = selected_php_version if selected_php_version and php_cli_path(selected_php_version).exists() else next((item.name for item in php_versions if php_cli_path(item.name).exists()), None)
         if not php_version:
-            self._update(job_id, status="failed", message="Install a PHP runtime first. Composer uses the newest isolated PHP CLI.")
+            self._update(job_id, status="failed", message="Install a PHP runtime first, then choose it for Composer.")
             return
         root = service_root("composer") / "versions" / requested_version
         archive = root / "composer.phar"
@@ -3418,13 +3891,14 @@ class JobStore:
             root.mkdir(parents=True, exist_ok=True)
             (root / "bin").mkdir(parents=True, exist_ok=True)
             if not archive.exists() or archive.stat().st_size < 1000:
-                self._update(job_id, status="running", progress=10, message=f"Downloading Composer for isolated PHP {php_version}…", log=[])
-                with urllib.request.urlopen("https://getcomposer.org/download/latest-stable/composer.phar", timeout=60) as response, archive.open("wb") as destination:
+                self._update(job_id, status="running", progress=10, message=f"Downloading Composer for PHP {php_version}…", log=[])
+                composer_url = f"https://getcomposer.org/download/{requested_version}/composer.phar"
+                with urllib.request.urlopen(composer_url, timeout=60) as response, archive.open("wb") as destination:
                     data = response.read()
                     self._raise_if_cancelled(job_id)
                     destination.write(data)
             else:
-                self._update(job_id, status="running", progress=70, message=f"Using the downloaded Composer PHAR with isolated PHP {php_version}…", log=[])
+                self._update(job_id, status="running", progress=70, message=f"Using the downloaded Composer PHAR with PHP {php_version}…", log=[])
             archive.chmod(0o755)
             php = php_cli_path(php_version)
             ensure_php_fpm_layout(php_version)
@@ -3433,7 +3907,16 @@ class JobStore:
             library_paths = {php_root_path / "lib", php_root_path / "lib64", php_root_path / "usr/lib", php_root_path / "usr/lib64"}
             library_paths.update(library.parent for library in php_root_path.rglob("*.so*") if library.is_file() or library.is_symlink())
             libraries = ":".join(str(path) for path in library_paths if path.exists())
-            extension_dir = next(iter(sorted(php_root_path.glob("usr/lib/php/*"))), None)
+            extension_dir = next(
+                (
+                    candidate
+                    for base in (php_root_path / "usr/lib/php", php_root_path / "lib/php", php_root_path / "lib64/php")
+                    if base.exists()
+                    for candidate in sorted(base.iterdir())
+                    if candidate.is_dir()
+                ),
+                None,
+            )
             phar = extension_dir / "phar.so" if extension_dir else None
             php_extensions = [module for module in ("phar.so", "iconv.so") if extension_dir and (extension_dir / module).exists()]
             extension_flags = " ".join(f"-d extension=\"{extension_dir / module}\"" for module in php_extensions)
@@ -3443,9 +3926,10 @@ class JobStore:
             launcher.write_text(f"#!/bin/sh\nexport LD_LIBRARY_PATH=\"{libraries}:$LD_LIBRARY_PATH\"\nexport COMPOSER_HOME=\"{composer_home}\"\nexec \"{php}\" -c \"{php_ini}\"{php_options} \"{archive}\" \"$@\"\n")
             launcher.chmod(0o755)
             (root / ".serverengine-version").write_text(requested_version)
+            (service_root("composer") / ".serverengine-php-version").write_text(php_version + "\n")
             result = subprocess.run([str(launcher), "--version"], capture_output=True, text=True, check=False, timeout=30)
             if result.returncode != 0:
-                raise RuntimeError((result.stderr or result.stdout).strip() or "Composer could not start with the installed isolated PHP runtime")
+                raise RuntimeError((result.stderr or result.stdout).strip() or "Composer could not start with the selected PHP runtime")
             actual = (result.stdout or result.stderr).strip()
             self._update(job_id, status="succeeded", progress=100, message=f"{actual}. Available as composer in the Server Engine terminal.")
         except Exception as error:

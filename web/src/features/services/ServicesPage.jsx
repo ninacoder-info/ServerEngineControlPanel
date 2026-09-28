@@ -11,7 +11,6 @@ import NginxConfigModal from "./NginxConfigModal";
 import ComposerConfigModal from "./ComposerConfigModal";
 import { VsftpdConfigModal } from "../ftp/FTPPage";
 import PowerDnsConfigModal from "./PowerDnsConfigModal";
-import SupervisorWorkspace from "./SupervisorWorkspace";
 import Pm2Workspace from "./Pm2Workspace";
 import RabbitMqWorkspace from "./RabbitMqWorkspace";
 import OpenSearchWorkspace from "./OpenSearchWorkspace";
@@ -20,6 +19,7 @@ import GitWorkspace from "./GitWorkspace";
 import WpCliWorkspace from "./WpCliWorkspace";
 import ImageMagickWorkspace from "./ImageMagickWorkspace";
 import FfmpegWorkspace from "./FfmpegWorkspace";
+import NodeRuntimesPage from "./NodeRuntimesPage";
 
 export default function ServicesPage() {
   const [catalog, setCatalog] = React.useState([]);
@@ -37,6 +37,7 @@ export default function ServicesPage() {
   const [category, setCategory] = React.useState("All");
   const [selected, setSelected] = React.useState(null);
   const [manage, setManage] = React.useState(null);
+  const [nodeRuntimesOpen, setNodeRuntimesOpen] = React.useState(false);
   const [ftpConfig, setFtpConfig] = React.useState({
     settings: {},
     service: {},
@@ -143,7 +144,6 @@ export default function ServicesPage() {
           ))}
         </select>
       </div>
-      {window.location.hash === "#supervisor" && <SupervisorWorkspace />}
       {window.location.hash === "#pm2" && <Pm2Workspace />}
       {window.location.hash === "#rabbitmq" && <RabbitMqWorkspace />}
       {window.location.hash === "#opensearch" && <OpenSearchWorkspace />}
@@ -163,6 +163,7 @@ export default function ServicesPage() {
                 installed={matches}
                 pinned={pinned.includes(service.id)}
                 onTogglePin={togglePin}
+                onInstall={(item) => setSelected({ service: item })}
               />
             );
           if (service.id === "nodejs")
@@ -173,6 +174,8 @@ export default function ServicesPage() {
                 installed={matches}
                 pinned={pinned.includes(service.id)}
                 onTogglePin={togglePin}
+                onInstall={(item) => setSelected({ service: item })}
+                onOpenRuntimes={() => setNodeRuntimesOpen(true)}
               />
             );
           return (
@@ -276,6 +279,9 @@ export default function ServicesPage() {
             onClose={() => setManage(null)}
           />
         ))}
+      {nodeRuntimesOpen && (
+        <NodeRuntimesPage modal onClose={() => setNodeRuntimesOpen(false)} />
+      )}
     </div>
   );
 }

@@ -282,13 +282,13 @@ export default function Topbar({
                           {(job.status === "running" ||
                             job.status === "queued") && (
                             <button
-                              className="shrink-0 text-xs font-medium text-slate-500 hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-400"
+                              className="shrink-0 cursor-pointer text-xs font-medium text-rose-600 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300"
                               onClick={(event) => {
                                 event.stopPropagation();
                                 cancelJob(job);
                               }}
                             >
-                              Cancel &amp; rollback
+                              Cancel
                             </button>
                           )}
                         </div>
@@ -537,7 +537,7 @@ export default function Topbar({
                     className="cursor-pointer text-sm font-medium text-rose-600 hover:text-rose-700 dark:text-rose-400"
                     onClick={() => cancelJob(selectedJob)}
                   >
-                    Cancel &amp; rollback
+                    Cancel
                   </button>
                 </div>
               )}

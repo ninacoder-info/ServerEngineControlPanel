@@ -1,5 +1,6 @@
 import React from "react";
 import QRCode from "qrcode";
+import { z } from "zod";
 import {
   Bell,
   Cloud,
@@ -21,6 +22,7 @@ import {
 import ActionDialog from "../../components/ActionDialog";
 import SaveButton from "../../components/SaveButton";
 import Toast from "../../components/Toast";
+import { formControlClass } from "../../components/ui/form";
 import { apiRequest, readApiError } from "../../lib/api";
 import { applyPanelPreferences } from "../../lib/panelPreferences";
 import languageOptions from "../../data/languages.json";
@@ -93,6 +95,55 @@ const panelValues = (values) => ({
   api_enabled: values.api_enabled !== false,
   api_bind_host: values.api_bind_host || "127.0.0.1",
 });
+const panelSchema = z.object({
+  panel_name: z.string().trim().min(1, "Panel name is required."),
+  language: z.string().min(1, "Choose a panel language."),
+  timezone: z.string().min(1, "Choose a timezone."),
+  panel_theme: z.enum(["system", "dark", "light"]),
+  panel_density: z.enum(["comfortable", "compact"]),
+  panel_accent: z.string().min(1, "Choose an accent color."),
+  panel_landing: z.enum(["overview", "websites", "services"]),
+  panel_date_format: z.enum(["local", "iso", "relative"]),
+  session_timeout_minutes: z.coerce.number().int().min(1, "Session timeout must be at least 1 minute."),
+});
+const storageSchema = z.object({
+  default_site_root: z.string().trim().min(1, "Website root is required."),
+  default_backup_root: z.string().trim().min(1, "Backup root is required."),
+  storage_upload_limit_mb: z.coerce.number().int().min(1, "Upload limit must be at least 1 MB."),
+  storage_required_free_mb: z.coerce.number().int().min(0, "Required free space cannot be negative."),
+});
+const securitySchema = z.object({
+  session_timeout_minutes: z.coerce.number().int().min(1, "Session timeout must be at least 1 minute."),
+  security_panel_port: z.coerce.number().int().min(1, "Port must be between 1 and 65535.").max(65535, "Port must be between 1 and 65535."),
+  security_max_failed_attempts: z.coerce.number().int().min(1, "Attempts must be at least 1."),
+  security_lockout_minutes: z.coerce.number().int().min(1, "Lockout must be at least 1 minute."),
+});
+const apiSchema = z.object({
+  api_rate_limit: z.coerce.number().int().min(1, "Rate limit must be at least 1."),
+  api_burst: z.coerce.number().int().min(1, "Burst must be at least 1."),
+  api_max_page_size: z.coerce.number().int().min(1, "Page size must be at least 1."),
+  api_token_expiry_days: z.coerce.number().int().min(1, "Token expiry must be at least 1 day."),
+});
+const notificationSchema = z.object({
+  notification_email: z.string().email("Enter a valid notification email.").or(z.literal("")),
+  notification_history_days: z.coerce.number().int().min(1, "History must be at least 1 day."),
+});
+const certificateSchema = z.object({
+  certbot_account_email: z.string().email("Enter a valid ACME account email.").or(z.literal("")),
+  certbot_renew_window_days: z.coerce.number().int().min(1, "Renewal window must be at least 1 day."),
+  certbot_expiry_notify_days: z.coerce.number().int().min(1, "Expiry notice must be at least 1 day."),
+  certbot_config_dir: z.string().trim().min(1, "Certificate directory is required."),
+});
+const maintenanceSchema = z.object({
+  job_retention_days: z.coerce.number().int().min(1, "Job retention must be at least 1 day."),
+  log_retention_days: z.coerce.number().int().min(1, "Log retention must be at least 1 day."),
+  maintenance_stale_job_hours: z.coerce.number().int().min(1, "Stale job threshold must be at least 1 hour."),
+});
+const validationErrors = (schema, values) => {
+  const result = schema.safeParse(values);
+  if (result.success) return {};
+  return Object.fromEntries(result.error.issues.map((issue) => [issue.path[0], issue.message]));
+};
 const apiSettingsValues = (values) => ({
   api_enabled: values.api_enabled !== false,
   api_bind_host: values.api_bind_host || "127.0.0.1",
@@ -235,18 +286,21 @@ function Section({ icon: Icon, title, description, badge, children }) {
     </section>
   );
 }
-function Control({ label, description, children, full = false }) {
+function Control({ label, description, children, full = false, error }) {
+  const control = React.isValidElement(children) && children.type !== React.Fragment
+    ? React.cloneElement(children, { className: formControlClass(children.props.className || "", Boolean(error)), "aria-invalid": error ? "true" : undefined })
+    : children;
   return (
     <label className={`${row}${full ? " md:grid-cols-1" : ""}`}>
       <span>
-        <strong className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+        <strong className={`text-sm font-semibold ${error ? "text-rose-600 dark:text-rose-400" : "text-slate-900 dark:text-slate-100"}`}>
           {label}
         </strong>
         <small className="mt-1 block text-sm leading-6 text-slate-500 dark:text-slate-400">
           {description}
         </small>
       </span>
-      <span>{children}</span>
+      <span>{control}{error && <small className="mt-1 block text-xs font-normal text-rose-600 dark:text-rose-400">{error}</small>}</span>
     </label>
   );
 }
@@ -292,16 +346,20 @@ function SelectControl({
     </Control>
   );
 }
-function FieldSet({ label, description, children }) {
+function FieldSet({ label, description, children, error }) {
+  const control = React.isValidElement(children)
+    ? React.cloneElement(children, { className: formControlClass(children.props.className || "", Boolean(error)), "aria-invalid": error ? "true" : undefined })
+    : children;
   return (
     <label className="block">
-      <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+      <span className={`text-sm font-semibold ${error ? "text-rose-600 dark:text-rose-400" : "text-slate-900 dark:text-slate-100"}`}>
         {label}
       </span>
       <small className="mt-1 block text-sm leading-6 text-slate-500 dark:text-slate-400">
         {description}
       </small>
-      {children}
+      {control}
+      {error && <small className="mt-1 block text-xs font-normal text-rose-600 dark:text-rose-400">{error}</small>}
     </label>
   );
 }
@@ -378,7 +436,7 @@ function SettingsActions({ onSave, onReset, saving, dirty, message }) {
     </div>
   );
 }
-function PanelTab({ values, onChange, onSave, onReset, saving, dirty, message }) {
+function PanelTab({ values, onChange, onSave, onReset, saving, dirty, message, errors = {} }) {
   const o = {
     theme: values.panel_theme || "system",
     density: values.panel_density || "comfortable",
@@ -405,6 +463,7 @@ function PanelTab({ values, onChange, onSave, onReset, saving, dirty, message })
         <Control
           label="Panel name"
           description="The name administrators see across the console."
+          error={errors.panel_name}
         >
           <input
             className={input}
@@ -416,6 +475,7 @@ function PanelTab({ values, onChange, onSave, onReset, saving, dirty, message })
         <Control
           label="Panel language"
           description="Default locale for this installation."
+          error={errors.language}
         >
           <select
             className={input}
@@ -484,6 +544,7 @@ function PanelTab({ values, onChange, onSave, onReset, saving, dirty, message })
         <Control
           label="Timezone"
           description="Used for timestamps shown by the control panel."
+          error={errors.timezone}
         >
           <select
             className={input}
@@ -539,6 +600,7 @@ function PanelTab({ values, onChange, onSave, onReset, saving, dirty, message })
         <Control
           label="Session timeout"
           description="How long an authenticated session remains valid."
+          error={errors.session_timeout_minutes}
         >
           <input
             className={input}
@@ -600,7 +662,7 @@ function PanelTab({ values, onChange, onSave, onReset, saving, dirty, message })
     </div>
   );
 }
-function StorageTab({ values, onChange, onSave, onReset, saving, dirty, message }) {
+function StorageTab({ values, onChange, onSave, onReset, saving, dirty, message, errors = {} }) {
   const o = storageValues(values);
   const set = (key, value) => onChange(key, value);
   return (
@@ -615,6 +677,7 @@ function StorageTab({ values, onChange, onSave, onReset, saving, dirty, message 
           full
           label="Default website root"
           description="Parent directory for new websites and deployments."
+          error={errors.default_site_root}
         >
           <input
             className={input}
@@ -671,6 +734,7 @@ function StorageTab({ values, onChange, onSave, onReset, saving, dirty, message 
         <Control
           label="Maximum upload size"
           description="Applies to File Manager and future deployment uploads."
+          error={errors.storage_upload_limit_mb}
         >
           <input
             className={input}
@@ -683,6 +747,7 @@ function StorageTab({ values, onChange, onSave, onReset, saving, dirty, message 
         <Control
           label="Required free space"
           description="Reject uploads below this filesystem reserve."
+          error={errors.storage_required_free_mb}
         >
           <input
             className={input}
@@ -814,7 +879,7 @@ function StorageTab({ values, onChange, onSave, onReset, saving, dirty, message 
     </div>
   );
 }
-function SecurityTab({ values, onChange, onSave, onReset, saving, dirty, message }) {
+function SecurityTab({ values, onChange, onSave, onReset, saving, dirty, message, errors = {} }) {
   const o = securityValues(values);
   const set = (key, value) => onChange(key, value);
   return (
@@ -828,6 +893,7 @@ function SecurityTab({ values, onChange, onSave, onReset, saving, dirty, message
         <Control
           label="Session timeout"
           description="Authenticated sessions expire after inactivity."
+          error={errors.session_timeout_minutes}
         >
           <input
             className={input}
@@ -874,6 +940,7 @@ function SecurityTab({ values, onChange, onSave, onReset, saving, dirty, message
           full
           label="Panel port"
           description="The host firewall must allow this value."
+          error={errors.security_panel_port}
         >
           <input
             className={input}
@@ -1035,7 +1102,7 @@ function SecurityTab({ values, onChange, onSave, onReset, saving, dirty, message
     </div>
   );
 }
-function ApiTab({ values, onChange, onSave, onReset, saving, dirty, message }) {
+function ApiTab({ values, onChange, onSave, onReset, saving, dirty, message, errors = {} }) {
   const o = apiSettingsValues(values);
   const set = (key, value) => onChange(key, value);
   const [tokens, setTokens] = React.useState([]);
@@ -1301,6 +1368,7 @@ function ApiTab({ values, onChange, onSave, onReset, saving, dirty, message }) {
           <FieldSet
             label="Requests per minute"
             description="Sustained limit per token."
+            error={errors.api_rate_limit}
           >
             <input
               className={input}
@@ -1309,7 +1377,7 @@ function ApiTab({ values, onChange, onSave, onReset, saving, dirty, message }) {
               onChange={(e) => set("api_rate_limit", Number(e.target.value))}
             />
           </FieldSet>
-          <FieldSet label="Burst capacity" description="Short spike allowance.">
+          <FieldSet label="Burst capacity" description="Short spike allowance." error={errors.api_burst}>
             <input
               className={input}
               type="number"
@@ -1320,6 +1388,7 @@ function ApiTab({ values, onChange, onSave, onReset, saving, dirty, message }) {
           <FieldSet
             label="Maximum page size"
             description="Largest list response."
+            error={errors.api_max_page_size}
           >
             <input
               className={input}
@@ -1394,7 +1463,7 @@ function ApiTab({ values, onChange, onSave, onReset, saving, dirty, message }) {
   );
 }
 
-function NotificationsTab({ values, onChange, onReset, saving, dirty, message }) {
+function NotificationsTab({ values, onChange, onReset, saving, dirty, message, errors = {} }) {
   const o = notificationSettingsValues(values);
   const set = (key, value) => onChange(key, value);
   return (
@@ -1415,6 +1484,7 @@ function NotificationsTab({ values, onChange, onReset, saving, dirty, message })
           full
           label="Primary notification email"
           description="Default recipient for security, certificate, job, and infrastructure alerts."
+          error={errors.notification_email}
         >
           <input
             className={input}
@@ -1619,7 +1689,7 @@ function NotificationsTab({ values, onChange, onReset, saving, dirty, message })
     </div>
   );
 }
-function CertificatesTab({ values, onChange, onSave, onReset, saving, dirty, message }) {
+function CertificatesTab({ values, onChange, onSave, onReset, saving, dirty, message, errors = {} }) {
   const o = certificateSettingsValues(values);
   const set = (key, value) => onChange(key, value);
   return (
@@ -1644,6 +1714,7 @@ function CertificatesTab({ values, onChange, onSave, onReset, saving, dirty, mes
           full
           label="ACME account email"
           description="Used for expiry notices, renewal issues, and authority communications."
+          error={errors.certbot_account_email}
         >
           <input
             className={input}
@@ -1727,6 +1798,7 @@ function CertificatesTab({ values, onChange, onSave, onReset, saving, dirty, mes
         <Control
           label="Expiry notification window"
           description="Notify operators this many days before expiry."
+          error={errors.certbot_expiry_notify_days}
         >
           <input
             className={input}
@@ -1793,7 +1865,7 @@ function CertificatesTab({ values, onChange, onSave, onReset, saving, dirty, mes
   );
 }
 
-function MaintenanceTab({ values, onChange, onSave, onReset, saving, dirty, message }) {
+function MaintenanceTab({ values, onChange, onSave, onReset, saving, dirty, message, errors = {} }) {
   const o = maintenanceSettingsValues(values);
   const set = (key, value) => onChange(key, value);
   return (
@@ -1807,6 +1879,7 @@ function MaintenanceTab({ values, onChange, onSave, onReset, saving, dirty, mess
         <Control
           label="Job history retention"
           description="Completed installation and maintenance jobs remain visible for this long."
+          error={errors.job_retention_days}
         >
           <input
             className={input}
@@ -1822,6 +1895,7 @@ function MaintenanceTab({ values, onChange, onSave, onReset, saving, dirty, mess
         <Control
           label="Log retention"
           description="Managed service and panel logs remain available for this long."
+          error={errors.log_retention_days}
         >
           <input
             className={input}
@@ -2022,6 +2096,13 @@ function Field({ definition, value, settings, onChange, notificationActions, cer
 export default function SettingsPage() {
   const [values, setValues] = React.useState({});
   const [panelSaved, setPanelSaved] = React.useState({});
+  const [panelErrors, setPanelErrors] = React.useState({});
+  const [storageErrors, setStorageErrors] = React.useState({});
+  const [securityErrors, setSecurityErrors] = React.useState({});
+  const [apiErrors, setApiErrors] = React.useState({});
+  const [notificationErrors, setNotificationErrors] = React.useState({});
+  const [certificateErrors, setCertificateErrors] = React.useState({});
+  const [maintenanceErrors, setMaintenanceErrors] = React.useState({});
   const [storageSaved, setStorageSaved] = React.useState({});
   const [securitySaved, setSecuritySaved] = React.useState({});
   const [apiSaved, setApiSaved] = React.useState({});
@@ -2103,6 +2184,13 @@ export default function SettingsPage() {
   }, []);
   const update = (k, v) => {
     setValues((x) => ({ ...x, [k]: v }));
+    setPanelErrors((current) => current[k] ? { ...current, [k]: "" } : current);
+    setStorageErrors((current) => current[k] ? { ...current, [k]: "" } : current);
+    setSecurityErrors((current) => current[k] ? { ...current, [k]: "" } : current);
+    setApiErrors((current) => current[k] ? { ...current, [k]: "" } : current);
+    setNotificationErrors((current) => current[k] ? { ...current, [k]: "" } : current);
+    setCertificateErrors((current) => current[k] ? { ...current, [k]: "" } : current);
+    setMaintenanceErrors((current) => current[k] ? { ...current, [k]: "" } : current);
   };
   const panelDirty = JSON.stringify(panelValues(values)) !== JSON.stringify(panelSaved);
   const storageDirty = JSON.stringify(storageValues(values)) !== JSON.stringify(storageSaved);
@@ -2112,8 +2200,17 @@ export default function SettingsPage() {
   const certificateDirty = JSON.stringify(certificateSettingsValues(values)) !== JSON.stringify(certificateSaved);
   const maintenanceDirty = JSON.stringify(maintenanceSettingsValues(values)) !== JSON.stringify(maintenanceSaved);
   const savePanel = async () => {
-    setPanelSaving(true);
     setPanelMessage("");
+    const parsed = panelSchema.safeParse(panelValues(values));
+    if (!parsed.success) {
+      const next = {};
+      parsed.error.issues.forEach((issue) => { next[issue.path[0]] = issue.message; });
+      setPanelErrors(next);
+      setPanelMessage("Review the highlighted panel settings.");
+      return false;
+    }
+    setPanelErrors({});
+    setPanelSaving(true);
     const r = await apiRequest("/api/v1/settings/panel", {
       method: "PATCH",
       body: JSON.stringify({ values: panelValues(values) }),
@@ -2146,6 +2243,7 @@ export default function SettingsPage() {
           const body = await r.json();
           setValues((current) => ({ ...current, ...body.values }));
           setPanelSaved(body.values);
+          setPanelErrors({});
           applyPanelPreferences(body.values);
           setPanelMessage("Panel defaults restored.");
         } else setPanelMessage(await readApiError(r));
@@ -2153,8 +2251,11 @@ export default function SettingsPage() {
       },
     });
   const saveStorage = async () => {
-    setStorageSaving(true);
     setStorageMessage("");
+    const errors = validationErrors(storageSchema, storageValues(values));
+    if (Object.keys(errors).length) { setStorageErrors(errors); setStorageMessage("Review the highlighted storage settings."); return false; }
+    setStorageErrors({});
+    setStorageSaving(true);
     const r = await apiRequest("/api/v1/settings/storage", {
       method: "PATCH",
       body: JSON.stringify({ values: storageValues(values) }),
@@ -2192,8 +2293,11 @@ export default function SettingsPage() {
       },
     });
   const saveSecurity = async () => {
-    setSecuritySaving(true);
     setSecurityMessage("");
+    const errors = validationErrors(securitySchema, securityValues(values));
+    if (Object.keys(errors).length) { setSecurityErrors(errors); setSecurityMessage("Review the highlighted security settings."); return false; }
+    setSecurityErrors({});
+    setSecuritySaving(true);
     const r = await apiRequest("/api/v1/settings/security", {
       method: "PATCH",
       body: JSON.stringify({ values: securityValues(values) }),
@@ -2231,8 +2335,11 @@ export default function SettingsPage() {
       },
     });
   const saveApi = async () => {
-    setApiSaving(true);
     setApiMessage("");
+    const errors = validationErrors(apiSchema, apiSettingsValues(values));
+    if (Object.keys(errors).length) { setApiErrors(errors); setApiMessage("Review the highlighted API settings."); return false; }
+    setApiErrors({});
+    setApiSaving(true);
     const r = await apiRequest("/api/v1/settings/api", {
       method: "PATCH",
       body: JSON.stringify({ values: apiSettingsValues(values) }),
@@ -2268,8 +2375,11 @@ export default function SettingsPage() {
       },
     });
   const saveNotifications = async () => {
-    setNotificationSaving(true);
     setNotificationMessage("");
+    const errors = validationErrors(notificationSchema, notificationSettingsValues(values));
+    if (Object.keys(errors).length) { setNotificationErrors(errors); setNotificationMessage("Review the highlighted notification settings."); return false; }
+    setNotificationErrors({});
+    setNotificationSaving(true);
     const r = await apiRequest("/api/v1/settings/notifications", {
       method: "PATCH",
       body: JSON.stringify({ values: notificationSettingsValues(values) }),
@@ -2307,8 +2417,11 @@ export default function SettingsPage() {
       },
     });
   const saveCertificates = async () => {
-    setCertificateSaving(true);
     setCertificateMessage("");
+    const errors = validationErrors(certificateSchema, certificateSettingsValues(values));
+    if (Object.keys(errors).length) { setCertificateErrors(errors); setCertificateMessage("Review the highlighted certificate settings."); return false; }
+    setCertificateErrors({});
+    setCertificateSaving(true);
     const r = await apiRequest("/api/v1/settings/certificates", {
       method: "PATCH",
       body: JSON.stringify({ values: certificateSettingsValues(values) }),
@@ -2346,8 +2459,11 @@ export default function SettingsPage() {
       },
     });
   const saveMaintenance = async () => {
-    setMaintenanceSaving(true);
     setMaintenanceMessage("");
+    const errors = validationErrors(maintenanceSchema, maintenanceSettingsValues(values));
+    if (Object.keys(errors).length) { setMaintenanceErrors(errors); setMaintenanceMessage("Review the highlighted maintenance settings."); return false; }
+    setMaintenanceErrors({});
+    setMaintenanceSaving(true);
     const r = await apiRequest("/api/v1/settings/maintenance", {
       method: "PATCH",
       body: JSON.stringify({ values: maintenanceSettingsValues(values) }),
@@ -2452,6 +2568,7 @@ export default function SettingsPage() {
             <PanelTab
               values={values}
               onChange={update}
+              errors={panelErrors}
               onSave={savePanel}
               onReset={restorePanel}
               saving={panelSaving}
@@ -2462,6 +2579,7 @@ export default function SettingsPage() {
             <StorageTab
               values={values}
               onChange={update}
+              errors={storageErrors}
               onSave={saveStorage}
               onReset={restoreStorage}
               saving={storageSaving}
@@ -2472,6 +2590,7 @@ export default function SettingsPage() {
             <SecurityTab
               values={values}
               onChange={update}
+              errors={securityErrors}
               onSave={saveSecurity}
               onReset={restoreSecurity}
               saving={securitySaving}
@@ -2480,7 +2599,7 @@ export default function SettingsPage() {
             />
           ) : active === "api" ? (
             <>
-              <ApiTab values={values} onChange={update} />
+              <ApiTab values={values} onChange={update} errors={apiErrors} />
               <SettingsActions
                 onSave={saveApi}
                 onReset={restoreApi}
@@ -2523,6 +2642,7 @@ export default function SettingsPage() {
                     saving: notificationSaving,
                     dirty: notificationDirty,
                     message: notificationMessage,
+                    errors: notificationErrors,
                   }}
                   certificateActions={{
                     onSave: saveCertificates,
@@ -2530,6 +2650,7 @@ export default function SettingsPage() {
                     saving: certificateSaving,
                     dirty: certificateDirty,
                     message: certificateMessage,
+                    errors: certificateErrors,
                   }}
                   maintenanceActions={{
                     onSave: saveMaintenance,
@@ -2537,6 +2658,7 @@ export default function SettingsPage() {
                     saving: maintenanceSaving,
                     dirty: maintenanceDirty,
                     message: maintenanceMessage,
+                    errors: maintenanceErrors,
                   }}
                   onChange={update}
                 />

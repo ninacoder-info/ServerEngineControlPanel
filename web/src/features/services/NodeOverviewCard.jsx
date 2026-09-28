@@ -4,23 +4,24 @@ import {
   ArrowRight,
   CheckCircle2,
   CircleStop,
+  Download,
   Server,
   Star,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
 
 export default function NodeOverviewCard({
   service,
   installed,
   pinned = false,
   onTogglePin,
+  onInstall,
+  onOpenRuntimes,
 }) {
-  const navigate = useNavigate();
   const running = installed.filter((item) => item.status === "running").length;
   return (
     <article
       className={`service-card php-overview-card ${pinned ? "service-card-pinned" : ""}`}
-      onClick={() => navigate("/services/nodejs")}
+      onClick={() => onOpenRuntimes?.()}
     >
       <div className="service-card-top">
         <div className="service-icon">
@@ -83,9 +84,28 @@ export default function NodeOverviewCard({
             </span>
           )}
         </div>
-        <button className="php-overview-link" type="button">
-          Open Node runtimes <ArrowRight size={14} />
-        </button>
+        <div
+          className="service-actions"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <button
+            className="inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
+            type="button"
+            onClick={() => onInstall(service)}
+          >
+            <Download size={14} />
+            Install
+          </button>
+          {installed.length > 0 && (
+            <button
+              className="inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-slate-300 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+              type="button"
+              onClick={onOpenRuntimes}
+            >
+              Open runtimes <ArrowRight size={14} />
+            </button>
+          )}
+        </div>
       </div>
     </article>
   );

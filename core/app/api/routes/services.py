@@ -6,13 +6,14 @@ from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import HTMLResponse
 
 from app.api.dependencies import require_user
 from app.models.service import ConfigurationSaveRequest, ExtensionInstallRequest, InstallServiceRequest, InstalledService, ServiceActionRequest, ServiceDefinition, SwitchVersionRequest
 from app.services.service_catalog import CATALOG, PHP_EXTENSIONS, get_service, refresh_service_versions
 from app.services.job_service import job_store
-from app.services.service_runtime import PHP_BASELINE_MODULES, SERVICE_PACKAGES, binary_path, composer_path, ensure_composer_launcher, ensure_nginx_layout, ensure_node_runtime, ensure_php_fpm_layout, ensure_php_terminal_launcher, nginx_default_configuration, nginx_paths, php_cli_path, service_root
+from app.services.service_runtime import PHP_BASELINE_MODULES, SERVICE_PACKAGES, binary_path, composer_path, composer_php_version, enable_php_baseline_extensions, ensure_composer_launcher, ensure_nginx_layout, ensure_node_runtime, ensure_php_fpm_layout, ensure_php_runtime_launcher, ensure_php_terminal_launcher, normalize_php_runtime_layout, nginx_default_configuration, nginx_paths, php_cli_path, php_runtime_library_path, service_root, version_sort_key
 
 router = APIRouter(prefix="/api/v1/services", tags=["services"])
 
@@ -21,7 +22,7 @@ router = APIRouter(prefix="/api/v1/services", tags=["services"])
 def composer_terminal_access(user=Depends(require_user)):
     ensure_composer_launcher()
     marker = service_root("composer") / ".terminal-enabled"
-    return {"enabled": marker.exists(), "path": str(composer_path())}
+    return {"enabled": marker.exists(), "path": str(composer_path()), "php_version": composer_php_version()}
 
 
 @router.put("/composer/terminal")
@@ -30,6 +31,9 @@ def update_composer_terminal_access(payload: dict, user=Depends(require_user)):
     marker = service_root("composer") / ".terminal-enabled"
     old_marker = service_root("composer") / ".terminal-disabled"
     enabled = bool(payload.get("enabled", False))
+    php_version = str(payload.get("php_version") or "").strip()
+    if php_version and not php_cli_path(php_version).exists():
+        raise HTTPException(status_code=400, detail=f"PHP {php_version} is not installed or its CLI is unavailable.")
     marker.parent.mkdir(parents=True, exist_ok=True)
     if enabled:
         marker.write_text("enabled\n")
@@ -37,26 +41,194 @@ def update_composer_terminal_access(payload: dict, user=Depends(require_user)):
     else:
         marker.unlink(missing_ok=True)
         old_marker.unlink(missing_ok=True)
-    return {"enabled": enabled, "path": str(composer_path())}
+    if php_version:
+        selected_marker = service_root("composer") / ".serverengine-php-version"
+        selected_marker.write_text(php_version + "\n")
+        ensure_composer_launcher()
+    return {"enabled": enabled, "path": str(composer_path()), "php_version": composer_php_version()}
+
+
+@router.get("/composer/versions")
+def composer_versions(user=Depends(require_user)):
+    versions_root = service_root("composer") / "versions"
+    versions = []
+    for root in sorted(versions_root.iterdir(), key=lambda item: version_sort_key(item.name), reverse=True) if versions_root.exists() else []:
+        launcher = root / "bin/composer"
+        if not launcher.exists():
+            continue
+        marker = root / ".serverengine-version"
+        versions.append({"version": marker.read_text(errors="replace").strip() if marker.exists() else root.name, "path": str(launcher)})
+    return versions
 
 
 def _php_extension_state(version: str) -> list[dict]:
     from app.services.service_runtime import php_fpm_paths
+
     ini = php_fpm_paths(version)["ini"]
     content = ini.read_text(errors="replace") if ini.exists() else ""
+    root = service_root("php", version)
+    module_files = []
+    for module_root in (
+        root / "usr/lib/php",
+        root / "lib/php",
+        root / "lib64/php",
+    ):
+        if module_root.exists():
+            module_files.extend(module_root.rglob("*.so"))
+
+    loaded = set()
+    cli = php_cli_path(version)
+    if cli.exists():
+        try:
+            result = subprocess.run(
+                [str(cli), "-n", "-m"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+                env={**os.environ, "LD_LIBRARY_PATH": ":".join(
+                    str(path)
+                    for path in (root / "lib", root / "lib64", root / "usr/lib")
+                    if path.exists()
+                )},
+            )
+            loaded = {
+                line.strip().lower()
+                for line in result.stdout.splitlines()
+                if line.strip() and not line.startswith("[")
+            }
+        except (OSError, subprocess.SubprocessError):
+            pass
+
     result = []
     root = service_root("php", version)
     for extension in PHP_EXTENSIONS:
-        module = next((candidate for name in PHP_BASELINE_MODULES.get(extension["id"], (extension["id"],)) for candidate in root.glob(f"usr/lib/php/*/{name}.so")), None)
-        result.append({**extension, "installed": bool(module), "enabled": bool(module and str(module) in content), "module_path": str(module) if module else None})
+        names = PHP_BASELINE_MODULES.get(extension["id"], (extension["id"],))
+        module = next(
+            (
+                candidate
+                for name in names
+                for candidate in module_files
+                if candidate.name == f"{name}.so"
+            ),
+            None,
+        )
+        loaded_name = next((name.lower() for name in names if name.lower() in loaded), None)
+        result.append(
+            {
+                **extension,
+                "installed": bool(module or loaded_name),
+                "enabled": bool(loaded_name or (module and str(module) in content)),
+                "module_path": str(module) if module else None,
+            }
+        )
     return result
+
+
+def _php_install_method(version: str) -> str | None:
+    root = service_root("php", version)
+    marker = root / ".serverengine-install-method"
+    if not marker.exists():
+        # Older installs predate the marker. Debian packages place PHP under
+        # usr/, while source builds install into the version prefix directly.
+        if (root / "bin/php").exists() or (root / "sbin/php-fpm").exists():
+            return "source"
+        if list(root.glob("usr/bin/php*")) or list(root.glob("usr/sbin/php-fpm*")):
+            return "prebuilt"
+        return None
+    value = marker.read_text(errors="replace").strip()
+    return value if value in {"prebuilt", "source"} else None
 
 
 @router.get("/php/runtimes")
 def php_runtimes(user=Depends(require_user)):
-    definition = get_service("php")
     detected = {item.version: item for item in installed(user) if item.id.startswith("php@") and item.version}
-    return [{"version": item.version, "channel": item.channel, "supported": item.supported, "installed": item.version in detected, "status": detected[item.version].status if item.version in detected else "not-installed", "config_path": str(service_root("php", item.version) / "conf/php-fpm.conf"), "socket_path": str(service_root("php", item.version) / "run/php-fpm.sock") if item.version in detected else None, "binary_path": str(binary_path("php", item.version)) if item.version in detected else None, "fpm_path": str(binary_path("php", item.version)) if item.version in detected else None, "cli_path": str(php_cli_path(item.version)) if item.version in detected and php_cli_path(item.version).exists() else None, "extensions": _php_extension_state(item.version) if item.version in detected else []} for item in definition.versions]
+    for installed_version in detected:
+        ensure_php_fpm_layout(installed_version)
+        enable_php_baseline_extensions(installed_version)
+        ensure_php_runtime_launcher(installed_version)
+    return [
+        {
+            "version": version,
+            "channel": "installed",
+            "supported": True,
+            "installed": True,
+            "install_method": _php_install_method(version),
+            "status": item.status,
+            "config_path": str(service_root("php", version) / "conf/php-fpm.conf"),
+            "socket_path": str(service_root("php", version) / "run/php-fpm.sock"),
+            "binary_path": str(binary_path("php", version)),
+            "fpm_path": str(binary_path("php", version)),
+            "cli_path": str(php_cli_path(version)) if php_cli_path(version).exists() else None,
+            "extensions": _php_extension_state(version),
+        }
+        for version, item in sorted(detected.items(), key=lambda entry: version_sort_key(entry[0]), reverse=True)
+    ]
+
+
+def render_php_runtime_info(version: str, user) -> HTMLResponse:
+    """Render phpinfo() for one installed managed PHP runtime."""
+    root = service_root("php", version)
+    cli = php_cli_path(version)
+    if not root.exists() or not cli.exists():
+        raise HTTPException(status_code=404, detail=f"PHP {version} is not installed")
+    ini = root / "conf/php.ini"
+    environment = {
+        "HOME": str(root / "home/serverengine"),
+        "PATH": f"{root / 'usr/bin'}:{root / 'bin'}:/usr/bin:/bin",
+        "PHP_INI_SCAN_DIR": str(root / "conf/conf.d"),
+        "LD_LIBRARY_PATH": php_runtime_library_path(root),
+        "TMPDIR": str(root / "tmp"),
+    }
+    command = [str(cli), "-c", str(ini), "-r", "phpinfo();"]
+    runuser = shutil.which("runuser")
+    if os.geteuid() == 0 and runuser:
+        command = [runuser, "-u", "serverengine", "--", *command]
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+            env=environment,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        raise HTTPException(status_code=500, detail=f"Unable to run PHP {version} info: {error}") from error
+    output = result.stdout or result.stderr
+    if result.returncode != 0:
+        raise HTTPException(status_code=500, detail=output.strip() or f"PHP {version} info failed")
+    if "<html" not in output.lower():
+        from html import escape
+
+        # PHP-FPM/CLI builds do not always include php-cgi, so phpinfo() can
+        # only emit CLI text. Keep the full output, but present it with the
+        # familiar phpinfo browser styling instead of an unformatted dump.
+        output = f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PHP {escape(version)} information</title>
+<style>
+html {{ background:#f1f5f9; }}
+body {{ margin:0; padding:24px; color:#1e293b; background:#f1f5f9; font:14px/1.5 Arial,Helvetica,sans-serif; }}
+main {{ max-width:1180px; margin:0 auto; overflow:hidden; border:1px solid #cbd5e1; border-radius:8px; background:#fff; box-shadow:0 8px 24px rgba(15,23,42,.08); }}
+header {{ padding:18px 22px; color:#fff; background:#4f81bd; }}
+h1 {{ margin:0; font-size:22px; font-weight:600; }}
+.runtime {{ margin-top:4px; opacity:.9; font-size:13px; }}
+pre {{ margin:0; padding:22px; overflow:auto; color:#334155; background:#fff; font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; white-space:pre-wrap; overflow-wrap:anywhere; }}
+@media (max-width:640px) {{ body {{ padding:0; }} main {{ border:0; border-radius:0; }} }}
+</style>
+</head>
+<body><main><header><h1>PHP {escape(version)} information</h1><div class="runtime">Server Engine managed PHP runtime</div></header><pre>{escape(output)}</pre></main></body>
+</html>"""
+    return HTMLResponse(output, headers={"X-Content-Type-Options": "nosniff"})
+
+
+@router.get("/php/versions/info", response_class=HTMLResponse)
+def php_runtime_info(version: str = Query(..., min_length=3, max_length=20, pattern=r"^\d+\.\d+(?:\.\d+)?$"), user=Depends(require_user)):
+    return render_php_runtime_info(version, user)
 
 
 @router.get("/php/{version}/terminal")
@@ -100,6 +272,9 @@ def install_php_extension(version: str, payload: ExtensionInstallRequest, user=D
     if not payload.confirmed:
         return {"status": "confirmation_required", "version": version, "extension": extension}
     job_id = f"extension-php-{version}-{payload.extension}"
+    existing = next((job for job in job_store.list() if job.id == job_id), None)
+    if existing and existing.status not in {"succeeded", "failed", "cancelled"}:
+        return {"status": "queued", "job_id": job_id, "message": f"PHP {version} extension {payload.extension} is already queued."}
     job_store.enqueue_extension(job_id, version, payload.extension)
     return {"status": "queued", "job_id": job_id, "message": f"PHP {version} extension {payload.extension} queued."}
 
@@ -128,9 +303,9 @@ def catalog(user=Depends(require_user)):
 
 
 @router.post("/{service_id}/versions/refresh")
-def refresh_versions(service_id: str, user=Depends(require_user)):
+def refresh_versions(service_id: str, install_method: str = Query(default="source", pattern="^(prebuilt|source)$"), user=Depends(require_user)):
     try:
-        definition, source, message = refresh_service_versions(service_id, force=True)
+        definition, source, message = refresh_service_versions(service_id, force=True, install_method=install_method)
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     return {
@@ -162,7 +337,8 @@ def installed(user=Depends(require_user)):
             php_root = service_root("php") / "versions"
             if php_root.exists():
                 for version_root in sorted(item for item in php_root.iterdir() if item.is_dir()):
-                    version = _installed_service_version("php", package, version_root.name)
+                    version_root, detected_version = normalize_php_runtime_layout(version_root)
+                    version = detected_version or _installed_service_version("php", package, version_root.name)
                     if version is not None:
                         definition = get_service("php")
                         running = _process_running("php", version_root.name)
@@ -177,6 +353,19 @@ def installed(user=Depends(require_user)):
                     if version is not None:
                         detected.append(InstalledService(id=f"nodejs@{version_root.name}", name=f"Node.js {version_root.name}", version=version, status="stopped", managed=False))
             ensure_node_runtime(service_root("nodejs"))
+            continue
+        if service_id == "pm2":
+            versions_root = service_root("pm2") / "versions"
+            if versions_root.exists():
+                definition = get_service(service_id)
+                for version_root in sorted((item for item in versions_root.iterdir() if item.is_dir()), key=lambda item: version_sort_key(item.name), reverse=True):
+                    marker = version_root / ".serverengine-version"
+                    launcher = version_root / "bin/pm2"
+                    if not launcher.exists():
+                        launcher = version_root / "node_modules/.bin/pm2"
+                    if launcher.exists():
+                        version = marker.read_text(errors="replace").strip() if marker.exists() else version_root.name
+                        detected.append(InstalledService(id="pm2", name=definition.name if definition else "PM2", version=version, status="installed", managed=False))
             continue
         if service_id == "python":
             versions_root = service_root("python") / "versions"
@@ -199,6 +388,16 @@ def installed(user=Depends(require_user)):
         marker = version_root / ".serverengine-version"
         version = marker.read_text().strip() if marker.exists() else version_root.name
         detected.append(InstalledService(id="composer", name="Composer", version=version, status="installed", managed=False))
+    wp_cli_root = service_root("wp-cli") / "versions"
+    if wp_cli_root.exists():
+        definition = get_service("wp-cli")
+        for version_root in sorted((item for item in wp_cli_root.iterdir() if item.is_dir()), key=lambda item: version_sort_key(item.name), reverse=True):
+            marker = version_root / ".serverengine-version"
+            launcher = version_root / "bin/wp"
+            if not launcher.exists():
+                continue
+            version = marker.read_text(errors="replace").strip() if marker.exists() else version_root.name
+            detected.append(InstalledService(id="wp-cli", name=definition.name if definition else "WP-CLI", version=version, status="installed", managed=False))
     return detected
 
 
@@ -284,12 +483,31 @@ def install(service_id: str, payload: InstallServiceRequest, user=Depends(requir
         raise HTTPException(status_code=404, detail="Service is not in the provider catalog")
     if not service.installable:
         raise HTTPException(status_code=400, detail=f"{service.name} is managed from {service.management_label or 'its dedicated feature area'}, not installed as an isolated service package.")
+    if service_id == "composer":
+        if not payload.php_version:
+            raise HTTPException(status_code=400, detail="Choose an installed PHP CLI runtime for Composer.")
+        if not php_cli_path(payload.php_version).exists():
+            raise HTTPException(status_code=400, detail=f"PHP {payload.php_version} is not installed or its CLI is unavailable.")
+    if service_id == "wp-cli" and payload.php_version:
+        if not php_cli_path(payload.php_version).exists():
+            raise HTTPException(status_code=400, detail=f"PHP {payload.php_version} is not installed or its CLI is unavailable.")
+    if payload.install_method not in service.install_methods:
+        available = ", ".join(service.install_methods)
+        raise HTTPException(status_code=400, detail=f"{service.name} does not support the {payload.install_method} installation method. Available: {available}.")
+    # A service can have two independent catalogs: source releases and host
+    # packages. Resolve the selected catalog before accepting a version so a
+    # release from the other method can never be queued accidentally.
+    try:
+        refreshed, _, _ = refresh_service_versions(service_id, install_method=payload.install_method)
+        service = refreshed
+    except Exception:
+        service.versions = []
     if not any(item.version == payload.version for item in service.versions):
         # The frontend may have a cached provider list while this API process
         # has just restarted and returned to its catalog defaults. Refresh the
         # provider once before rejecting an otherwise valid cached selection.
         try:
-            refreshed, _, _ = refresh_service_versions(service_id)
+            refreshed, _, _ = refresh_service_versions(service_id, force=True, install_method=payload.install_method)
             service = refreshed
         except Exception:
             pass
@@ -297,8 +515,9 @@ def install(service_id: str, payload: InstallServiceRequest, user=Depends(requir
         raise HTTPException(status_code=400, detail=f"Requested {service.name} version {payload.version} is not available for this host. Refresh compatible versions and choose one from the current list.")
     if not payload.confirmed:
         return {"status": "confirmation_required", "service": service, "version": payload.version}
-    job_id = f"preview-{service_id}-{payload.version}"
-    job_store.enqueue_install(job_id, service_id, payload.version)
+    php_suffix = f"-php-{payload.php_version}" if service_id == "composer" else ""
+    job_id = f"preview-{service_id}-{payload.install_method}-{payload.version}{php_suffix}"
+    job_store.enqueue_install(job_id, service_id, payload.version, payload.install_method, payload.php_version, payload.composer_version)
     return {"status": "queued", "job_id": job_id, "message": "Install job queued and started in the background."}
 
 
@@ -310,6 +529,8 @@ def configuration(service_id: str, version: str | None = None, file: str = "fpm"
     if service_id == "nginx":
         ensure_nginx_layout()
     if service_id == "php" and version:
+        if not binary_path("php", version).exists():
+            raise HTTPException(status_code=404, detail="That PHP-FPM version is not installed")
         ensure_php_fpm_layout(version)
     config_path = _configuration_path(service_id, version, file)
     path = Path(config_path)
@@ -729,12 +950,19 @@ def switch_version(service_id: str, payload: SwitchVersionRequest, user=Depends(
     service = get_service(service_id)
     if service is None:
         raise HTTPException(status_code=404, detail="Service is not in the provider catalog")
+    if payload.install_method not in service.install_methods:
+        available = ", ".join(service.install_methods)
+        raise HTTPException(status_code=400, detail=f"{service.name} does not support the {payload.install_method} installation method. Available: {available}.")
+    try:
+        service, _, _ = refresh_service_versions(service_id, install_method=payload.install_method)
+    except Exception:
+        pass
     if not any(item.version == payload.version for item in service.versions):
         raise HTTPException(status_code=400, detail="Requested version is not available for this provider")
     if not payload.confirmed:
         return {"status": "confirmation_required", "message": "Confirm the version switch before queuing it."}
-    job_id = f"switch-{service_id}-{payload.version}"
-    job_store.enqueue_install(job_id, service_id, payload.version)
+    job_id = f"switch-{service_id}-{payload.install_method}-{payload.version}"
+    job_store.enqueue_install(job_id, service_id, payload.version, payload.install_method)
     return {"status": "queued", "job_id": job_id, "message": "Version switch queued and started in the background."}
 
 

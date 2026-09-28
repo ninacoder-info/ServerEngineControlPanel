@@ -4,6 +4,7 @@ import {
   CircleStop,
   Download,
   ExternalLink,
+  Info,
   Server,
   Star,
 } from "lucide-react";
@@ -31,6 +32,12 @@ export default function ServiceCard({
           <div>
             <h3>{service.name}</h3>
             <p>{service.description}</p>
+            {service.requirements && (
+              <p className="mt-2 flex items-center gap-1.5 text-xs font-medium text-blue-600 dark:text-blue-400">
+                <Info size={13} />
+                {service.requirements}
+              </p>
+            )}
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <span
@@ -95,14 +102,14 @@ export default function ServiceCard({
             </a>
           ) : (
             <button
-              className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+              className="inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
               onClick={() =>
                 installed
                   ? onManage(service, installedVersions)
                   : onInstall(service)
               }
             >
-              {installed ? "Configure service" : "Install service"}
+              {installed ? "Configure service" : <><Download size={14} />Install</>}
             </button>
           )}
           <a href="#" onClick={(event) => event.preventDefault()}>

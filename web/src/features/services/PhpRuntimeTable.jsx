@@ -6,6 +6,7 @@ import {
   CircleStop,
   Copy,
   Download,
+  ExternalLink,
   MoreHorizontal,
   Settings2,
   Trash2,
@@ -22,7 +23,6 @@ export default function PhpRuntimeTable({
   onManage,
   onUninstall,
 }) {
-  const installedCount = runtimes.filter((item) => item.installed).length;
   const [menuVersion, setMenuVersion] = React.useState(null);
   const [copiedPath, setCopiedPath] = React.useState(null);
   const [uninstallVersion, setUninstallVersion] = React.useState(null);
@@ -51,32 +51,15 @@ export default function PhpRuntimeTable({
   };
 
   return (
-    <section className="overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
-      <div className="flex flex-col justify-between gap-4 border-b border-slate-200 p-5 sm:flex-row sm:items-start dark:border-slate-700">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">
-            PHP runtime provider
-          </p>
-          <h3 className="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100">
-            PHP-FPM versions
-          </h3>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500 dark:text-slate-400">
-            Install and manage PHP runtimes with their own pools, sockets,
-            configuration, extensions, and process controls.
-          </p>
-        </div>
-        <span className="inline-flex w-fit items-center rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 dark:border-slate-700 dark:text-slate-300">
-          {installedCount} installed
-        </span>
-      </div>
-      <div className="overflow-x-auto">
+    <section className="overflow-visible rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
+      <div className="overflow-visible">
         <table className="w-full min-w-[760px] border-collapse text-left text-sm">
           <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-950 dark:text-slate-400">
             <tr>
               <th className="px-4 py-3 font-semibold">Version</th>
               <th className="px-4 py-3 font-semibold">Channel</th>
               <th className="px-4 py-3 font-semibold">Status</th>
-              <th className="px-4 py-3 font-semibold">Runtime path</th>
+              <th className="px-4 py-3 font-semibold">Install method</th>
               <th className="px-4 py-3 font-semibold">Extensions</th>
               <th className="px-4 py-3 text-right font-semibold" />
             </tr>
@@ -125,8 +108,12 @@ export default function PhpRuntimeTable({
                           : "Not installed"}
                     </span>
                   </td>
-                  <td className="px-4 py-4 font-mono text-xs text-slate-500 dark:text-slate-400">
-                    {isInstalled ? runtime.socket_path : "—"}
+                  <td className="px-4 py-4 text-slate-500 dark:text-slate-400">
+                    {runtime.install_method === "source"
+                      ? "Build from source"
+                      : runtime.install_method === "prebuilt"
+                        ? "Prebuilt package"
+                        : "—"}
                   </td>
                   <td className="px-4 py-4 text-slate-500 dark:text-slate-400">
                     {isInstalled
@@ -139,11 +126,30 @@ export default function PhpRuntimeTable({
                         <button
                           type="button"
                           className={linkButton}
-                          onClick={() => onManage(service, item)}
+                          onClick={() =>
+                            onManage(
+                              service,
+                              item || {
+                                ...runtime,
+                                id: `php@${runtime.version}`,
+                                installed: true,
+                              },
+                            )
+                          }
                         >
                           <Settings2 size={14} />
                           Manage
                         </button>
+                        <a
+                          className={linkButton}
+                          href={`/services/php/${encodeURIComponent(runtime.version)}/info`}
+                          title={`View PHP ${runtime.version} information`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          <ExternalLink size={14} />
+                          Info
+                        </a>
                         <div className="relative" data-php-actions>
                           <button
                             type="button"
@@ -161,7 +167,7 @@ export default function PhpRuntimeTable({
                             <MoreHorizontal size={17} />
                           </button>
                           {menuVersion === runtime.version && (
-                            <div className="absolute right-0 top-11 z-30 w-56 rounded-lg border border-slate-200 bg-white p-1 text-left shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                            <div className="absolute bottom-11 right-0 z-50 w-56 rounded-lg border border-slate-200 bg-white p-1 text-left shadow-lg dark:border-slate-700 dark:bg-slate-900">
                               <button
                                 type="button"
                                 className="flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"

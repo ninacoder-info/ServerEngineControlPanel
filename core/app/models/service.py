@@ -15,6 +15,7 @@ class ServiceDefinition(BaseModel):
     name: str
     category: str
     description: str
+    requirements: str | None = None
     vendor: str
     license: str
     versions: list[ServiceVersion]
@@ -24,6 +25,7 @@ class ServiceDefinition(BaseModel):
     installable: bool = True
     management_path: str | None = None
     management_label: str | None = None
+    install_methods: list[Literal["prebuilt", "source"]] = ["source"]
 
 
 class InstalledService(BaseModel):
@@ -39,11 +41,15 @@ class InstalledService(BaseModel):
 class InstallServiceRequest(BaseModel):
     version: str = Field(min_length=1, max_length=32)
     confirmed: bool = False
+    install_method: Literal["prebuilt", "source"] = "prebuilt"
+    php_version: str | None = Field(default=None, max_length=32)
+    composer_version: str | None = Field(default=None, max_length=32)
 
 
 class SwitchVersionRequest(BaseModel):
     version: str = Field(min_length=1, max_length=32)
     confirmed: bool = False
+    install_method: Literal["prebuilt", "source"] = "prebuilt"
 
 
 class ServiceActionRequest(BaseModel):

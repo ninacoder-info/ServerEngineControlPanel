@@ -8,8 +8,8 @@ import ActivityPanel from "./ActivityPanel";
 import MetricCard from "./MetricCard";
 import ServerPanel from "./ServerPanel";
 import ServicesPage from "../services/ServicesPage";
-import PhpRuntimesPage from "../services/PhpRuntimesPage";
 import NodeRuntimesPage from "../services/NodeRuntimesPage";
+import PhpRuntimesPage from "../services/PhpRuntimesPage";
 import FileManagerPage from "../file-manager/FileManagerPage";
 import SettingsPage from "../settings/SettingsPage";
 import WebsitesPage from "../websites/WebsitesPage";
@@ -28,6 +28,7 @@ import AccountSettingsPage from "../account/AccountSettingsPage";
 import TerminalPage from "../terminal/TerminalPage";
 import ActivityPage from "../activity/ActivityPage";
 import CronJobsPage from "../cron/CronJobsPage";
+import SupervisorWorkspace from "../services/SupervisorWorkspace";
 import WebProtectionPage from "../waf/WebProtectionPage";
 import DockerPage from "../docker/DockerPage";
 import PlansPage from "../plans/PlansPage";
@@ -72,10 +73,10 @@ export default function DashboardPage({ user, onLogout }) {
   }, [location.pathname, navigate, panelPreferences.panel_landing]);
   const active = location.pathname.startsWith("/websites")
     ? "Websites"
-    : location.pathname === "/services/php"
-      ? "PHP runtimes"
-      : location.pathname === "/services/nodejs"
+    : location.pathname === "/services/nodejs"
         ? "Node.js runtimes"
+        : location.pathname === "/services/php"
+          ? "PHP runtimes"
         : location.pathname.startsWith("/services")
           ? "Services"
           : location.pathname === "/file-manager"
@@ -90,6 +91,8 @@ export default function DashboardPage({ user, onLogout }) {
                     ? "Activity"
                     : location.pathname === "/cronjobs"
                       ? "Cron jobs"
+                      : location.pathname === "/supervisor"
+                        ? "Supervisor"
                       : location.pathname === "/docker"
                         ? "Containers"
                     : location.pathname === "/health"
@@ -127,12 +130,14 @@ export default function DashboardPage({ user, onLogout }) {
     <ActivityPage />
   ) : location.pathname === "/cronjobs" ? (
     <CronJobsPage />
+  ) : location.pathname === "/supervisor" ? (
+    <SupervisorWorkspace />
   ) : location.pathname === "/docker" ? (
     <DockerPage />
-  ) : location.pathname === "/services/php" ? (
-    <PhpRuntimesPage />
   ) : location.pathname === "/services/nodejs" ? (
     <NodeRuntimesPage />
+  ) : location.pathname === "/services/php" ? (
+    <PhpRuntimesPage />
   ) : location.pathname === "/file-manager" ? (
     <FileManagerPage />
   ) : location.pathname === "/domains" ? (

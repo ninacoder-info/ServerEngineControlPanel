@@ -1,10 +1,13 @@
 import json
+import gzip
+import os
 import platform
 import re
 import shutil
 import subprocess
 import time
 import urllib.request
+from pathlib import Path
 
 from app.models.service import ServiceDefinition, ServiceVersion
 
@@ -14,6 +17,7 @@ def v(version: str, channel: str):
 
 
 _PYTHON_ASSETS: dict[str, str] = {}
+_PHP_SOURCES: dict[str, str] = {}
 _REDIS_SOURCES: dict[str, str] = {}
 _POSTGRES_SOURCES: dict[str, str] = {}
 _MYSQL_RELEASES: dict[str, str] = {}
@@ -21,6 +25,48 @@ _POWERDNS_RELEASES: list[str] = []
 _POWERDNS_SOURCES: dict[str, str] = {}
 _SQLSERVER_RELEASES: list[str] = []
 _APT_RELEASES: dict[str, list[str]] = {}
+_APT_VERSION_REFRESHED_AT: dict[str, float] = {}
+_SELECTED_PREBUILT_PACKAGES: dict[str, str] = {}
+_VERSION_METHODS: dict[str, str] = {}
+_PREBUILT_PACKAGES = {
+    "mysql": "mysql-server",
+    "redis": "redis-server",
+    "postgresql": "postgresql",
+    "mariadb": "mariadb-server",
+    "nginx": "nginx",
+    "apache": "apache2",
+    "caddy": "caddy",
+    "haproxy": "haproxy",
+    "memcached": "memcached",
+    "valkey": "valkey-server",
+    "vsftpd": "vsftpd",
+    "certbot": "certbot",
+    "rabbitmq": "rabbitmq-server",
+    "fail2ban": "fail2ban",
+    "modsecurity": "libmodsecurity3",
+    "git": "git",
+    "imagemagick": "imagemagick",
+    "ffmpeg": "ffmpeg",
+    "ruby": "ruby",
+    "powerdns": "pdns-server",
+    "bind9": "bind9",
+    "unbound": "unbound",
+    "clamav": "clamav",
+    "auditd": "auditd",
+    "logrotate": "logrotate",
+    "postfix": "postfix",
+    "dovecot": "dovecot-imapd",
+    "supervisor": "supervisor",
+    "lynis": "lynis",
+    "rspamd": "rspamd",
+}
+_PREBUILT_PACKAGE_CHOICES = {
+    "modsecurity": [
+        "libmodsecurity3",
+        "libapache2-mod-security2",
+        "libnginx-mod-http-modsecurity",
+    ],
+}
 _CADDY_SOURCES: dict[str, str] = {}
 _MARIADB_SOURCES: dict[str, str] = {}
 _HAPROXY_SOURCES: dict[str, str] = {}
@@ -90,6 +136,266 @@ def _refresh_python_versions(definition: ServiceDefinition):
 
 def python_asset_for(version: str) -> str | None:
     return _PYTHON_ASSETS.get(version)
+
+
+def _refresh_php_versions(definition: ServiceDefinition):
+    """Fetch versioned PHP-FPM package lines for the current Debian family."""
+    cached_at = _VERSION_REFRESHED_AT.get("php", 0)
+    if definition.versions and cached_at and time.monotonic() - cached_at < 300:
+        return len(definition.versions)
+    release = {}
+    try:
+        for line in Path("/etc/os-release").read_text(errors="replace").splitlines():
+            key, _, value = line.partition("=")
+            release[key] = value.strip().strip('"')
+    except OSError:
+        release = {}
+    codename = release.get("VERSION_CODENAME")
+    architecture = {"x86_64": "amd64", "aarch64": "arm64", "arm64": "arm64", "armv7l": "armhf"}.get(platform.machine().lower())
+    if not codename or not architecture:
+        found = set()
+    else:
+        index_url = f"https://packages.sury.org/php/dists/{codename}/main/binary-{architecture}/Packages.gz"
+        request = urllib.request.Request(index_url, headers={"User-Agent": "Server-Engine-Control-Panel"})
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:
+                content = gzip.decompress(response.read()).decode("utf-8", "replace")
+            found = {}
+            for paragraph in content.split("\n\n"):
+                package = re.search(r"^Package:\s+php(\d+\.\d+)-fpm$", paragraph, re.MULTILINE)
+                release_version = re.search(r"^Version:\s+([^\s]+)", paragraph, re.MULTILINE)
+                if not package or not release_version:
+                    continue
+                match = re.match(r"(?:\d+:)?(\d+\.\d+\.\d+)", release_version.group(1))
+                if match:
+                    minor = package.group(1)
+                    candidate = match.group(1)
+                    if minor not in found or tuple(map(int, candidate.split("."))) > tuple(map(int, found[minor].split("."))):
+                        found[minor] = candidate
+        except Exception:
+            found = {}
+    if not found:
+        apt_cache = shutil.which("apt-cache")
+        if apt_cache:
+            def native_packages():
+                result = subprocess.run(
+                    [apt_cache, "pkgnames", "php"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=8,
+                )
+                return re.findall(r"^php(\d+\.\d+)-fpm$", result.stdout, re.MULTILINE)
+
+            found = native_packages()
+            if not found and os.geteuid() == 0:
+                apt = shutil.which("apt-get")
+                if apt:
+                    subprocess.run([apt, "update"], capture_output=True, text=True, check=False, timeout=90)
+                    found = native_packages()
+            exact = {}
+            for minor in found:
+                versions = subprocess.run(
+                    [apt_cache, "madison", f"php{minor}-fpm"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=8,
+                ).stdout.splitlines()
+                for line in versions:
+                    parts = [part.strip() for part in line.split("|")]
+                    if len(parts) < 2:
+                        continue
+                    match = re.match(r"(?:\d+:)?(\d+\.\d+\.\d+)", parts[1])
+                    if match:
+                        candidate = match.group(1)
+                        if minor not in exact or tuple(map(int, candidate.split("."))) > tuple(map(int, exact[minor].split("."))):
+                            exact[minor] = candidate
+            found = exact
+            if not found:
+                native = subprocess.run([apt_cache, "policy", "php-fpm"], capture_output=True, text=True, check=False, timeout=8)
+                version = re.search(r"^\s*Candidate:\s+((?:\d+:)?\d+\.\d+\.\d+)", native.stdout, re.MULTILINE)
+                if version:
+                    normalized = version.group(1).split(":", 1)[-1]
+                    found[normalized.rsplit(".", 1)[0]] = normalized
+    if not found:
+        return None
+    ordered = sorted(found.values(), key=lambda item: tuple(int(part) for part in item.split(".")), reverse=True)
+    definition.versions = [v(item, "stable" if index == 0 else "security") for index, item in enumerate(ordered)]
+    _VERSION_REFRESHED_AT["php"] = time.monotonic()
+    return len(definition.versions)
+
+
+def _refresh_node_versions(definition: ServiceDefinition):
+    """Fetch one current binary release for every supported Node major line."""
+    cached_at = _VERSION_REFRESHED_AT.get("nodejs", 0)
+    if definition.versions and cached_at and time.monotonic() - cached_at < 300:
+        return len(definition.versions)
+    request = urllib.request.Request("https://nodejs.org/dist/index.json", headers={"User-Agent": "Server-Engine-Control-Panel"})
+    with urllib.request.urlopen(request, timeout=20) as response:
+        releases = json.loads(response.read().decode("utf-8", "replace"))
+    selected = []
+    seen_major = set()
+    for release in releases:
+        match = re.match(r"^v(\d+)\.", release.get("version", ""))
+        if not match or match.group(1) in seen_major:
+            continue
+        seen_major.add(match.group(1))
+        selected.append(v(match.group(1), "lts" if release.get("lts") else "mainline"))
+        if len(selected) >= 30:
+            break
+    if not selected:
+        return None
+    definition.versions = selected
+    _VERSION_REFRESHED_AT["nodejs"] = time.monotonic()
+    return len(selected)
+
+
+def _refresh_php_source_versions(definition: ServiceDefinition):
+    """Fetch the newest stable source release for each PHP minor line."""
+    cached_at = _VERSION_REFRESHED_AT.get("php-source", 0)
+    if _PHP_SOURCES and cached_at and time.monotonic() - cached_at < 300:
+        definition.versions = [v(version, "stable") for version in _PHP_SOURCES]
+        return len(definition.versions)
+    tags = []
+    try:
+        official_request = urllib.request.Request(
+            "https://www.php.net/releases/index.php",
+            headers={"User-Agent": "Server-Engine-Control-Panel"},
+        )
+        with urllib.request.urlopen(official_request, timeout=20) as response:
+            html = response.read().decode("utf-8", "replace")
+        tags = [{"name": f"php-{version}"} for version in re.findall(r"php-([0-9]+\.[0-9]+\.[0-9]+)\.tar\.gz", html)]
+    except Exception:
+        tags = []
+    if not tags:
+        try:
+            for page in range(1, 9):
+                request = urllib.request.Request(
+                    f"https://api.github.com/repos/php/php-src/tags?per_page=100&page={page}",
+                    headers={"Accept": "application/vnd.github+json", "User-Agent": "Server-Engine-Control-Panel"},
+                )
+                with urllib.request.urlopen(request, timeout=20) as response:
+                    page_tags = json.loads(response.read().decode("utf-8", "replace"))
+                if not page_tags:
+                    break
+                tags.extend(page_tags)
+        except Exception:
+            tags = []
+    if not tags:
+        manifest_request = urllib.request.Request(
+            "https://www.php.net/releases/index.php?json=1",
+            headers={"Accept": "application/json", "User-Agent": "Server-Engine-Control-Panel"},
+        )
+        try:
+            with urllib.request.urlopen(manifest_request, timeout=20) as response:
+                manifest = json.loads(response.read().decode("utf-8", "replace"))
+            tags = [
+                {"name": f"php-{release.get('version')}"}
+                for release in manifest.values()
+                if isinstance(release, dict) and re.fullmatch(r"\d+\.\d+\.\d+", str(release.get("version", "")))
+            ]
+        except Exception:
+            tags = []
+    selected = {}
+    for tag in tags:
+        tag_name = str(tag.get("name", "")) if isinstance(tag, dict) else ""
+        match = re.fullmatch(r"php-(\d+\.\d+\.\d+)", tag_name)
+        if not match:
+            continue
+        version = match.group(1)
+        minor = ".".join(version.split(".")[:2])
+        if minor not in selected or tuple(int(part) for part in version.split(".")) > tuple(int(part) for part in selected[minor].split(".")):
+            selected[minor] = version
+    versions = sorted(selected.values(), key=lambda item: tuple(int(part) for part in item.split(".")), reverse=True)
+    if not versions:
+        return None
+    # GitHub can expose a tag before its source archive is published (the
+    # MongoDB repository currently has such tags). Do not show a release that
+    # the installer cannot actually download.
+    downloadable = []
+    for version in versions:
+        source_url = f"https://codeload.github.com/mongodb/mongo/tar.gz/refs/tags/r{version}"
+        try:
+            # Use a ranged GET instead of HEAD: codeload.github.com can
+            # return a misleading success response to HEAD for unpublished
+            # tag archives.
+            probe = urllib.request.Request(
+                source_url,
+                headers={"Range": "bytes=0-0", "User-Agent": "Server-Engine-Control-Panel"},
+            )
+            with urllib.request.urlopen(probe, timeout=5) as response:
+                response.read(1)
+                downloadable.append(version)
+        except Exception:
+            continue
+    versions = downloadable
+    if not versions:
+        return None
+    _PHP_SOURCES.clear()
+    _PHP_SOURCES.update({version: f"https://www.php.net/distributions/php-{version}.tar.gz" for version in versions})
+    _VERSION_REFRESHED_AT["php-source"] = time.monotonic()
+    definition.versions = [
+        v(
+            version,
+            "stable" if index == 0 else "security" if version.startswith(("8.1.", "8.0.", "7.")) else "legacy",
+        )
+        for index, version in enumerate(versions)
+    ]
+    return len(versions)
+
+
+def php_source_for(version: str) -> str | None:
+    return _PHP_SOURCES.get(version)
+
+
+def _refresh_composer_versions(definition: ServiceDefinition):
+    """Fetch one stable Composer release for each current minor line."""
+    cached_at = _VERSION_REFRESHED_AT.get("composer", 0)
+    if definition.versions and cached_at and time.monotonic() - cached_at < 300:
+        return len(definition.versions)
+
+    releases = []
+    official_request = urllib.request.Request(
+        "https://getcomposer.org/versions",
+        headers={"Accept": "application/json", "User-Agent": "Server-Engine-Control-Panel"},
+    )
+    try:
+        with urllib.request.urlopen(official_request, timeout=12) as response:
+            payload = json.loads(response.read().decode("utf-8", "replace"))
+        releases = payload.get("stable", []) if isinstance(payload, dict) else []
+    except Exception:
+        # Composer's manifest is preferred because it is the authoritative
+        # download catalog. GitHub remains a compatibility fallback for older
+        # Composer mirrors and restricted environments.
+        releases = []
+
+    if not releases:
+        github_request = urllib.request.Request(
+            "https://api.github.com/repos/composer/composer/releases?per_page=50",
+            headers={"Accept": "application/vnd.github+json", "User-Agent": "Server-Engine-Control-Panel"},
+        )
+        with urllib.request.urlopen(github_request, timeout=20) as response:
+            releases = json.loads(response.read().decode("utf-8", "replace"))
+
+    selected = []
+    seen_minor = set()
+    for release in releases:
+        version = str(release.get("version") or release.get("tag_name", "")).removeprefix("v")
+        if not re.fullmatch(r"2\.\d+\.\d+", version):
+            continue
+        minor = ".".join(version.split(".")[:2])
+        if minor in seen_minor:
+            continue
+        seen_minor.add(minor)
+        selected.append(v(version, "stable" if not selected else "security"))
+        if len(selected) >= 12:
+            break
+    if not selected:
+        return None
+    definition.versions = selected
+    _VERSION_REFRESHED_AT["composer"] = time.monotonic()
+    return len(selected)
 
 
 def _refresh_redis_versions(definition: ServiceDefinition):
@@ -251,6 +557,10 @@ def powerdns_source_for(version: str) -> str | None:
     return _POWERDNS_SOURCES.get(version)
 
 
+def prebuilt_package_for(service_id: str) -> str | None:
+    return _SELECTED_PREBUILT_PACKAGES.get(service_id) or _PREBUILT_PACKAGES.get(service_id)
+
+
 def _refresh_sqlserver_versions(definition: ServiceDefinition):
     cached_at = _VERSION_REFRESHED_AT.get("sqlserver", 0)
     if _SQLSERVER_RELEASES and time.monotonic() - cached_at < 300:
@@ -281,7 +591,7 @@ def _refresh_sqlserver_versions(definition: ServiceDefinition):
 
 
 def _refresh_apt_versions(definition: ServiceDefinition, package: str):
-    cached_at = _VERSION_REFRESHED_AT.get(definition.id, 0)
+    cached_at = _APT_VERSION_REFRESHED_AT.get(package, 0)
     if package in _APT_RELEASES and time.monotonic() - cached_at < 300:
         definition.versions = [v(item, "stable" if index == 0 else "security") for index, item in enumerate(_APT_RELEASES[package])]
         return len(_APT_RELEASES[package])
@@ -294,7 +604,8 @@ def _refresh_apt_versions(definition: ServiceDefinition, package: str):
         parts = [part.strip() for part in line.split("|")]
         if len(parts) < 2 or not parts[1]:
             continue
-        normalized = parts[1].split(":", 1)[-1]
+        full_version = parts[1]
+        normalized = full_version.split(":", 1)[-1]
         if normalized not in candidates:
             candidates.append(normalized)
     candidates.sort(key=lambda item: tuple(int(part) for part in re.findall(r"\d+", item)), reverse=True)
@@ -311,7 +622,7 @@ def _refresh_apt_versions(definition: ServiceDefinition, package: str):
     if not selected:
         return None
     _APT_RELEASES[package] = selected
-    _VERSION_REFRESHED_AT[definition.id] = time.monotonic()
+    _APT_VERSION_REFRESHED_AT[package] = time.monotonic()
     definition.versions = [v(item, "stable" if index == 0 else "security") for index, item in enumerate(selected)]
     return len(selected)
 
@@ -832,16 +1143,31 @@ def _refresh_mongodb_versions(definition: ServiceDefinition):
     if _MONGODB_SOURCES and time.monotonic() - cached_at < 300:
         return len(_MONGODB_SOURCES)
     request = urllib.request.Request(
-        "https://github.com/mongodb/mongo/tags",
-        headers={"User-Agent": "Server-Engine-Control-Panel"},
+        "https://api.github.com/repos/mongodb/mongo/tags?per_page=100",
+        headers={"Accept": "application/vnd.github+json", "User-Agent": "Server-Engine-Control-Panel"},
     )
-    with urllib.request.urlopen(request, timeout=20) as response:
-        html = response.read().decode("utf-8", "replace")
-    versions = sorted(
-        set(re.findall(r"/mongodb/mongo/releases/tag/r(\d+\.\d+(?:\.\d+)?)", html)),
-        key=lambda item: tuple(int(part) for part in item.split(".")),
-        reverse=True,
-    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            tags = json.loads(response.read().decode("utf-8", "replace"))
+        versions = sorted(
+            {match.group(1) for tag in tags if isinstance(tag, dict) and (match := re.fullmatch(r"r(\d+\.\d+(?:\.\d+)?)", str(tag.get("name", ""))))},
+            key=lambda item: tuple(int(part) for part in item.split(".")),
+            reverse=True,
+        )
+    except Exception:
+        # Keep a small fallback for installations where GitHub's API is
+        # blocked, but only accept real release-tag links from the repository.
+        request = urllib.request.Request(
+            "https://github.com/mongodb/mongo/tags",
+            headers={"User-Agent": "Server-Engine-Control-Panel"},
+        )
+        with urllib.request.urlopen(request, timeout=20) as response:
+            html = response.read().decode("utf-8", "replace")
+        versions = sorted(
+            set(re.findall(r"/mongodb/mongo/releases/tag/r(\d+\.\d+(?:\.\d+)?)", html)),
+            key=lambda item: tuple(int(part) for part in item.split(".")),
+            reverse=True,
+        )
     if not versions:
         return None
     selected = []
@@ -855,7 +1181,7 @@ def _refresh_mongodb_versions(definition: ServiceDefinition):
         if len(selected) == 12:
             break
     _MONGODB_SOURCES.clear()
-    _MONGODB_SOURCES.update({version: f"https://github.com/mongodb/mongo/archive/refs/tags/r{version}.tar.gz" for version in selected})
+    _MONGODB_SOURCES.update({version: f"https://codeload.github.com/mongodb/mongo/tar.gz/refs/tags/r{version}" for version in selected})
     _VERSION_REFRESHED_AT["mongodb"] = time.monotonic()
     latest_minor = selected[0].rsplit(".", 1)[0]
     definition.versions = [v(version, "stable" if version.rsplit(".", 1)[0] == latest_minor else "security") for version in selected]
@@ -1079,15 +1405,14 @@ PHP_EXTENSIONS = [
 
 
 CATALOG = [
-    ServiceDefinition(id="nginx", name="Nginx", category="Web servers", description="High-performance HTTP reverse proxy and web server.", vendor="F5 / Nginx", license="BSD-2-Clause", default_port=80, versions=[v("1.30", "stable"), v("1.28", "stable"), v("1.26", "stable"), v("1.24", "stable"), v("1.22", "security"), v("1.20", "security"), v("1.18", "security")]),
-    ServiceDefinition(id="apache", name="Apache HTTP Server", category="Web servers", description="Extensible web server with virtual hosts, modules, and .htaccess support.", vendor="Apache Software Foundation", license="Apache-2.0", default_port=80, versions=[v("2.4.68", "stable"), v("2.4.62", "stable"), v("2.4.58", "stable"), v("2.4.57", "security"), v("2.4.54", "security"), v("2.4.52", "security"), v("2.4.48", "security")]),
+    ServiceDefinition(id="nginx", name="Nginx", category="Web servers", description="High-performance HTTP reverse proxy and web server.", vendor="F5 / Nginx", license="BSD-2-Clause", default_port=80, versions=[]),
+    ServiceDefinition(id="apache", name="Apache HTTP Server", category="Web servers", description="Extensible web server with virtual hosts, modules, and .htaccess support.", vendor="Apache Software Foundation", license="Apache-2.0", default_port=80, versions=[]),
     ServiceDefinition(id="openlitespeed", name="OpenLiteSpeed", category="Web servers", description="Event-driven web server with built-in caching and HTTP/3 support.", vendor="LiteSpeed Technologies", license="GPL-3.0", default_port=80, versions=[], mode="service", installable=True, management_path="/services", management_label="Open web server tools"),
-    ServiceDefinition(id="litespeed", name="LiteSpeed Enterprise", category="Web servers", description="Commercial Apache-compatible web server with high-performance caching.", vendor="LiteSpeed Technologies", license="Commercial", default_port=80, versions=[v("6.3", "stable"), v("6.2", "stable"), v("6.1", "security"), v("6.0", "security")], mode="integration", installable=False, management_path="/services", management_label="Open web server tools"),
     ServiceDefinition(id="caddy", name="Caddy", category="Web servers", description="Modern web server with automatic HTTPS and simple configuration.", vendor="Caddy", license="Apache-2.0", default_port=80, versions=[]),
     ServiceDefinition(id="haproxy", name="HAProxy", category="Web servers", description="Reliable TCP and HTTP load balancer and reverse proxy.", vendor="HAProxy Technologies", license="GPL-2.0", default_port=80, versions=[]),
-    ServiceDefinition(id="php", name="PHP-FPM", category="Application runtimes", description="Isolated PHP runtimes and FastCGI process pools; multiple versions can run together.", vendor="PHP Foundation", license="PHP-3.01", default_port=9000, versions=[v("8.5", "stable"), v("8.4", "stable"), v("8.3", "stable"), v("8.2", "security"), v("8.1", "security"), v("8.0", "security"), v("7.4", "security"), v("7.3", "security"), v("7.2", "security"), v("7.1", "security"), v("7.0", "security"), v("5.6", "security")]),
-    ServiceDefinition(id="nodejs", name="Node.js", category="Application runtimes", description="JavaScript runtime for server-side applications and tooling. Multiple major versions can coexist for separate projects.", vendor="OpenJS Foundation", license="MIT", versions=[v("26", "mainline"), v("25", "legacy"), v("24", "lts"), v("23", "legacy"), v("22", "lts"), v("21", "legacy"), v("20", "legacy"), v("19", "legacy"), v("18", "legacy"), v("17", "legacy"), v("16", "legacy"), v("15", "legacy"), v("14", "legacy"), v("13", "legacy"), v("12", "legacy")]),
-    ServiceDefinition(id="python", name="Python", category="Application runtimes", description="Python runtime for WSGI/ASGI applications and automation.", vendor="Python Software Foundation", license="PSF-2.0", versions=[v("3.13", "stable"), v("3.12", "stable"), v("3.11", "stable"), v("3.10", "security"), v("3.9", "security"), v("3.8", "security")]),
+    ServiceDefinition(id="php", name="PHP-FPM", category="Application runtimes", description="Isolated PHP runtimes and FastCGI process pools; multiple versions can run together.", vendor="PHP Foundation", license="PHP-3.01", default_port=9000, versions=[]),
+    ServiceDefinition(id="nodejs", name="Node.js", category="Application runtimes", description="JavaScript runtime for server-side applications and tooling. Multiple major versions can coexist for separate projects.", vendor="OpenJS Foundation", license="MIT", versions=[]),
+    ServiceDefinition(id="python", name="Python", category="Application runtimes", description="Python runtime for WSGI/ASGI applications and automation.", vendor="Python Software Foundation", license="PSF-2.0", versions=[]),
     ServiceDefinition(id="ruby", name="Ruby", category="Application runtimes", description="Ruby runtime for Rails and Rack applications.", vendor="Ruby Community", license="Ruby/BSD", versions=[]),
     ServiceDefinition(id="mariadb", name="MariaDB", category="Databases", description="MySQL-compatible relational database server.", vendor="MariaDB Foundation", license="GPL-2.0", default_port=3306, versions=[]),
     ServiceDefinition(id="mysql", name="MySQL", category="Databases", description="Relational database server for web applications.", vendor="Oracle", license="GPL-2.0 / Commercial", default_port=3306, versions=[]),
@@ -1097,7 +1422,7 @@ CATALOG = [
     ServiceDefinition(id="memcached", name="Memcached", category="Databases & cache", description="Simple distributed memory caching system.", vendor="Memcached", license="BSD-3-Clause", default_port=11211, versions=[]),
     ServiceDefinition(id="certbot", name="Certbot", category="Security & operations", description="Automatic TLS certificate issuance and renewal client.", vendor="EFF", license="Apache-2.0", versions=[]),
     ServiceDefinition(id="vsftpd", name="vsftpd", category="Security & operations", description="Lightweight FTP/FTPS server for legacy deployment workflows.", vendor="vsftpd", license="GPL-2.0", default_port=21, versions=[]),
-    ServiceDefinition(id="fail2ban", name="Fail2ban", category="Security & operations", description="Host firewall integration for log-based intrusion prevention and temporary bans.", vendor="Fail2ban", license="GPL-2.0", versions=[v("1.1", "stable"), v("1.0", "stable"), v("0.11", "security"), v("0.10", "security")], mode="integration", installable=False, management_path="/firewall", management_label="Open firewall controls"),
+    ServiceDefinition(id="fail2ban", name="Fail2ban", category="Security & operations", description="Log-based intrusion prevention that can protect the host firewall after installation.", vendor="Fail2ban", license="GPL-2.0", versions=[], mode="service", installable=True, management_path="/firewall", management_label="Open firewall controls"),
 ]
 
 
@@ -1105,7 +1430,7 @@ CATALOG = [
 # a feature page or an external provider rather than extracted as an isolated
 # Debian package by the generic installer.
 CATALOG.extend([
-    ServiceDefinition(id="modsecurity", name="ModSecurity WAF", category="Security & traffic", description="Web application firewall with OWASP Core Rule Set protection for websites.", vendor="OWASP / SpiderLabs", license="Apache-2.0", versions=[v("3", "stable")], mode="feature", installable=False, management_path="/firewall", management_label="Open WAF controls"),
+    ServiceDefinition(id="modsecurity", name="ModSecurity WAF", category="Security & traffic", description="Web application firewall engine installed before it is attached to Nginx or Apache websites.", vendor="OWASP / SpiderLabs", license="Apache-2.0", versions=[], mode="service", installable=True, management_path="/firewall", management_label="Open WAF controls"),
     ServiceDefinition(id="supervisor", name="Supervisor", category="Process managers", description="Keep Laravel workers, queue consumers, Python processes, and custom daemons running.", vendor="Supervisor", license="BSD-3-Clause", versions=[], mode="service", installable=True, management_path="/services", management_label="Open process managers"),
     ServiceDefinition(id="pm2", name="PM2", category="Process managers", description="Production Node.js process management, clustering, startup, and log handling.", vendor="PM2", license="AGPL-3.0", versions=[], mode="service", installable=True, management_path="/services", management_label="Open process managers"),
     ServiceDefinition(id="postfix", name="Postfix", category="Mail services", description="Outbound and inbound SMTP transport for managed domains and application mail.", vendor="Postfix", license="IPL-1.0", versions=[], mode="service", installable=True, management_path="/email", management_label="Open mail controls"),
@@ -1116,9 +1441,9 @@ CATALOG.extend([
     ServiceDefinition(id="bind9", name="BIND 9", category="DNS services", description="Authoritative and recursive DNS service for self-hosted zones.", vendor="ISC", license="MPL-2.0", versions=[], mode="service", installable=True, management_path="/domains", management_label="Open DNS controls"),
     ServiceDefinition(id="unbound", name="Unbound", category="DNS services", description="Validating recursive DNS resolver with caching and DNSSEC support.", vendor="NLnet Labs", license="BSD-3-Clause", versions=[], mode="service", installable=True, management_path="/domains", management_label="Open DNS controls"),
     ServiceDefinition(id="clamav", name="ClamAV", category="Security & operations", description="Scheduled malware scanning for website files, uploads, mail, and backups.", vendor="ClamAV", license="GPL-2.0", versions=[], mode="service", installable=True, management_path="/health", management_label="Open security scans"),
-    ServiceDefinition(id="auditd", name="Linux audit", category="Security & operations", description="Host kernel audit events for privileged actions, file changes, authentication, and policy review.", vendor="Linux Audit", license="GPL-2.0", versions=[v("managed", "stable")], mode="integration", installable=False, management_path="/logs", management_label="Open audit logs"),
+    ServiceDefinition(id="auditd", name="Linux audit", category="Security & operations", description="Kernel audit event collection for privileged actions, file changes, and authentication review.", vendor="Linux Audit", license="GPL-2.0", versions=[], mode="service", installable=True, management_path="/logs", management_label="Open audit logs"),
     ServiceDefinition(id="lynis", name="Lynis hardening audit", category="Security & operations", description="Security audit and hardening recommendations for the host and its services.", vendor="CISOfy", license="GPL-3.0", versions=[], mode="service", installable=True, management_path="/health", management_label="Open health checks"),
-    ServiceDefinition(id="logrotate", name="Logrotate", category="Monitoring & operations", description="Host log retention, compression, and rotation policies.", vendor="Linux", license="GPL-2.0", versions=[v("managed", "stable")], mode="integration", installable=False, management_path="/logs", management_label="Open log controls"),
+    ServiceDefinition(id="logrotate", name="Logrotate", category="Monitoring & operations", description="Host log retention, compression, and rotation policies.", vendor="Linux", license="GPL-2.0", versions=[], mode="service", installable=True, management_path="/logs", management_label="Open log controls"),
     ServiceDefinition(id="node-exporter", name="Prometheus Node Exporter", category="Monitoring & operations", description="Host metrics for CPU, memory, disk, network, and filesystems.", vendor="Prometheus", license="Apache-2.0", versions=[v("1.10", "stable"), v("1.9", "security")], mode="integration", installable=False, management_path="/health", management_label="Open monitoring"),
     ServiceDefinition(id="rabbitmq", name="RabbitMQ", category="Queues & messaging", description="Reliable queues and messaging for workers, event processing, and distributed applications.", vendor="Broadcom", license="MPL-2.0", versions=[], mode="service", installable=True, management_path="/services", management_label="Open queue managers"),
     ServiceDefinition(id="mongodb", name="MongoDB", category="Databases", description="Document database for flexible application data and event-oriented workloads.", vendor="MongoDB", license="SSPL-1.0", versions=[], mode="service", installable=True, management_path="/databases", management_label="Open database manager"),
@@ -1126,26 +1451,72 @@ CATALOG.extend([
     ServiceDefinition(id="opensearch", name="OpenSearch", category="Databases & search", description="Search and analytics engine for application search, logs, and dashboards.", vendor="OpenSearch", license="Apache-2.0", versions=[], mode="service", installable=True, management_path="/services", management_label="Open search services"),
     ServiceDefinition(id="docker", name="Docker Engine", category="Deployment tools", description="Host container runtime used by optional Server Engine integrations.", vendor="Docker", license="Apache-2.0 / Commercial", versions=[v("latest", "stable")], mode="integration", installable=False, management_path="/services", management_label="Open container tools"),
     ServiceDefinition(id="git", name="Git", category="Deployment tools", description="Repository checkout, deployment hooks, rollback, and application source management.", vendor="Git", license="GPL-2.0", versions=[], mode="service", installable=True, management_path="/websites", management_label="Open deployment tools"),
-    ServiceDefinition(id="composer", name="Composer", category="Deployment tools", description="Isolated PHP dependency manager, ready for Laravel and WordPress projects.", vendor="Composer", license="MIT", versions=[v("2.8", "stable"), v("2.7", "security")]),
-    ServiceDefinition(id="wp-cli", name="WP-CLI", category="Deployment tools", description="WordPress installation, updates, database tasks, cache control, and scripted maintenance.", vendor="WordPress", license="MIT", versions=[], mode="service", installable=True, management_path="/websites", management_label="Open website tools"),
+    ServiceDefinition(id="composer", name="Composer", category="Deployment tools", description="PHP dependency manager for Laravel, WordPress, and modern PHP applications.", requirements="PHP CLI is needed to install and manage project dependencies.", vendor="Composer", license="MIT", versions=[]),
+    ServiceDefinition(id="wp-cli", name="WP-CLI", category="Deployment tools", description="WordPress installation, updates, database tasks, cache control, and scripted maintenance.", requirements="PHP CLI and Composer enable full WordPress project automation.", vendor="WordPress", license="MIT", versions=[], mode="service", installable=True, management_path="/websites", management_label="Open website tools"),
     ServiceDefinition(id="imagemagick", name="ImageMagick", category="Deployment tools", description="Image conversion and optimization for WordPress, Laravel, and media workflows.", vendor="ImageMagick", license="Apache-2.0", versions=[], mode="service", installable=True, management_path="/services", management_label="Open runtime tools"),
     ServiceDefinition(id="ffmpeg", name="FFmpeg", category="Deployment tools", description="Audio and video processing for media applications and background jobs.", vendor="FFmpeg", license="LGPL-2.1/GPL-2.0", versions=[], mode="service", installable=True, management_path="/services", management_label="Open runtime tools"),
 ])
+
+# Keep the installation-method contract in the catalog response instead of
+# duplicating a growing service list in the React installer. Services without
+# a real host-compatible package provider remain source-only.
+for _service in CATALOG:
+    if _service.id in {"fail2ban", "modsecurity", "auditd", "logrotate"}:
+        _service.install_methods = ["prebuilt"]
+    elif _service.id in _PREBUILT_PACKAGES:
+        _service.install_methods = ["prebuilt", "source"]
+    elif _service.id in {"nodejs", "python", "composer", "pm2", "sqlserver"}:
+        # These adapters use versioned portable archives or package-manager
+        # artifacts extracted under Server Engine; they do not expose a
+        # generic source-build implementation.
+        _service.install_methods = ["prebuilt"]
+    elif _service.id == "php":
+        _service.install_methods = ["prebuilt", "source"]
 
 
 def get_service(service_id: str) -> ServiceDefinition | None:
     return next((service for service in CATALOG if service.id == service_id), None)
 
 
-def refresh_service_versions(service_id: str, force: bool = False) -> tuple[ServiceDefinition, str, str]:
+def refresh_service_versions(service_id: str, force: bool = False, install_method: str = "source") -> tuple[ServiceDefinition, str, str]:
     """Refresh a provider-backed version list while retaining a safe fallback."""
     definition = get_service(service_id)
     if definition is None:
         raise ValueError("Service is not in the provider catalog")
+    if _VERSION_METHODS.get(service_id) != install_method:
+        definition.versions = []
+    _VERSION_METHODS[service_id] = install_method
     if force:
         # The explicit Fetch button must contact the provider again. Internal
         # installer lookups may still use the short-lived catalog cache.
         _VERSION_REFRESHED_AT.pop(service_id, None)
+        if service_id == "php":
+            _VERSION_REFRESHED_AT.pop("php-source", None)
+        packages = _PREBUILT_PACKAGE_CHOICES.get(
+            service_id,
+            [_PREBUILT_PACKAGES[service_id]] if service_id in _PREBUILT_PACKAGES else [],
+        )
+        for package in packages:
+            _APT_VERSION_REFRESHED_AT.pop(package, None)
+        _SELECTED_PREBUILT_PACKAGES.pop(service_id, None)
+        definition.versions = []
+    if install_method == "prebuilt" and service_id in _PREBUILT_PACKAGES:
+        packages = _PREBUILT_PACKAGE_CHOICES.get(service_id, [_PREBUILT_PACKAGES[service_id]])
+        for package in packages:
+            definition.versions = []
+            count = _refresh_apt_versions(definition, package)
+            if count:
+                _SELECTED_PREBUILT_PACKAGES[service_id] = package
+                return definition, "apt", f"Fetched {count} {definition.name} packages compatible with this OS and architecture."
+        return definition, "apt", f"No compatible prebuilt {definition.name} packages were found for this OS and architecture."
+    if service_id == "composer":
+        try:
+            count = _refresh_composer_versions(definition)
+            if count:
+                return definition, "github.com/composer", f"Fetched {count} Composer releases from the official repository."
+        except Exception:
+            pass
+        return definition, "catalog", "The Composer release catalog could not be reached. Refresh compatible versions and try again."
     if service_id == "pm2":
         cached_at = _VERSION_REFRESHED_AT.get("pm2", 0)
         if definition.versions and cached_at and time.monotonic() - cached_at < 300:
@@ -1192,6 +1563,25 @@ def refresh_service_versions(service_id: str, force: bool = False) -> tuple[Serv
         except Exception:
             pass
         return definition, "catalog", "The Python release catalog could not be reached. The saved compatibility list is still available."
+
+    if service_id == "nodejs":
+        try:
+            count = _refresh_node_versions(definition)
+            if count:
+                return definition, "nodejs.org", f"Fetched {count} Node.js binary release lines for this host architecture."
+        except Exception:
+            pass
+        return definition, "catalog", "The Node.js release catalog could not be reached. Refresh compatible versions and try again."
+
+    if service_id == "php":
+        try:
+            count = _refresh_php_source_versions(definition) if install_method == "source" else _refresh_php_versions(definition)
+            if count:
+                provider = "php.net" if install_method == "source" else "packages.sury.org"
+                return definition, provider, f"Fetched {count} PHP-FPM versions compatible with this host architecture."
+        except Exception:
+            pass
+        return definition, "catalog", "The PHP package catalog could not be reached. Refresh compatible versions and try again."
 
     if service_id == "certbot":
         try:
@@ -1486,6 +1876,8 @@ def refresh_service_versions(service_id: str, force: bool = False) -> tuple[Serv
     # architecture instead of pretending every upstream release is usable.
     package_services = {
         "fail2ban": "fail2ban",
+        "auditd": "auditd",
+        "logrotate": "logrotate",
         "docker": "docker.io",
 
         "supervisor": "supervisor", "postfix": "postfix", "dovecot": "dovecot-imapd",

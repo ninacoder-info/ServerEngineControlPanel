@@ -1,4 +1,5 @@
 import React from "react";
+import SupervisorConfigModal from "./SupervisorConfigModal";
 import {
   Activity,
   CheckCircle2,
@@ -1169,6 +1170,9 @@ export default function ServiceManagerModal({
   if (service.id === "haproxy") {
     return <HaProxyConfigModal installed={installedProp} onClose={onClose} />;
   }
+  if (service.id === "supervisor") {
+    return <SupervisorConfigModal service={service} installed={installedProp} onClose={onClose} />;
+  }
   if (service.id === "valkey") {
     return <ValkeyConfigModal installed={installedProp} onClose={onClose} />;
   }
@@ -1185,6 +1189,12 @@ export default function ServiceManagerModal({
   );
   React.useEffect(() => {
     setInstalledItems(initialInstalledItems);
+    const nextVersion =
+      initialInstalledItems.find((item) => item?.version)?.version ||
+      service.versions[0]?.version ||
+      "";
+    setVersion(nextVersion);
+    setExtensions([]);
   }, [installedProp]);
   const installed =
     installedItems.find((item) => item.status === "running") ||
@@ -1206,6 +1216,7 @@ export default function ServiceManagerModal({
   const [text, setText] = React.useState("");
   const [logs, setLogs] = React.useState(null);
   const [extensions, setExtensions] = React.useState([]);
+  const [pendingExtensions, setPendingExtensions] = React.useState(() => new Set());
   const [message, setMessage] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [action, setAction] = React.useState("");
@@ -1230,7 +1241,12 @@ export default function ServiceManagerModal({
         `server-engine:service-versions:v10:${service.id}`,
         JSON.stringify(body.versions),
       );
-      if (!body.versions.some((item) => item.version === version)) {
+      const installedVersion = initialInstalledItems.find(
+        (item) => item?.version,
+      )?.version;
+      if (installedVersion) {
+        setVersion(installedVersion);
+      } else if (!body.versions.some((item) => item.version === version)) {
         setVersion(body.versions[0].version);
       }
       if (manual) {
@@ -1248,12 +1264,17 @@ export default function ServiceManagerModal({
     setVersionsRefreshing(false);
   };
   React.useEffect(() => {
-      const cacheKey = `server-engine:service-versions:v10:${service.id}`;
+    const cacheKey = `server-engine:service-versions:v10:${service.id}`;
+    const installedVersion = initialInstalledItems.find(
+      (item) => item?.version,
+    )?.version;
     try {
       const cached = JSON.parse(window.sessionStorage.getItem(cacheKey) || "null");
       if (Array.isArray(cached) && cached.length) {
         setAvailableVersions(cached);
-        if (!cached.some((item) => item.version === version)) {
+        if (installedVersion) {
+          setVersion(installedVersion);
+        } else if (!cached.some((item) => item.version === version)) {
           setVersion(cached[0].version);
         }
         return;
@@ -1304,12 +1325,24 @@ export default function ServiceManagerModal({
   }, [tab, loadLogs]);
   React.useEffect(() => {
     if (!isPhp || tab !== "extensions" || !version) return undefined;
+    setExtensions([]);
+    setPendingExtensions(new Set());
     const load = () =>
       apiRequest(
         `/api/v1/services/php/${encodeURIComponent(version)}/extensions`,
       )
         .then((r) => (r.ok ? r.json() : null))
-        .then((value) => setExtensions(value?.extensions || []))
+        .then((value) => {
+          const nextExtensions = value?.extensions || [];
+          setExtensions(nextExtensions);
+          setPendingExtensions((current) => {
+            const next = new Set(current);
+            nextExtensions
+              .filter((extension) => extension.installed)
+              .forEach((extension) => next.delete(extension.id));
+            return next;
+          });
+        })
         .catch(() => {});
     load();
     const timer = setInterval(load, 3000);
@@ -1377,13 +1410,30 @@ export default function ServiceManagerModal({
     setBusy(false);
   }
   async function installExtension(extension) {
+    if (pendingExtensions.has(extension)) return;
+    setPendingExtensions((current) => new Set(current).add(extension));
     setBusy(true);
     const r = await apiRequest(
       `/api/v1/services/php/${encodeURIComponent(version)}/extensions/install`,
       { method: "POST", body: JSON.stringify({ extension, confirmed: true }) },
     );
     const body = r.ok ? await r.json() : { message: await readApiError(r) };
-    setMessage(body.message || "Extension installation failed.");
+    if (!r.ok) {
+      setPendingExtensions((current) => {
+        const next = new Set(current);
+        next.delete(extension);
+        return next;
+      });
+      setTerminalToast({
+        type: "error",
+        message: body.message || "Extension installation failed.",
+      });
+    } else {
+      setTerminalToast({
+        type: "success",
+        message: body.message || `PHP ${extension} installation queued.`,
+      });
+    }
     setBusy(false);
   }
   async function savePhpTerminalAccess() {
@@ -1429,7 +1479,11 @@ export default function ServiceManagerModal({
     });
     const body = r.ok ? await r.json() : { message: await readApiError(r) };
     if (!r.ok || !body.job_id) {
-      setMessage(body.message || "Service action failed.");
+      setMessage("");
+      setTerminalToast({
+        type: "error",
+        message: body.message || "Service action failed.",
+      });
       setAction("");
       return;
     }
@@ -1572,6 +1626,12 @@ export default function ServiceManagerModal({
         )}
         {tab === "extensions" && isPhp && (
           <div className="manager-pane space-y-1">
+            {!extensions.length && (
+              <p className="py-6 text-sm text-slate-500 dark:text-slate-400">
+                No extension information is available for PHP {version} yet.
+                Reload the modal after the runtime finishes installing.
+              </p>
+            )}
             {extensions.map((extension) => (
               <div
                 className="flex items-center justify-between gap-4 border-b border-slate-200 py-2.5 last:border-b-0 dark:border-slate-700"
@@ -1593,10 +1653,12 @@ export default function ServiceManagerModal({
                 ) : (
                   <button
                     className="inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1.5 text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
-                    disabled={busy}
+                    disabled={busy || pendingExtensions.has(extension.id)}
                     onClick={() => installExtension(extension.id)}
                   >
-                    {busy ? "Installing…" : "Install"}
+                    {pendingExtensions.has(extension.id)
+                      ? "Queued…"
+                      : "Install"}
                   </button>
                 )}
               </div>
@@ -1610,7 +1672,7 @@ export default function ServiceManagerModal({
                 PHP {version} in Terminal
               </h3>
               <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                Enable this version to use the isolated PHP runtime by typing <code>php</code> in new local terminal sessions. The server’s existing PHP command is not changed.
+                Enable this version to use the managed PHP runtime by typing <code>php</code> in new local terminal sessions. The server’s existing PHP command is not changed.
               </p>
             </div>
             <label className="flex cursor-pointer items-start gap-3 border-y border-slate-200 py-4 dark:border-slate-800">

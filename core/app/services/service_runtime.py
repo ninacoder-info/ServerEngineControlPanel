@@ -1,15 +1,34 @@
 import os
 import pwd
+import re
+import subprocess
 from pathlib import Path
 
-SERVICE_PACKAGES = {"nginx": "nginx", "apache": "apache2", "caddy": "caddy", "haproxy": "haproxy", "php": "php-fpm", "nodejs": "nodejs", "python": "python3", "mariadb": "mariadb-server", "mysql": "mysql-server", "postgresql": "postgresql", "redis": "redis-server", "valkey": "valkey-server", "memcached": "memcached", "certbot": "certbot", "vsftpd": "vsftpd", "fail2ban": "fail2ban", "powerdns": "pdns-server", "rabbitmq": "rabbitmq-server", "docker": "docker.io", "postfix": "postfix", "dovecot": "dovecot-imapd", "rspamd": "rspamd", "bind9": "bind9", "unbound": "unbound", "clamav": "clamav", "auditd": "auditd", "logrotate": "logrotate", "node-exporter": "prometheus-node-exporter", "modsecurity": "libmodsecurity3"}
+SERVICE_PACKAGES = {"nginx": "nginx", "apache": "apache2", "caddy": "caddy", "haproxy": "haproxy", "php": "php-fpm", "nodejs": "nodejs", "python": "python3", "mariadb": "mariadb-server", "mysql": "mysql-server", "postgresql": "postgresql", "redis": "redis-server", "valkey": "valkey-server", "memcached": "memcached", "certbot": "certbot", "vsftpd": "vsftpd", "fail2ban": "fail2ban", "powerdns": "pdns-server", "rabbitmq": "rabbitmq-server", "docker": "docker.io", "postfix": "postfix", "dovecot": "dovecot-imapd", "rspamd": "rspamd", "bind9": "bind9", "unbound": "unbound", "clamav": "clamav", "auditd": "auditd", "logrotate": "logrotate", "node-exporter": "prometheus-node-exporter", "modsecurity": "libmodsecurity3", "git": "git", "imagemagick": "imagemagick", "ffmpeg": "ffmpeg", "ruby": "ruby", "supervisor": "supervisor", "lynis": "lynis"}
 SERVICE_BINARIES = {"nginx": "usr/sbin/nginx", "apache": "usr/sbin/apache2", "openlitespeed": "usr/local/lsws/bin/lshttpd", "caddy": "usr/bin/caddy", "haproxy": "usr/sbin/haproxy", "php": "usr/sbin/php-fpm8.2", "nodejs": "usr/bin/node", "python": "usr/bin/python3", "ruby": "usr/bin/ruby", "mariadb": "usr/sbin/mariadbd", "mysql": "bin/mysqld", "postgresql": "usr/lib/postgresql/15/bin/postgres", "redis": "usr/bin/redis-server", "valkey": "usr/bin/valkey-server", "memcached": "usr/bin/memcached", "certbot": "usr/bin/certbot", "vsftpd": "usr/sbin/vsftpd", "fail2ban": "usr/bin/fail2ban-server", "powerdns": "usr/sbin/pdns_server", "rabbitmq": "sbin/rabbitmq-server", "stalwart": "bin/stalwart", "mongodb": "bin/mongod", "opensearch": "bin/opensearch", "wp-cli": "bin/wp", "postfix": "bin/postfix", "dovecot": "sbin/dovecot", "rspamd": "bin/rspamd", "bind9": "sbin/named", "unbound": "sbin/unbound", "clamav": "bin/clamscan", "supervisor": "venv/bin/supervisord", "lynis": "bin/lynis"}
+
+
+def version_sort_key(value: str) -> tuple:
+    return tuple((0, int(part)) if part.isdigit() else (1, part) for part in re.split(r"[._+~-]", value))
 
 
 def service_root(service_id: str, version: str | None = None) -> Path:
     if service_id in {"php", "nodejs", "python", "openssl"} and version:
         safe_version = version.replace("/", "-").replace("\\", "-")
-        return Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / service_id / "versions" / safe_version
+        versions_root = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / service_id / "versions"
+        requested = versions_root / safe_version
+        if service_id != "php" or requested.exists():
+            return requested
+        # Package providers may install a minor-version directory (for
+        # example 8.5) while their metadata records the exact patch release.
+        # Resolve that metadata back to the real managed runtime directory.
+        for candidate in versions_root.iterdir() if versions_root.exists() else ():
+            if not candidate.is_dir():
+                continue
+            marker = candidate / ".serverengine-version"
+            if marker.exists() and marker.read_text(errors="replace").strip() == version:
+                return candidate
+        return requested
     return Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / service_id
 
 
@@ -44,6 +63,9 @@ def binary_path(service_id: str, version: str | None = None) -> Path:
         return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
     if service_id == "redis":
         candidates = [root / "bin/redis-server", root / "usr/bin/redis-server"]
+        return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    if service_id == "mysql":
+        candidates = [root / "bin/mysqld", root / "usr/sbin/mysqld", root / "usr/libexec/mysqld", root / "usr/lib/mysql/mysqld"]
         return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
     if service_id == "certbot":
         candidates = [root / "venv/bin/certbot", root / "usr/bin/certbot", root / "bin/certbot"]
@@ -99,6 +121,9 @@ def binary_path(service_id: str, version: str | None = None) -> Path:
     if service_id == "wp-cli":
         candidates = [root / "versions" / "current" / "bin/wp", root / "bin/wp"]
         return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    if service_id == "pm2":
+        candidates = [root / "bin/pm2", root / "node_modules/.bin/pm2"]
+        return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
     if service_id == "postfix":
         candidates = [root / "bin/postfix", root / "usr/sbin/postfix"]
         return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
@@ -124,7 +149,7 @@ def binary_path(service_id: str, version: str | None = None) -> Path:
         candidates = [root / "bin/lynis", root / "lynis"]
         return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
     if service_id == "php" and version:
-        candidates = sorted(root.glob("usr/sbin/php-fpm*")) + sorted(root.glob("usr/bin/php-fpm*"))
+        candidates = sorted(root.glob("usr/sbin/php-fpm*")) + sorted(root.glob("usr/bin/php-fpm*")) + sorted(root.glob("sbin/php-fpm*"))
         return candidates[0] if candidates else root / "usr/sbin/php-fpm"
     return root / SERVICE_BINARIES.get(service_id, f"usr/bin/{service_id}")
 
@@ -162,24 +187,99 @@ def php_cli_path(version: str) -> Path:
     return next((candidate for candidate in candidates if candidate.exists()), root / f"usr/bin/php{version}")
 
 
+def php_runtime_library_path(root: Path) -> str:
+    paths = {root / "lib", root / "lib64", root / "usr/lib", root / "usr/lib64"}
+    paths.update(
+        library.parent
+        for library in root.rglob("*.so*")
+        if library.is_file() or library.is_symlink()
+    )
+    return ":".join(str(path) for path in sorted(paths) if path.exists())
+
+
+def detect_php_runtime_version(root: Path) -> str | None:
+    candidates = [
+        root / "usr/bin/php",
+        *sorted(root.glob("usr/bin/php8.*")),
+        root / "bin/php",
+        *sorted(root.glob("bin/php8.*")),
+    ]
+    environment = {**os.environ, "LD_LIBRARY_PATH": php_runtime_library_path(root)}
+    for candidate in candidates:
+        if not candidate.exists():
+            continue
+        try:
+            result = subprocess.run(
+                [str(candidate), "-n", "-r", "echo PHP_VERSION;"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+                env=environment,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        match = re.search(r"\b(\d+\.\d+\.\d+)\b", result.stdout or "")
+        if match:
+            return match.group(1)
+    return None
+
+
+def normalize_php_runtime_layout(root: Path) -> tuple[Path, str | None]:
+    """Use the real PHP patch version as the runtime directory and CLI name."""
+    detected = detect_php_runtime_version(root)
+    if not detected:
+        return root, None
+    target = root.parent / detected
+    if target != root and not target.exists():
+        root.rename(target)
+        root = target
+    cli = root / "usr/bin/php"
+    if not cli.exists():
+        candidates = [root / "bin/php"] + sorted(root.glob("usr/bin/php8.*")) + sorted(root.glob("bin/php8.*"))
+        candidates = [candidate for candidate in candidates if candidate.exists()]
+        if candidates:
+            cli.parent.mkdir(parents=True, exist_ok=True)
+            candidates[0].rename(cli)
+    (root / ".serverengine-version").write_text(detected + "\n")
+    return root, detected
+
+
+def ensure_php_runtime_launcher(version: str) -> Path:
+    """Make the copied PHP executable carry its isolated library search path."""
+    root = service_root("php", version)
+    cli = php_cli_path(version)
+    if not cli.exists() or cli.read_bytes()[:2] == b"#!":
+        return cli
+    real_cli = cli.with_name(f"{cli.name}.bin")
+    if not real_cli.exists():
+        cli.rename(real_cli)
+    libraries = php_runtime_library_path(root)
+    cli.write_text(
+        "#!/bin/sh\n"
+        f"export LD_LIBRARY_PATH=\"{libraries}:$LD_LIBRARY_PATH\"\n"
+        f"export PHP_INI_SCAN_DIR=\"{root / 'conf/conf.d'}\"\n"
+        f"exec \"{real_cli}\" -c \"{root / 'conf/php.ini'}\" \"$@\"\n"
+    )
+    cli.chmod(0o755)
+    return cli
+
+
 def ensure_php_terminal_launcher(version: str) -> Path:
     """Create the isolated version's `php` command without touching the host PATH."""
     root = service_root("php", version)
-    cli = php_cli_path(version)
+    cli = ensure_php_runtime_launcher(version)
     launcher = root / "usr/bin/php"
     if not cli.exists():
         return launcher
     launcher.parent.mkdir(parents=True, exist_ok=True)
     launcher_is_script = launcher.exists() and not launcher.is_symlink() and launcher.is_file() and launcher.read_bytes()[:2] == b"#!"
     if not launcher.exists() or launcher.is_symlink() or launcher_is_script:
-        library_paths = {root / "lib", root / "lib64", root / "usr/lib", root / "usr/lib64"}
-        for library in root.rglob("*.so*"):
-            if library.is_file() or library.is_symlink():
-                library_paths.add(library.parent)
-        libraries = ":".join(str(path) for path in library_paths if path.exists())
+        libraries = php_runtime_library_path(root)
         launcher.write_text(
             "#!/bin/sh\n"
             f"export LD_LIBRARY_PATH=\"{libraries}:$LD_LIBRARY_PATH\"\n"
+            f"export PHP_INI_SCAN_DIR=\"{root / 'conf/conf.d'}\"\n"
             f"exec \"{cli}\" -c \"{root / 'conf/php.ini'}\" \"$@\"\n"
         )
         launcher.chmod(0o755)
@@ -188,7 +288,7 @@ def ensure_php_terminal_launcher(version: str) -> Path:
 
 def composer_path() -> Path:
     root = service_root("composer") / "versions"
-    candidates = sorted(root.glob("*/bin/composer"), reverse=True)
+    candidates = sorted(root.glob("*/bin/composer"), key=lambda path: version_sort_key(path.parent.parent.name), reverse=True)
     return candidates[0] if candidates else root / "current/bin/composer"
 
 
@@ -213,8 +313,14 @@ def ensure_composer_cache() -> Path:
 def ensure_composer_launcher() -> Path:
     """Refresh the Composer launcher so it always loads the managed PHP config."""
     versions_root = service_root("php") / "versions"
-    php_versions = sorted((item for item in versions_root.iterdir() if item.is_dir()), reverse=True) if versions_root.exists() else []
-    php_version = next((item.name for item in php_versions if php_cli_path(item.name).exists()), None)
+    php_versions = sorted((item for item in versions_root.iterdir() if item.is_dir()), key=lambda item: version_sort_key(item.name), reverse=True) if versions_root.exists() else []
+    composer_root = service_root("composer")
+    selected_marker = composer_root / ".serverengine-php-version"
+    selected = selected_marker.read_text(errors="replace").strip() if selected_marker.exists() else ""
+    php_version = selected if selected and php_cli_path(selected).exists() else next((item.name for item in php_versions if php_cli_path(item.name).exists()), None)
+    if php_version and php_version != selected:
+        selected_marker.parent.mkdir(parents=True, exist_ok=True)
+        selected_marker.write_text(php_version + "\n")
     launcher = composer_path()
     if not php_version or not launcher.exists():
         return launcher
@@ -224,16 +330,31 @@ def ensure_composer_launcher() -> Path:
     library_paths = {php_root / "lib", php_root / "lib64", php_root / "usr/lib", php_root / "usr/lib64"}
     library_paths.update(library.parent for library in php_root.rglob("*.so*") if library.is_file() or library.is_symlink())
     libraries = ":".join(str(path) for path in library_paths if path.exists())
-    extension_dir = next(iter(sorted(php_root.glob("usr/lib/php/*"))), None)
+    extension_dir = next(
+        (
+            candidate
+            for base in (php_root / "usr/lib/php", php_root / "lib/php", php_root / "lib64/php")
+            if base.exists()
+            for candidate in sorted(base.iterdir())
+            if candidate.is_dir()
+        ),
+        None,
+    )
     extensions = [module for module in ("phar.so", "iconv.so") if extension_dir and (extension_dir / module).exists()]
     extension_flags = " ".join(f'-d extension="{extension_dir / module}"' for module in extensions)
     extension_options = f' -d extension_dir="{extension_dir}" {extension_flags}' if extension_dir else ""
     archive = launcher.parent.parent / "composer.phar"
     php_ini = php_root / "conf/php.ini"
     composer_home = ensure_composer_cache()
-    launcher.write_text(f'#!/bin/sh\nexport LD_LIBRARY_PATH="{libraries}:$LD_LIBRARY_PATH"\nexport COMPOSER_HOME="{composer_home}"\nexec "{php}" -c "{php_ini}"{extension_options} "{archive}" "$@"\n')
+    launcher.write_text(f'#!/bin/sh\nexport LD_LIBRARY_PATH="{libraries}:$LD_LIBRARY_PATH"\nexport PHP_INI_SCAN_DIR="{php_root / "conf/conf.d"}"\nexport COMPOSER_HOME="{composer_home}"\nexec "{php}" -c "{php_ini}"{extension_options} "{archive}" "$@"\n')
     launcher.chmod(0o755)
     return launcher
+
+
+def composer_php_version() -> str | None:
+    ensure_composer_launcher()
+    marker = service_root("composer") / ".serverengine-php-version"
+    return marker.read_text(errors="replace").strip() if marker.exists() else None
 
 
 def php_fpm_paths(version: str) -> dict[str, Path]:
@@ -246,6 +367,7 @@ PHP_BASELINE_MODULES = {
     "gd": ("gd",),
     "intl": ("intl",),
     "mbstring": ("mbstring",),
+    "pdo": ("pdo",),
     "mysql": ("mysqlnd", "mysqli", "pdo_mysql"),
     "opcache": ("opcache",),
     "pgsql": ("pgsql", "pdo_pgsql"),
@@ -255,7 +377,10 @@ PHP_BASELINE_MODULES = {
     "zip": ("zip",),
     "bcmath": ("bcmath",),
     "fileinfo": ("fileinfo",),
+    "phar": ("phar",),
 }
+
+PHP_REQUIRED_EXTENSIONS = ("fileinfo", "mysql", "pgsql", "zip", "curl", "mbstring")
 
 
 def php_default_ini(version: str, error_log: Path, root: Path | None = None) -> str:
@@ -264,6 +389,11 @@ def php_default_ini(version: str, error_log: Path, root: Path | None = None) -> 
         base = production_file.read_text(errors="replace").rstrip()
     else:
         base = "[PHP]"
+    runtime_root = root or error_log.parents[1]
+    extension_dir = php_extension_dir(runtime_root)
+    local_include_path = runtime_root / "usr/share/php"
+    session_path = runtime_root / "var/lib/php/sessions"
+    temp_path = runtime_root / "tmp"
     return base + f'''\n\n; Server Engine Laravel and WordPress production defaults for PHP {version}
 engine = On
 short_open_tag = Off
@@ -288,6 +418,13 @@ max_file_uploads = 50
 default_socket_timeout = 60
 date.timezone = UTC
 
+; Keep this runtime independent from host PHP configuration.
+extension_dir = "{extension_dir}"
+include_path = ".:{local_include_path}"
+session.save_path = "{session_path}"
+sys_temp_dir = "{temp_path}"
+upload_tmp_dir = "{temp_path}"
+
 session.use_strict_mode = 1
 session.cookie_httponly = 1
 session.cookie_samesite = Lax
@@ -306,23 +443,109 @@ opcache.save_comments = 1
 '''
 
 
+def php_extension_dir(root: Path) -> Path:
+    """Find the extension directory inside one managed PHP prefix."""
+    candidates = []
+    for base in (root / "usr/lib/php", root / "lib/php", root / "lib64/php"):
+        if base.exists():
+            candidates.extend(path for path in base.rglob("*") if path.is_dir() and any(path.glob("*.so")))
+    return sorted(candidates, key=lambda path: len(path.parts))[0] if candidates else root / "usr/lib/php"
+
+
+def ensure_php_runtime_configuration(version: str) -> None:
+    """Repair host-derived PHP defaults after package extraction or upgrades."""
+    paths = php_fpm_paths(version)
+    root = paths["root"]
+    extension_dir = php_extension_dir(root)
+    local_include_path = root / "usr/share/php"
+    session_path = root / "var/lib/php/sessions"
+    temp_path = root / "tmp"
+    for directory in (root / "conf/conf.d", local_include_path, session_path, temp_path, root / "var/cache/php/opcache"):
+        directory.mkdir(parents=True, exist_ok=True)
+    content = paths["ini"].read_text(errors="replace") if paths["ini"].exists() else "[PHP]\n"
+    directives = {
+        "extension_dir": f'"{extension_dir}"',
+        "include_path": f'".:{local_include_path}"',
+        "session.save_path": f'"{session_path}"',
+        "sys_temp_dir": f'"{temp_path}"',
+        "upload_tmp_dir": f'"{temp_path}"',
+        "opcache.file_cache": f'"{root / "var/cache/php/opcache"}"',
+    }
+    lines = content.splitlines()
+    for key, value in directives.items():
+        lines = [line for line in lines if not re.match(rf"^\s*;?\s*{re.escape(key)}\s*=", line)]
+        lines.append(f"{key} = {value}")
+    paths["ini"].write_text("\n".join(lines).rstrip() + "\n")
+    # Package extraction does not install Debian's /etc/php conf.d links.
+    # Enable the modules from this prefix directly in the managed ini.
+    enable_php_baseline_extensions(version)
+
+
 def enable_php_baseline_extensions(version: str) -> list[str]:
     paths = php_fpm_paths(version)
     ini = paths["ini"]
     content = ini.read_text(errors="replace") if ini.exists() else ""
+    module_files = []
+    for module_root in (
+        paths["root"] / "usr/lib/php",
+        paths["root"] / "lib/php",
+        paths["root"] / "lib64/php",
+    ):
+        if module_root.exists():
+            module_files.extend(module_root.rglob("*.so"))
     enabled = []
     for feature, modules in PHP_BASELINE_MODULES.items():
         for module in modules:
-            shared_object = next(paths["root"].glob(f"usr/lib/php/*/{module}.so"), None)
+            shared_object = next(
+                (candidate for candidate in module_files if candidate.name == f"{module}.so"),
+                None,
+            )
             if not shared_object:
                 continue
             directive = "zend_extension" if module == "opcache" else "extension"
             line = f"{directive}={shared_object}"
             if line not in content:
                 content = content.rstrip() + "\n" + line + "\n"
+            if feature == "pdo":
+                lines = [item for item in content.splitlines() if item.strip() != line]
+                content = line + "\n" + "\n".join(lines).rstrip() + "\n"
             enabled.append(feature)
     ini.write_text(content)
     return sorted(set(enabled))
+
+
+def ensure_php_runtime_permissions(version: str) -> None:
+    """Give the managed PHP worker account ownership of its writable paths."""
+    root = service_root("php", version)
+    try:
+        account = pwd.getpwnam("serverengine")
+    except KeyError as error:
+        raise RuntimeError("The serverengine service account is required for PHP-FPM") from error
+
+    writable = (
+        root / "conf",
+        root / "logs",
+        root / "run",
+        root / "www",
+        root / "data",
+        root / "tmp",
+    )
+    for path in writable:
+        path.mkdir(parents=True, exist_ok=True)
+        try:
+            os.chown(path, account.pw_uid, account.pw_gid)
+        except OSError:
+            # A non-root development process may not be able to change an
+            # existing owner. The service will still use the account when the
+            # installer runs with the required privileges.
+            pass
+        for current, directories, files in os.walk(path):
+            for name in (*directories, *files):
+                item = Path(current) / name
+                try:
+                    os.chown(item, account.pw_uid, account.pw_gid)
+                except OSError:
+                    pass
 
 
 def ensure_php_fpm_layout(version: str) -> dict[str, Path]:
@@ -341,10 +564,31 @@ def ensure_php_fpm_layout(version: str) -> dict[str, Path]:
         legacy_ini = "[PHP]\nexpose_php=Off\nmemory_limit=256M\nlog_errors=On\nerror_log="
         if current_ini.startswith(legacy_ini):
             paths["ini"].write_text(php_default_ini(version, paths["error_log"], paths["root"]))
+    runtime_user = None
+    for account in ("serverengine", "www-data", "nobody"):
+        try:
+            runtime_user = pwd.getpwnam(account).pw_name
+            break
+        except KeyError:
+            continue
+    if runtime_user is None:
+        current_user = pwd.getpwuid(os.geteuid()).pw_name
+        if current_user != "root":
+            runtime_user = current_user
+        else:
+            raise RuntimeError("PHP-FPM requires a non-root pool account; serverengine, www-data, or nobody is missing")
     if not paths["pool"].exists():
-        paths["pool"].write_text("[www]\nuser = serverengine\ngroup = serverengine\nlisten = " + str(paths["socket"]) + "\nlisten.owner = serverengine\nlisten.group = serverengine\npm = dynamic\npm.max_children = 20\npm.start_servers = 2\npm.min_spare_servers = 1\npm.max_spare_servers = 5\npm.max_requests = 500\nrequest_terminate_timeout = 300s\ncatch_workers_output = yes\nclear_env = no\nphp_admin_flag[log_errors] = on\nphp_admin_value[error_log] = " + str(paths["error_log"]) + "\n")
+        paths["pool"].write_text("[www]\nuser = " + runtime_user + "\ngroup = " + runtime_user + "\nlisten = " + str(paths["socket"]) + "\nlisten.owner = " + runtime_user + "\nlisten.group = " + runtime_user + "\npm = dynamic\npm.max_children = 20\npm.start_servers = 2\npm.min_spare_servers = 1\npm.max_spare_servers = 5\npm.max_requests = 500\nrequest_terminate_timeout = 300s\ncatch_workers_output = yes\nclear_env = yes\nphp_admin_flag[log_errors] = on\nphp_admin_value[error_log] = " + str(paths["error_log"]) + "\n")
+    else:
+        pool = paths["pool"].read_text(errors="replace")
+        updated_pool = re.sub(r"^(user|group|listen\.owner|listen\.group)\s*=\s*(?:serverengine|www-data|nobody|root)\s*$", lambda match: f"{match.group(1)} = {runtime_user}", pool, flags=re.MULTILINE)
+        updated_pool = re.sub(r"^clear_env\s*=\s*no\s*$", "clear_env = yes", updated_pool, flags=re.MULTILINE)
+        if updated_pool != pool:
+            paths["pool"].write_text(updated_pool)
     if not paths["config"].exists():
         paths["config"].write_text("[global]\npid = " + str(paths["pid"]) + "\nerror_log = " + str(paths["error_log"]) + "\ninclude = " + str(paths["pool"]) + "\n")
+    ensure_php_runtime_configuration(version)
+    ensure_php_runtime_permissions(version)
     return paths
 
 
@@ -445,4 +689,21 @@ def ensure_nginx_layout() -> dict[str, Path]:
         if legacy_signature in config and "gzip on;" not in config and "client_max_body_size" not in config:
             config = nginx_default_configuration(paths)
         paths["config"].write_text(config)
+    try:
+        owner = pwd.getpwnam("serverengine")
+        for directory in (
+            paths["root"] / "data",
+            paths["root"] / "run",
+            paths["root"] / "logs",
+            paths["root"] / "conf/sites",
+            paths["www"],
+        ):
+            for current, directories, files in os.walk(directory):
+                for name in (current, *directories, *files):
+                    try:
+                        os.chown(Path(current) / name if name != current else Path(current), owner.pw_uid, owner.pw_gid)
+                    except OSError:
+                        pass
+    except KeyError:
+        pass
     return paths

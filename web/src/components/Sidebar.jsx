@@ -59,7 +59,10 @@ const sections = [
   ],
   [
     "Automation",
-    [["Cron jobs", "/cronjobs", CalendarClock]],
+    [
+      ["Cron jobs", "/cronjobs", CalendarClock],
+      ["Supervisor", "/supervisor", Activity],
+    ],
   ],
   [
     "Accounts & plans",
@@ -95,17 +98,21 @@ export default function Sidebar({ open, onClose, active, onSelect }) {
             </p>
             <div className="space-y-1">
               {items.map(([label, path, Icon]) => (
-                <button
+                <a
                   key={path}
-                  className={`nav-item ${active === label ? "nav-active" : ""}`}
-                  onClick={() => {
+                  href={path}
+                  title={`${label} · ${path}`}
+                  aria-label={label}
+                  className={`nav-item no-underline ${active === label ? "nav-active" : ""}`}
+                  onClick={(event) => {
+                    event.preventDefault();
                     onSelect(path);
                     onClose();
                   }}
                 >
                   <Icon size={16} />
                   {label}
-                </button>
+                </a>
               ))}
             </div>
           </div>
