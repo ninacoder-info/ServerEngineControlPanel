@@ -10,6 +10,16 @@ import ApacheConfigModal from "./ApacheConfigModal";
 import NginxConfigModal from "./NginxConfigModal";
 import ComposerConfigModal from "./ComposerConfigModal";
 import { VsftpdConfigModal } from "../ftp/FTPPage";
+import PowerDnsConfigModal from "./PowerDnsConfigModal";
+import SupervisorWorkspace from "./SupervisorWorkspace";
+import Pm2Workspace from "./Pm2Workspace";
+import RabbitMqWorkspace from "./RabbitMqWorkspace";
+import OpenSearchWorkspace from "./OpenSearchWorkspace";
+import DockerWorkspace from "./DockerWorkspace";
+import GitWorkspace from "./GitWorkspace";
+import WpCliWorkspace from "./WpCliWorkspace";
+import ImageMagickWorkspace from "./ImageMagickWorkspace";
+import FfmpegWorkspace from "./FfmpegWorkspace";
 
 export default function ServicesPage() {
   const [catalog, setCatalog] = React.useState([]);
@@ -132,6 +142,15 @@ export default function ServicesPage() {
           ))}
         </select>
       </div>
+      {window.location.hash === "#supervisor" && <SupervisorWorkspace />}
+      {window.location.hash === "#pm2" && <Pm2Workspace />}
+      {window.location.hash === "#rabbitmq" && <RabbitMqWorkspace />}
+      {window.location.hash === "#opensearch" && <OpenSearchWorkspace />}
+      {window.location.hash === "#docker" && <DockerWorkspace />}
+      {window.location.hash === "#git" && <GitWorkspace />}
+      {window.location.hash === "#wp-cli" && <WpCliWorkspace />}
+      {window.location.hash === "#imagemagick" && <ImageMagickWorkspace />}
+      {window.location.hash === "#ffmpeg" && <FfmpegWorkspace />}
       <div className="service-grid">
         {visible.map((service) => {
           const matches = matchesFor(service);
@@ -242,6 +261,12 @@ export default function ServicesPage() {
               setFtpConfig((current) => ({ ...current, settings }));
               setManage(null);
             }}
+          />
+        ) : manage.service.id === "powerdns" ? (
+          <PowerDnsConfigModal
+            service={manage.service}
+            installed={manage.versions}
+            onClose={() => setManage(null)}
           />
         ) : (
           <ServiceManagerModal

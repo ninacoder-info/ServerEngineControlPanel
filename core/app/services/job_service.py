@@ -7,7 +7,9 @@ import tarfile
 import urllib.request
 import re
 import shutil
+import shlex
 import subprocess
+import time
 from pathlib import Path
 from threading import Event, Thread
 from threading import Lock
@@ -104,6 +106,33 @@ class JobStore:
             return
         if service_id == "vsftpd":
             self._run_vsftpd_action(job_id, action)
+            return
+        if service_id == "powerdns":
+            self._run_powerdns_action(job_id, action)
+            return
+        if service_id == "openlitespeed":
+            self._run_openlitespeed_action(job_id, action)
+            return
+        if service_id == "caddy":
+            self._run_caddy_action(job_id, action)
+            return
+        if service_id == "haproxy":
+            self._run_haproxy_action(job_id, action)
+            return
+        if service_id == "postgresql":
+            self._run_postgresql_action(job_id, action)
+            return
+        if service_id == "redis":
+            self._run_redis_action(job_id, action)
+            return
+        if service_id == "valkey":
+            self._run_valkey_action(job_id, action)
+            return
+        if service_id == "fail2ban":
+            self._run_fail2ban_action(job_id, action)
+            return
+        if service_id == "memcached":
+            self._run_memcached_action(job_id, action)
             return
         if service_id == "nodejs" and action == "uninstall":
             root = service_root("nodejs", version)
@@ -234,6 +263,328 @@ class JobStore:
         except Exception as error:
             self._update(job_id, status="failed", message=str(error))
 
+    def _run_powerdns_action(self, job_id: str, action: str):
+        root = service_root("powerdns")
+        binary = Path(shutil.which("pdns_server") or "/usr/sbin/pdns_server")
+        config_dir = root / "conf"
+        config = config_dir / "pdns.conf"
+        log_file = root / "logs/pdns.log"
+        try:
+            if not binary.exists():
+                raise RuntimeError("PowerDNS is not installed")
+            config_dir.mkdir(parents=True, exist_ok=True)
+            log_file.parent.mkdir(parents=True, exist_ok=True)
+            if not config.exists():
+                config.write_text("launch=local\nlocal-address=0.0.0.0\nlocal-port=53\n")
+            if action in {"stop", "restart"}:
+                self._stop_process_by_binary(binary)
+            if action == "stop":
+                self._update(job_id, status="succeeded", message="PowerDNS stopped.", log=[])
+                return
+            command = [str(binary), "--daemon=no", "--config-dir", str(config_dir)]
+            self._update(job_id, status="running", message=f"Starting PowerDNS with {config}…", log=[])
+            with log_file.open("a") as stream:
+                process = subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True)
+            import time
+            time.sleep(0.4)
+            if process.poll() is not None:
+                raise RuntimeError(f"PowerDNS exited with code {process.returncode}; inspect {log_file}")
+            self._update(job_id, status="succeeded", message=f"PowerDNS {action} completed.", log=[])
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+
+    def _run_openlitespeed_action(self, job_id: str, action: str):
+        root = service_root("openlitespeed")
+        binary = binary_path("openlitespeed")
+        config = root / "conf/httpd_config.conf"
+        if not binary.exists():
+            self._update(job_id, status="failed", message="OpenLiteSpeed is not installed.")
+            return
+        commands = {
+            "start": [str(binary), "-c", str(config)],
+            "stop": [str(binary), "-c", str(config), "-s", "stop"],
+            "restart": [str(binary), "-c", str(config), "-s", "restart"],
+        }
+        command = commands.get(action)
+        if not command:
+            self._update(job_id, status="failed", message=f"Unsupported OpenLiteSpeed action: {action}.")
+            return
+        result = subprocess.run(command, capture_output=True, text=True, check=False, timeout=30)
+        if result.returncode != 0:
+            self._update(job_id, status="failed", message=(result.stderr or result.stdout).strip() or "OpenLiteSpeed action failed.")
+            return
+        self._update(job_id, status="succeeded", message=f"OpenLiteSpeed {action} completed.", log=(result.stdout or result.stderr).splitlines()[-50:])
+
+    def _run_caddy_action(self, job_id: str, action: str):
+        root = service_root("caddy")
+        binary = binary_path("caddy")
+        config = root / "conf/Caddyfile"
+        log_file = root / "logs/caddy.log"
+        pid_file = root / "run/caddy.pid"
+        try:
+            if not binary.exists():
+                raise RuntimeError("Caddy is not installed")
+            for path in (config.parent, log_file.parent, pid_file.parent, root / "data", root / "www"):
+                path.mkdir(parents=True, exist_ok=True)
+            if action in {"stop", "restart"}:
+                self._stop_process_by_binary(binary, pid_file)
+            if action == "stop":
+                self._update(job_id, status="succeeded", message="Caddy stopped.", log=[])
+                return
+            if action not in {"start", "restart"}:
+                raise RuntimeError(f"Unsupported Caddy action: {action}")
+            command = [str(binary), "run", "--config", str(config), "--adapter", "caddyfile", "--data-dir", str(root / "data")]
+            self._update(job_id, status="running", message=f"Starting Caddy with {config}…", log=[])
+            stream = log_file.open("a")
+            process = subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True, cwd=root)
+            import time
+            time.sleep(0.5)
+            if process.poll() is not None:
+                stream.close()
+                raise RuntimeError(f"Caddy exited with code {process.returncode}; inspect {log_file}")
+            pid_file.write_text(str(process.pid))
+            self._update(job_id, status="succeeded", message=f"Caddy {action} completed.", log=[])
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+
+    def _run_haproxy_action(self, job_id: str, action: str):
+        root = service_root("haproxy")
+        binary = binary_path("haproxy")
+        config = root / "conf/haproxy.cfg"
+        log_file = root / "logs/haproxy.log"
+        pid_file = root / "run/haproxy.pid"
+        try:
+            if not binary.exists():
+                raise RuntimeError("HAProxy is not installed")
+            for path in (config.parent, log_file.parent, pid_file.parent, root / "run"):
+                path.mkdir(parents=True, exist_ok=True)
+            if action in {"stop", "restart"}:
+                self._stop_process_by_binary(binary, pid_file)
+            if action == "stop":
+                self._update(job_id, status="succeeded", message="HAProxy stopped.", log=[])
+                return
+            if action not in {"start", "restart"}:
+                raise RuntimeError(f"Unsupported HAProxy action: {action}")
+            check = subprocess.run([str(binary), "-c", "-f", str(config)], capture_output=True, text=True, check=False)
+            if check.returncode != 0:
+                raise RuntimeError((check.stderr or check.stdout).strip() or "HAProxy configuration validation failed.")
+            command = [str(binary), "-db", "-f", str(config), "-p", str(pid_file)]
+            self._update(job_id, status="running", message=f"Starting HAProxy with {config}…", log=[])
+            stream = log_file.open("a")
+            process = subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True, cwd=root)
+            import time
+            time.sleep(0.5)
+            if process.poll() is not None:
+                stream.close()
+                raise RuntimeError(f"HAProxy exited with code {process.returncode}; inspect {log_file}")
+            self._update(job_id, status="succeeded", message=f"HAProxy {action} completed.", log=[])
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+
+    def _run_postgresql_action(self, job_id: str, action: str):
+        root = service_root("postgresql")
+        binary = binary_path("postgresql")
+        data = root / "data"
+        config_dir = root / "conf"
+        config = config_dir / "postgresql.conf"
+        hba = config_dir / "pg_hba.conf"
+        log_file = root / "logs/postgresql.log"
+        pid_file = root / "run/postmaster.pid"
+        try:
+            if not binary.exists():
+                raise RuntimeError("PostgreSQL is not installed in the managed service root")
+            initdb = binary.parent / "initdb"
+            user = self._ensure_service_user()
+            for path in (data, config_dir, log_file.parent, pid_file.parent):
+                path.mkdir(parents=True, exist_ok=True)
+            if not config.exists():
+                config.write_text("listen_addresses = '127.0.0.1'\nport = 5432\nlogging_collector = on\n")
+            if not hba.exists():
+                hba.write_text("local all all scram-sha-256\nhost all all 127.0.0.1/32 scram-sha-256\n")
+            if action in {"stop", "restart"}:
+                self._stop_process_by_binary(binary, pid_file)
+            if action == "stop":
+                self._update(job_id, status="succeeded", message="PostgreSQL stopped.", log=[])
+                return
+            if not (data / "PG_VERSION").exists():
+                if not initdb.exists():
+                    raise RuntimeError("PostgreSQL initdb was not found in the managed service root")
+                initialize_command = [str(initdb), "-D", str(data), "--auth-local=scram-sha-256", "--auth-host=scram-sha-256", "--no-locale", "--encoding=UTF8"]
+                if os.geteuid() == 0 and shutil.which("runuser"):
+                    initialize_command = ["runuser", "-u", user, "--", *initialize_command]
+                initialize = subprocess.run(initialize_command, capture_output=True, text=True, check=False)
+                if initialize.returncode != 0:
+                    raise RuntimeError((initialize.stderr or initialize.stdout).strip() or "PostgreSQL data directory initialization failed")
+            subprocess.run(["chown", "-R", f"{user}:{user}", str(data), str(config_dir), str(log_file.parent)], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            command = [str(binary), "-D", str(data), "-c", f"config_file={config}", "-c", f"hba_file={hba}", "-k", str(root / "run")]
+            if os.geteuid() == 0 and shutil.which("runuser"):
+                command = ["runuser", "-u", user, "--", *command]
+            self._update(job_id, status="running", message=f"Starting PostgreSQL with {config}…", log=[])
+            with log_file.open("a") as stream:
+                process = subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True)
+            import time
+            time.sleep(0.8)
+            if process.poll() is not None:
+                details = log_file.read_text(errors="replace").splitlines()[-20:]
+                raise RuntimeError(f"PostgreSQL exited during startup: {' | '.join(details) if details else process.returncode}")
+            self._update(job_id, status="succeeded", message=f"PostgreSQL {action} completed.", log=log_file.read_text(errors="replace").splitlines()[-80:])
+        except Exception as error:
+            details = log_file.read_text(errors="replace").splitlines()[-80:] if log_file.exists() else []
+            self._update(job_id, status="failed", message=str(error), log=details)
+
+    def _run_fail2ban_action(self, job_id: str, action: str):
+        root = service_root("fail2ban")
+        server = binary_path("fail2ban")
+        client = root / "usr/bin/fail2ban-client"
+        if not client.exists():
+            client = Path(shutil.which("fail2ban-client") or str(client))
+        config = root / "conf/jail.local"
+        log_file = root / "logs/fail2ban.log"
+        try:
+            if not server.exists():
+                raise RuntimeError("Fail2ban is not installed")
+            for path in (config.parent, log_file.parent, root / "run"):
+                path.mkdir(parents=True, exist_ok=True)
+            if action == "stop":
+                result = subprocess.run([str(client), "stop"], capture_output=True, text=True, check=False)
+                if result.returncode != 0:
+                    self._stop_process_by_binary(server)
+                self._update(job_id, status="succeeded", message="Fail2ban stopped.", log=[])
+                return
+            if action not in {"start", "restart"}:
+                raise RuntimeError(f"Unsupported Fail2ban action: {action}")
+            if action == "restart":
+                subprocess.run([str(client), "reload"], capture_output=True, text=True, check=False)
+                self._update(job_id, status="succeeded", message="Fail2ban reloaded.", log=[])
+                return
+            command = [str(server), "-xf", "start", "-c", str(root / "conf")]
+            self._update(job_id, status="running", message=f"Starting Fail2ban with {config}…", log=[])
+            stream = log_file.open("a")
+            process = subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True, cwd=root)
+            import time
+            time.sleep(0.5)
+            if process.poll() is not None:
+                stream.close()
+                raise RuntimeError(f"Fail2ban exited with code {process.returncode}; inspect {log_file}")
+            self._update(job_id, status="succeeded", message="Fail2ban started.", log=[])
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+
+    def _run_valkey_action(self, job_id: str, action: str):
+        root = service_root("valkey")
+        binary = binary_path("valkey")
+        config = root / "conf/valkey.conf"
+        log_file = root / "logs/valkey.log"
+        pid_file = root / "run/valkey.pid"
+        try:
+            if not binary.exists():
+                raise RuntimeError("Valkey is not installed")
+            for path in (config.parent, log_file.parent, pid_file.parent, root / "data"):
+                path.mkdir(parents=True, exist_ok=True)
+            if action in {"stop", "restart"}:
+                self._stop_process_by_binary(binary, pid_file)
+            if action == "stop":
+                self._update(job_id, status="succeeded", message="Valkey stopped.", log=[])
+                return
+            if action not in {"start", "restart"}:
+                raise RuntimeError(f"Unsupported Valkey action: {action}")
+            command = [str(binary), str(config)]
+            self._update(job_id, status="running", message=f"Starting Valkey with {config}…", log=[])
+            stream = log_file.open("a")
+            process = subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True, cwd=root)
+            import time
+            time.sleep(0.4)
+            if process.poll() is not None:
+                stream.close()
+                raise RuntimeError(f"Valkey exited with code {process.returncode}; inspect {log_file}")
+            pid_file.write_text(str(process.pid))
+            self._update(job_id, status="succeeded", message=f"Valkey {action} completed.", log=[])
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+
+    def _run_redis_action(self, job_id: str, action: str):
+        root = service_root("redis")
+        binary = binary_path("redis")
+        config_dir = root / "conf"
+        config = config_dir / "redis.conf"
+        data = root / "data"
+        log_file = root / "logs/redis.log"
+        pid_file = root / "run/redis.pid"
+        try:
+            if not binary.exists():
+                raise RuntimeError("Redis is not installed in the managed service root")
+            for path in (config_dir, data, log_file.parent, pid_file.parent):
+                path.mkdir(parents=True, exist_ok=True)
+            if not config.exists():
+                config.write_text(
+                    f"bind 127.0.0.1 ::1\nprotected-mode yes\nport 6379\n"
+                    f"dir {data}\nlogfile {log_file}\npidfile {pid_file}\ndaemonize no\n"
+                )
+            user = self._ensure_service_user()
+            if action in {"stop", "restart"}:
+                self._stop_process_by_binary(binary, pid_file)
+            if action == "stop":
+                self._update(job_id, status="succeeded", message="Redis stopped.", log=[])
+                return
+            subprocess.run(["chown", "-R", f"{user}:{user}", str(data), str(log_file.parent), str(pid_file.parent)], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            command = [str(binary), str(config)]
+            if os.geteuid() == 0 and shutil.which("runuser"):
+                command = ["runuser", "-u", user, "--", *command]
+            self._update(job_id, status="running", message=f"Starting Redis with {config}…", log=[])
+            with log_file.open("a") as stream:
+                process = subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True)
+            import time
+            time.sleep(0.4)
+            if process.poll() is not None:
+                details = log_file.read_text(errors="replace").splitlines()[-20:]
+                raise RuntimeError(f"Redis exited during startup: {' | '.join(details) if details else process.returncode}")
+            self._update(job_id, status="succeeded", message="Redis started on its managed port and data directory.", log=log_file.read_text(errors="replace").splitlines()[-80:])
+        except Exception as error:
+            details = log_file.read_text(errors="replace").splitlines()[-80:] if log_file.exists() else []
+            self._update(job_id, status="failed", message=str(error), log=details)
+
+    def _run_memcached_action(self, job_id: str, action: str):
+        root = service_root("memcached")
+        binary = binary_path("memcached")
+        config_dir = root / "conf"
+        config = config_dir / "memcached.conf"
+        log_file = root / "logs/memcached.log"
+        pid_file = root / "run/memcached.pid"
+        try:
+            if not binary.exists():
+                raise RuntimeError("Memcached is not installed in the managed service root")
+            for path in (config_dir, log_file.parent, pid_file.parent):
+                path.mkdir(parents=True, exist_ok=True)
+            if not config.exists():
+                config.write_text("-m 256\n-p 11211\n-l 127.0.0.1\n-c 1024\n-t 4\n-U 0\n-o modern\n")
+            user = self._ensure_service_user()
+            if action in {"stop", "restart"}:
+                self._stop_process_by_binary(binary, pid_file)
+            if action == "stop":
+                self._update(job_id, status="succeeded", message="Memcached stopped.", log=[])
+                return
+            arguments = []
+            for line in config.read_text(errors="replace").splitlines():
+                stripped = line.strip()
+                if stripped and not stripped.startswith("#"):
+                    arguments.extend(shlex.split(stripped))
+            command = [str(binary), *arguments]
+            if os.geteuid() == 0 and shutil.which("runuser"):
+                command = ["runuser", "-u", user, "--", *command]
+            self._update(job_id, status="running", message=f"Starting Memcached with {config}…", log=[])
+            with log_file.open("a") as stream:
+                process = subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True)
+            import time
+            time.sleep(0.4)
+            if process.poll() is not None:
+                details = log_file.read_text(errors="replace").splitlines()[-20:]
+                raise RuntimeError(f"Memcached exited during startup: {' | '.join(details) if details else process.returncode}")
+            pid_file.write_text(str(process.pid))
+            self._update(job_id, status="succeeded", message="Memcached started on its managed port.", log=log_file.read_text(errors="replace").splitlines()[-80:])
+        except Exception as error:
+            details = log_file.read_text(errors="replace").splitlines()[-80:] if log_file.exists() else []
+            self._update(job_id, status="failed", message=str(error), log=details)
+
     def _run_php_uninstall(self, job_id: str, version: str, paths: dict[str, Path]):
         root = paths["root"].resolve()
         versions_root = service_root("php").joinpath("versions").resolve()
@@ -273,13 +624,25 @@ class JobStore:
             for path in (data, logs, run, config.parent):
                 path.mkdir(parents=True, exist_ok=True)
             if not config.exists():
-                config.write_text("[mysqld]\nbind-address=127.0.0.1\nport=3306\ndatadir=" + str(data) + "\nlog-error=" + str(error_log) + "\nslow_query_log=ON\nmax_connections=151\nsql_mode=STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION\n\n[client]\nport=3306\n")
+                config.write_text("[mysqld]\nbind-address=127.0.0.1\nport=3306\ndatadir=" + str(data) + "\nlog-error=" + str(error_log) + "\nslow_query_log=ON\nmax_connections=151\ninnodb_numa_interleave=OFF\nmysqlx=OFF\nsql_mode=STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION\n\n[client]\nport=3306\n")
+            else:
+                # Server Engine exposes the classic protocol only. Remove any
+                # previous X Protocol or NUMA setting so stale configs cannot
+                # collide with another MySQL instance in the same container.
+                config_lines = [
+                    line
+                    for line in config.read_text(errors="replace").splitlines()
+                    if not line.strip().lower().startswith(("mysqlx=", "innodb_numa_interleave="))
+                ]
+                config_lines.extend(["innodb_numa_interleave=OFF", "mysqlx=OFF"])
+                config.write_text("\n".join(config_lines).rstrip() + "\n")
             if action == "stop":
                 self._stop_mysql_process(binary, pid_file)
                 self._update(job_id, status="succeeded", message=f"{label} stopped.", log=[])
                 return
-            if action == "restart":
-                self._stop_mysql_process(binary, pid_file)
+            # Reconcile every start with the process table so stale managed
+            # mysqld instances cannot retain the isolated socket lock.
+            self._stop_mysql_process(binary, pid_file)
             runtime_env = self._prepare_mysql_runtime(root)
             if not (data / "mysql").exists():
                 self._update(job_id, status="running", message=f"Initializing the {label} data directory…", log=[])
@@ -289,7 +652,7 @@ class JobStore:
                 raise RuntimeError(f"{label} initialization failed: " + (" | ".join(details) if details else f"exit code {initialize.returncode}"))
             user = self._ensure_service_user()
             subprocess.run(["chown", "-R", f"{user}:{user}", str(data), str(logs), str(run)], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            command = [str(binary), f"--defaults-file={config}", f"--basedir={root}", f"--datadir={data}", f"--pid-file={pid_file}", f"--socket={run / 'mysql.sock'}", f"--log-error={error_log}", f"--user={user}"]
+            command = [str(binary), f"--defaults-file={config}", "--mysqlx=OFF", "--innodb-numa-interleave=OFF", f"--basedir={root}", f"--datadir={data}", f"--pid-file={pid_file}", f"--socket={run / 'mysql.sock'}", f"--log-error={error_log}", f"--user={user}"]
             self._update(job_id, status="running", message=f"Starting {label} with {config}…", log=[])
             with error_log.open("a") as log_file:
                 process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT, start_new_session=True, env=runtime_env)
@@ -376,27 +739,37 @@ class JobStore:
                 pids.append(int(pid_file.read_text().strip()))
             except ValueError:
                 pass
-        if not pids:
-            pgrep = shutil.which("pgrep")
-            if pgrep:
-                result = subprocess.run([pgrep, "-f", str(binary)], capture_output=True, text=True, check=False)
-                pids = [int(item) for item in result.stdout.split() if item.isdigit()]
-            elif Path("/proc").exists():
-                for command_line in Path("/proc").glob("[0-9]*/cmdline"):
+        # Reconcile the PID file with the process table. A previous failed
+        # start can leave a live managed process with a stale or replaced PID
+        # file, which otherwise causes socket collisions on the next start.
+        pgrep = shutil.which("pgrep")
+        if pgrep:
+            result = subprocess.run([pgrep, "-f", str(binary)], capture_output=True, text=True, check=False)
+            pids.extend(int(item) for item in result.stdout.split() if item.isdigit())
+        elif Path("/proc").exists():
+            for command_line in Path("/proc").glob("[0-9]*/cmdline"):
+                try:
+                    command = command_line.read_bytes().replace(b"\x00", b" ").decode(errors="replace")
+                except OSError:
+                    continue
+                if str(binary) in command:
                     try:
-                        command = command_line.read_bytes().replace(b"\x00", b" ").decode(errors="replace")
-                    except OSError:
-                        continue
-                    if str(binary) in command:
-                        try:
-                            pids.append(int(command_line.parent.name))
-                        except ValueError:
-                            pass
-        for pid in pids:
+                        pids.append(int(command_line.parent.name))
+                    except ValueError:
+                        pass
+        for pid in set(pids):
             try:
                 os.kill(pid, 15)
             except (ProcessLookupError, PermissionError):
                 pass
+        deadline = time.monotonic() + 2
+        for pid in set(pids):
+            while time.monotonic() < deadline:
+                try:
+                    os.kill(pid, 0)
+                except (ProcessLookupError, PermissionError):
+                    break
+                time.sleep(0.05)
 
     def _stop_mysql_process(self, binary: Path, pid_file: Path):
         self._stop_process_by_binary(binary, pid_file)
@@ -406,6 +779,17 @@ class JobStore:
             current = self._jobs[job_id]
             if current.status == "cancelled" and changes.get("status") != "cancelled":
                 return
+            if "log" in changes and changes["log"]:
+                incoming = list(changes["log"])
+                existing = current.log
+                if existing and len(incoming) >= len(existing) and incoming[:len(existing)] == existing:
+                    changes["log"] = incoming
+                else:
+                    overlap = 0
+                    for size in range(1, min(len(existing), len(incoming)) + 1):
+                        if existing[-size:] == incoming[:size]:
+                            overlap = size
+                    changes["log"] = existing + incoming[overlap:]
             self._jobs[job_id] = current.model_copy(update={"updated_at": datetime.now(timezone.utc), **changes})
 
     def _run_install(self, job_id: str, service_id: str, requested_version: str):
@@ -532,6 +916,121 @@ class JobStore:
             self._update(job_id, progress=92, message=f"Configuring {service_id} runtime files and default extensions…")
             if service_id == "nginx":
                 ensure_nginx_layout()
+            if service_id == "openlitespeed":
+                config_dir = root / "conf"
+                (config_dir / "vhosts/default").mkdir(parents=True, exist_ok=True)
+                (root / "www").mkdir(parents=True, exist_ok=True)
+                config = config_dir / "httpd_config.conf"
+                vhost = config_dir / "vhosts/default/vhost.conf"
+                if not config.exists():
+                    config.write_text(
+                        f"serverName ServerEngine\nuser serverengine\ngroup serverengine\nautoRestart 1\n"
+                        f"enableGzip 1\nenableBr 1\nlistener HTTP {{\n  address *:80\n  secure 0\n  map default *\n}}\n"
+                        f"virtualHost default {{\n  vhRoot {root / 'www'}\n  configFile {vhost}\n  allowSymbolLink 1\n  enableScript 1\n}}\n"
+                        f"errorlog {root / 'logs/error.log'} {{ logLevel NOTICE rollingSize 10M keepDays 30 }}\n"
+                        f"accesslog {root / 'logs/access.log'} {{ logFormat \"%h %l %u %t \\\"%r\\\" %>s %b\" rollingSize 10M keepDays 30 }}\n"
+                    )
+                if not vhost.exists():
+                    vhost.write_text("docRoot $VH_ROOT/www\nindex {\n  useServer 0\n  indexFiles index.php, index.html\n}\nrewrite {\n  enable 1\n  autoLoadHtaccess 1\n}\n")
+            if service_id == "caddy":
+                config_dir = root / "conf"
+                config_dir.mkdir(parents=True, exist_ok=True)
+                for directory in (root / "data", root / "www", root / "logs", root / "run"):
+                    directory.mkdir(parents=True, exist_ok=True)
+                config = config_dir / "Caddyfile"
+                if not config.exists():
+                    config.write_text(
+                        f"{{\n    email admin@example.com\n    admin 127.0.0.1:2019\n    storage file-system {root / 'data'}\n}}\n\n"
+                        f":80 {{\n    root * {root / 'www'}\n    encode zstd gzip\n    file_server\n    log {{ output file {root / 'logs/access.log'} }}\n}}\n"
+                    )
+            if service_id == "haproxy":
+                config_dir = root / "conf"
+                config_dir.mkdir(parents=True, exist_ok=True)
+                for directory in (root / "logs", root / "run"):
+                    directory.mkdir(parents=True, exist_ok=True)
+                config = config_dir / "haproxy.cfg"
+                if not config.exists():
+                    config.write_text(
+                        f"global\n    log stdout format raw local0\n    stats socket {root / 'run/admin.sock'} mode 660 level admin\n    maxconn 4096\n\n"
+                        "defaults\n    mode http\n    log global\n    option httplog\n    timeout connect 5s\n    timeout client 30s\n    timeout server 30s\n\n"
+                        "frontend http_front\n    bind *:80\n    default_backend web_back\n\n"
+                        "backend web_back\n    balance roundrobin\n    option httpchk GET /health\n    server app1 127.0.0.1:8080 check\n"
+                    )
+            if service_id == "powerdns":
+                config = root / "conf/pdns.conf"
+                config.parent.mkdir(parents=True, exist_ok=True)
+                if not config.exists():
+                    config.write_text(
+                        "# Server Engine PowerDNS Authoritative baseline\n"
+                        "launch=local\nlocal-address=0.0.0.0\nlocal-port=53\n"
+                        "default-ttl=3600\napi=yes\nwebserver=yes\n"
+                        "webserver-address=127.0.0.1\nwebserver-port=8081\n"
+                        "webserver-allow-from=127.0.0.1,::1\n"
+                    )
+            if service_id == "postgresql":
+                config_dir = root / "conf"
+                config_dir.mkdir(parents=True, exist_ok=True)
+                config = config_dir / "postgresql.conf"
+                hba = config_dir / "pg_hba.conf"
+                if not config.exists():
+                    config.write_text("listen_addresses = '127.0.0.1'\nport = 5432\nlogging_collector = on\n")
+                if not hba.exists():
+                    hba.write_text("local all all scram-sha-256\nhost all all 127.0.0.1/32 scram-sha-256\n")
+            if service_id == "redis":
+                config_dir = root / "conf"
+                config_dir.mkdir(parents=True, exist_ok=True)
+                config = config_dir / "redis.conf"
+                if not config.exists():
+                    config.write_text(
+                        f"bind 127.0.0.1 ::1\nprotected-mode yes\nport 6379\n"
+                        f"dir {root / 'data'}\nlogfile {root / 'logs/redis.log'}\n"
+                        f"pidfile {root / 'run/redis.pid'}\ndaemonize no\n"
+                    )
+            if service_id == "valkey":
+                config_dir = root / "conf"
+                config_dir.mkdir(parents=True, exist_ok=True)
+                for directory in (root / "data", root / "logs", root / "run"):
+                    directory.mkdir(parents=True, exist_ok=True)
+                config = config_dir / "valkey.conf"
+                if not config.exists():
+                    config.write_text(
+                        f"bind 127.0.0.1 ::1\nprotected-mode yes\nport 6379\n"
+                        f"dir {root / 'data'}\nappendonly no\nmaxmemory 256mb\n"
+                        f"maxmemory-policy allkeys-lru\nlogfile {root / 'logs/valkey.log'}\n"
+                        f"pidfile {root / 'run/valkey.pid'}\ndaemonize no\n"
+                    )
+            if service_id == "fail2ban":
+                config_dir = root / "conf"
+                config_dir.mkdir(parents=True, exist_ok=True)
+                for directory in (root / "logs", root / "run"):
+                    directory.mkdir(parents=True, exist_ok=True)
+                config = config_dir / "jail.local"
+                if not config.exists():
+                    config.write_text(
+                        "[DEFAULT]\nignoreip = 127.0.0.1/8 ::1\nbantime = 1h\n"
+                        "findtime = 10m\nmaxretry = 5\nbackend = auto\n"
+                        "banaction = nftables-multiport\naction = %(action_)s\n\n"
+                        f"[sshd]\nenabled = true\nport = ssh\nlogpath = {root / 'logs/sshd.log'}\n"
+                    )
+            if service_id == "memcached":
+                config_dir = root / "conf"
+                config_dir.mkdir(parents=True, exist_ok=True)
+                config = config_dir / "memcached.conf"
+                if not config.exists():
+                    config.write_text("-m 256\n-p 11211\n-l 127.0.0.1\n-c 1024\n-t 4\n-U 0\n-o modern\n")
+            if service_id == "certbot":
+                config_dir = root / "conf"
+                config_dir.mkdir(parents=True, exist_ok=True)
+                config = config_dir / "cli.ini"
+                if not config.exists():
+                    config.write_text(
+                        "# Server Engine Certbot defaults\n"
+                        "agree-tos = true\nnon-interactive = true\n"
+                        "preferred-challenges = http\n"
+                        f"config-dir = {root / 'config'}\n"
+                        f"work-dir = {root / 'work'}\n"
+                        f"logs-dir = {root / 'logs'}\n"
+                    )
             if service_id == "php":
                 self._ensure_service_user()
                 ensure_php_fpm_layout(normalized)

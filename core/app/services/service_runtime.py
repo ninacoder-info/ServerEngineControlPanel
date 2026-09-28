@@ -2,8 +2,8 @@ import os
 import pwd
 from pathlib import Path
 
-SERVICE_PACKAGES = {"nginx": "nginx", "apache": "apache2", "php": "php-fpm", "nodejs": "nodejs", "python": "python3", "ruby": "ruby", "mariadb": "mariadb-server", "mysql": "mysql-server", "postgresql": "postgresql", "redis": "redis-server", "valkey": "valkey-server", "memcached": "memcached", "certbot": "certbot", "vsftpd": "vsftpd", "fail2ban": "fail2ban"}
-SERVICE_BINARIES = {"nginx": "usr/sbin/nginx", "apache": "usr/sbin/apache2", "php": "usr/sbin/php-fpm8.2", "nodejs": "usr/bin/node", "python": "usr/bin/python3", "ruby": "usr/bin/ruby", "mariadb": "usr/sbin/mariadbd", "mysql": "bin/mysqld", "postgresql": "usr/lib/postgresql/15/bin/postgres", "redis": "usr/bin/redis-server", "valkey": "usr/bin/valkey-server", "memcached": "usr/bin/memcached", "certbot": "usr/bin/certbot", "vsftpd": "usr/sbin/vsftpd", "fail2ban": "usr/bin/fail2ban-server"}
+SERVICE_PACKAGES = {"nginx": "nginx", "apache": "apache2", "openlitespeed": "openlitespeed", "caddy": "caddy", "haproxy": "haproxy", "php": "php-fpm", "nodejs": "nodejs", "python": "python3", "ruby": "ruby", "mariadb": "mariadb-server", "mysql": "mysql-server", "postgresql": "postgresql", "redis": "redis-server", "valkey": "valkey-server", "memcached": "memcached", "certbot": "certbot", "vsftpd": "vsftpd", "fail2ban": "fail2ban", "powerdns": "pdns-server", "rabbitmq": "rabbitmq-server", "docker": "docker.io", "git": "git", "imagemagick": "imagemagick", "ffmpeg": "ffmpeg", "supervisor": "supervisor", "postfix": "postfix", "dovecot": "dovecot-imapd", "rspamd": "rspamd", "bind9": "bind9", "unbound": "unbound", "clamav": "clamav", "auditd": "auditd", "lynis": "lynis", "logrotate": "logrotate", "node-exporter": "prometheus-node-exporter", "modsecurity": "libmodsecurity3"}
+SERVICE_BINARIES = {"nginx": "usr/sbin/nginx", "apache": "usr/sbin/apache2", "openlitespeed": "usr/local/lsws/bin/lshttpd", "caddy": "usr/bin/caddy", "haproxy": "usr/sbin/haproxy", "php": "usr/sbin/php-fpm8.2", "nodejs": "usr/bin/node", "python": "usr/bin/python3", "ruby": "usr/bin/ruby", "mariadb": "usr/sbin/mariadbd", "mysql": "bin/mysqld", "postgresql": "usr/lib/postgresql/15/bin/postgres", "redis": "usr/bin/redis-server", "valkey": "usr/bin/valkey-server", "memcached": "usr/bin/memcached", "certbot": "usr/bin/certbot", "vsftpd": "usr/sbin/vsftpd", "fail2ban": "usr/bin/fail2ban-server", "powerdns": "usr/sbin/pdns_server"}
 
 
 def service_root(service_id: str, version: str | None = None) -> Path:
@@ -22,12 +22,16 @@ def package_for(service_id: str) -> str | None:
 
 def binary_path(service_id: str, version: str | None = None) -> Path:
     root = service_root(service_id, version)
+    if service_id == "postgresql":
+        candidates = sorted(root.glob("usr/lib/postgresql/*/bin/postgres"), reverse=True)
+        return candidates[0] if candidates else root / "usr/lib/postgresql/15/bin/postgres"
     if service_id == "nodejs":
         current = root / "bin/node"
         legacy = root / "usr/bin/node"
         return current if current.exists() or not legacy.exists() else legacy
     if service_id == "certbot":
-        return root / "venv/bin/certbot"
+        candidates = [root / "venv/bin/certbot", root / "usr/bin/certbot", root / "bin/certbot"]
+        return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
     if service_id == "php" and version:
         candidates = sorted(root.glob("usr/sbin/php-fpm*")) + sorted(root.glob("usr/bin/php-fpm*"))
         return candidates[0] if candidates else root / "usr/sbin/php-fpm"

@@ -19,6 +19,8 @@ import {
   Upload,
 } from "lucide-react";
 import ActionDialog from "../../components/ActionDialog";
+import SaveButton from "../../components/SaveButton";
+import Toast from "../../components/Toast";
 import { apiRequest, readApiError } from "../../lib/api";
 import { applyPanelPreferences } from "../../lib/panelPreferences";
 import languageOptions from "../../data/languages.json";
@@ -364,7 +366,14 @@ function SettingsActions({ onSave, onReset, saving, dirty, message }) {
       <span className="text-sm text-slate-500 dark:text-slate-400">{message}</span>
       <div className="flex items-center gap-2">
         <button type="button" onClick={onReset} disabled={saving} className="inline-flex cursor-pointer items-center justify-center rounded-md px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-800">Restore defaults</button>
-        <button type="button" onClick={onSave} disabled={saving || !dirty} className="inline-flex cursor-pointer items-center justify-center rounded-md bg-[var(--panel-accent)] px-3 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50">{saving ? "Saving…" : dirty ? "Save API settings" : "Saved"}</button>
+        <SaveButton
+          onClick={onSave}
+          saving={saving}
+          disabled={!dirty}
+          className="bg-[var(--panel-accent)] text-white hover:opacity-90"
+        >
+          Save API settings
+        </SaveButton>
       </div>
     </div>
   );
@@ -578,15 +587,14 @@ function PanelTab({ values, onChange, onSave, onReset, saving, dirty, message })
             <RotateCcw size={16} />
             Restore defaults
           </button>
-          <button
-            type="button"
-            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md bg-[var(--panel-accent)] px-3 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          <SaveButton
             onClick={onSave}
-            disabled={saving || !dirty}
+            saving={saving}
+            disabled={!dirty}
+            className="bg-[var(--panel-accent)] text-white hover:opacity-90"
           >
-            <Save size={16} />
-            {saving ? "Saving…" : dirty ? "Save panel settings" : "Saved"}
-          </button>
+            Save panel settings
+          </SaveButton>
         </div>
       </div>
     </div>
@@ -793,15 +801,14 @@ function StorageTab({ values, onChange, onSave, onReset, saving, dirty, message 
             <RotateCcw size={16} />
             Restore defaults
           </button>
-          <button
-            type="button"
-            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md bg-[var(--panel-accent)] px-3 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          <SaveButton
             onClick={onSave}
-            disabled={saving || !dirty}
+            saving={saving}
+            disabled={!dirty}
+            className="bg-[var(--panel-accent)] text-white hover:opacity-90"
           >
-            <Save size={16} />
-            {saving ? "Saving…" : dirty ? "Save storage settings" : "Saved"}
-          </button>
+            Save storage settings
+          </SaveButton>
         </div>
       </div>
     </div>
@@ -1015,15 +1022,14 @@ function SecurityTab({ values, onChange, onSave, onReset, saving, dirty, message
             <RotateCcw size={16} />
             Restore defaults
           </button>
-          <button
-            type="button"
-            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md bg-[var(--panel-accent)] px-3 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          <SaveButton
             onClick={onSave}
-            disabled={saving || !dirty}
+            saving={saving}
+            disabled={!dirty}
+            className="bg-[var(--panel-accent)] text-white hover:opacity-90"
           >
-            <Save size={16} />
-            {saving ? "Saving…" : dirty ? "Save security settings" : "Saved"}
-          </button>
+            Save security settings
+          </SaveButton>
         </div>
       </div>
     </div>
@@ -1388,7 +1394,7 @@ function ApiTab({ values, onChange, onSave, onReset, saving, dirty, message }) {
   );
 }
 
-function NotificationsTab({ values, onChange, onSave, onReset, saving, dirty, message }) {
+function NotificationsTab({ values, onChange, onReset, saving, dirty, message }) {
   const o = notificationSettingsValues(values);
   const set = (key, value) => onChange(key, value);
   return (
@@ -1600,15 +1606,14 @@ function NotificationsTab({ values, onChange, onSave, onReset, saving, dirty, me
             <RotateCcw size={16} />
             Restore defaults
           </button>
-          <button
-            type="button"
-            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md bg-[var(--panel-accent)] px-3 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          <SaveButton
             onClick={onSave}
-            disabled={saving || !dirty}
+            saving={saving}
+            disabled={!dirty}
+            className="bg-[var(--panel-accent)] text-white hover:opacity-90"
           >
-            <Save size={16} />
-            {saving ? "Saving…" : dirty ? "Save notifications" : "Saved"}
-          </button>
+            Save notifications
+          </SaveButton>
         </div>
       </div>
     </div>
@@ -1774,15 +1779,14 @@ function CertificatesTab({ values, onChange, onSave, onReset, saving, dirty, mes
             <RotateCcw size={16} />
             Restore defaults
           </button>
-          <button
-            type="button"
-            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md bg-[var(--panel-accent)] px-3 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          <SaveButton
             onClick={onSave}
-            disabled={saving || !dirty}
+            saving={saving}
+            disabled={!dirty}
+            className="bg-[var(--panel-accent)] text-white hover:opacity-90"
           >
-            <Save size={16} />
-            {saving ? "Saving…" : dirty ? "Save certificates" : "Saved"}
-          </button>
+            Save certificates
+          </SaveButton>
         </div>
       </div>
     </div>
@@ -1941,15 +1945,14 @@ function MaintenanceTab({ values, onChange, onSave, onReset, saving, dirty, mess
             <RotateCcw size={16} />
             Restore defaults
           </button>
-          <button
-            type="button"
-            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md bg-[var(--panel-accent)] px-3 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          <SaveButton
             onClick={onSave}
-            disabled={saving || !dirty}
+            saving={saving}
+            disabled={!dirty}
+            className="bg-[var(--panel-accent)] text-white hover:opacity-90"
           >
-            <Save size={16} />
-            {saving ? "Saving…" : dirty ? "Save maintenance" : "Saved"}
-          </button>
+            Save maintenance
+          </SaveButton>
         </div>
       </div>
     </div>
@@ -2018,7 +2021,6 @@ function Field({ definition, value, settings, onChange, notificationActions, cer
 }
 export default function SettingsPage() {
   const [values, setValues] = React.useState({});
-  const [saved, setSaved] = React.useState({});
   const [panelSaved, setPanelSaved] = React.useState({});
   const [storageSaved, setStorageSaved] = React.useState({});
   const [securitySaved, setSecuritySaved] = React.useState({});
@@ -2044,6 +2046,7 @@ export default function SettingsPage() {
   const [certificateMessage, setCertificateMessage] = React.useState("");
   const [maintenanceMessage, setMaintenanceMessage] = React.useState("");
   const [message, setMessage] = React.useState("");
+  const [settingsToast, setSettingsToast] = React.useState("");
   const [dialog, setDialog] = React.useState(null);
   React.useEffect(() => {
     const accent = appearanceAccentColors.find(
@@ -2086,7 +2089,6 @@ export default function SettingsPage() {
       })
       .then(([settingsBody, panelBody, storageBody, securityBody, apiBody, notificationBody, certificateBody, maintenanceBody]) => {
         setValues({ ...settingsBody.values, ...panelBody.values, ...storageBody.values, ...securityBody.values, ...apiBody.values, ...notificationBody.values, ...certificateBody.values, ...maintenanceBody.values });
-        setSaved(settingsBody.values);
         setPanelSaved(panelBody.values);
         setStorageSaved(storageBody.values);
         setSecuritySaved(securityBody.values);
@@ -2099,7 +2101,9 @@ export default function SettingsPage() {
       .catch((e) => setMessage(e.message))
       .finally(() => setBusy(false));
   }, []);
-  const update = (k, v) => setValues((x) => ({ ...x, [k]: v }));
+  const update = (k, v) => {
+    setValues((x) => ({ ...x, [k]: v }));
+  };
   const panelDirty = JSON.stringify(panelValues(values)) !== JSON.stringify(panelSaved);
   const storageDirty = JSON.stringify(storageValues(values)) !== JSON.stringify(storageSaved);
   const securityDirty = JSON.stringify(securityValues(values)) !== JSON.stringify(securitySaved);
@@ -2120,8 +2124,10 @@ export default function SettingsPage() {
       setPanelSaved(body.values);
       applyPanelPreferences(body.values);
       setPanelMessage("Panel settings saved.");
+      setSettingsToast("Panel settings saved.");
     } else setPanelMessage(await readApiError(r));
     setPanelSaving(false);
+    return r.ok;
   };
   const restorePanel = () =>
     setDialog({
@@ -2158,8 +2164,10 @@ export default function SettingsPage() {
       setValues((current) => ({ ...current, ...body.values }));
       setStorageSaved(body.values);
       setStorageMessage("Web & storage settings saved.");
+      setSettingsToast("Web & storage settings saved.");
     } else setStorageMessage(await readApiError(r));
     setStorageSaving(false);
+    return r.ok;
   };
   const restoreStorage = () =>
     setDialog({
@@ -2195,8 +2203,10 @@ export default function SettingsPage() {
       setValues((current) => ({ ...current, ...body.values }));
       setSecuritySaved(body.values);
       setSecurityMessage("Security settings saved.");
+      setSettingsToast("Security settings saved.");
     } else setSecurityMessage(await readApiError(r));
     setSecuritySaving(false);
+    return r.ok;
   };
   const restoreSecurity = () =>
     setDialog({
@@ -2232,8 +2242,10 @@ export default function SettingsPage() {
       setValues((current) => ({ ...current, ...body.values }));
       setApiSaved(body.values);
       setApiMessage("API settings saved.");
+      setSettingsToast("API settings saved.");
     } else setApiMessage(await readApiError(r));
     setApiSaving(false);
+    return r.ok;
   };
   const restoreApi = () =>
     setDialog({
@@ -2267,8 +2279,10 @@ export default function SettingsPage() {
       setValues((current) => ({ ...current, ...body.values }));
       setNotificationSaved(body.values);
       setNotificationMessage("Notification settings saved.");
+      setSettingsToast("Notification settings saved.");
     } else setNotificationMessage(await readApiError(r));
     setNotificationSaving(false);
+    return r.ok;
   };
   const restoreNotifications = () =>
     setDialog({
@@ -2304,8 +2318,10 @@ export default function SettingsPage() {
       setValues((current) => ({ ...current, ...body.values }));
       setCertificateSaved(body.values);
       setCertificateMessage("Certificate settings saved.");
+      setSettingsToast("Certificate settings saved.");
     } else setCertificateMessage(await readApiError(r));
     setCertificateSaving(false);
+    return r.ok;
   };
   const restoreCertificates = () =>
     setDialog({
@@ -2341,8 +2357,10 @@ export default function SettingsPage() {
       setValues((current) => ({ ...current, ...body.values }));
       setMaintenanceSaved(body.values);
       setMaintenanceMessage("Maintenance settings saved.");
+      setSettingsToast("Maintenance settings saved.");
     } else setMaintenanceMessage(await readApiError(r));
     setMaintenanceSaving(false);
+    return r.ok;
   };
   const restoreMaintenance = () =>
     setDialog({
@@ -2531,6 +2549,11 @@ export default function SettingsPage() {
           )}
         </main>
       </div>
+      <Toast
+        message={settingsToast}
+        type="success"
+        onClose={() => setSettingsToast("")}
+      />
       <ActionDialog
         dialog={dialog}
         onClose={() => setDialog(null)}

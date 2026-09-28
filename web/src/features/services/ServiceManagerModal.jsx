@@ -18,6 +18,16 @@ import {
 import { apiRequest, readApiError } from "../../lib/api";
 import ConfigEditor from "./ConfigEditor";
 import ApacheConfigModal from "./ApacheConfigModal";
+import MariaDbConfigModal from "./MariaDbConfigModal";
+import PostgreSqlConfigModal from "./PostgreSqlConfigModal";
+import RedisConfigModal from "./RedisConfigModal";
+import MemcachedConfigModal from "./MemcachedConfigModal";
+import CertbotConfigModal from "./CertbotConfigModal";
+import OpenLiteSpeedConfigModal from "./OpenLiteSpeedConfigModal";
+import CaddyConfigModal from "./CaddyConfigModal";
+import HaProxyConfigModal from "./HaProxyConfigModal";
+import ValkeyConfigModal from "./ValkeyConfigModal";
+import Fail2banConfigModal from "./Fail2banConfigModal";
 import SaveButton from "../../components/SaveButton";
 import Toast from "../../components/Toast";
 
@@ -1113,6 +1123,57 @@ export default function ServiceManagerModal({
         onClose={onClose}
       />
     );
+  }
+  if (service.id === "mariadb") {
+    return (
+      <MariaDbConfigModal
+        service={service}
+        installed={installedProp}
+        onClose={onClose}
+      />
+    );
+  }
+  if (service.id === "postgresql") {
+    return (
+      <PostgreSqlConfigModal
+        installed={installedProp}
+        onClose={onClose}
+      />
+    );
+  }
+  if (service.id === "redis") {
+    return (
+      <RedisConfigModal
+        installed={installedProp}
+        onClose={onClose}
+      />
+    );
+  }
+  if (service.id === "memcached") {
+    return (
+      <MemcachedConfigModal
+        installed={installedProp}
+        onClose={onClose}
+      />
+    );
+  }
+  if (service.id === "certbot") {
+    return <CertbotConfigModal installed={installedProp} onClose={onClose} />;
+  }
+  if (service.id === "openlitespeed") {
+    return <OpenLiteSpeedConfigModal installed={installedProp} onClose={onClose} />;
+  }
+  if (service.id === "caddy") {
+    return <CaddyConfigModal installed={installedProp} onClose={onClose} />;
+  }
+  if (service.id === "haproxy") {
+    return <HaProxyConfigModal installed={installedProp} onClose={onClose} />;
+  }
+  if (service.id === "valkey") {
+    return <ValkeyConfigModal installed={installedProp} onClose={onClose} />;
+  }
+  if (service.id === "fail2ban") {
+    return <Fail2banConfigModal installed={installedProp} onClose={onClose} />;
   }
   const initialInstalledItems = Array.isArray(installedProp)
     ? installedProp

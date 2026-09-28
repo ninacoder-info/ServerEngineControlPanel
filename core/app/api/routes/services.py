@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.dependencies import require_user
 from app.models.service import ConfigurationSaveRequest, ExtensionInstallRequest, InstallServiceRequest, InstalledService, ServiceActionRequest, ServiceDefinition, SwitchVersionRequest
-from app.services.service_catalog import CATALOG, PHP_EXTENSIONS, get_service
+from app.services.service_catalog import CATALOG, PHP_EXTENSIONS, get_service, refresh_service_versions
 from app.services.job_service import job_store
 from app.services.service_runtime import PHP_BASELINE_MODULES, SERVICE_PACKAGES, binary_path, composer_path, ensure_composer_launcher, ensure_nginx_layout, ensure_node_runtime, ensure_php_fpm_layout, ensure_php_terminal_launcher, nginx_default_configuration, nginx_paths, php_cli_path, service_root
 
@@ -127,11 +127,37 @@ def catalog(user=Depends(require_user)):
     return CATALOG
 
 
+@router.post("/{service_id}/versions/refresh")
+def refresh_versions(service_id: str, user=Depends(require_user)):
+    try:
+        definition, source, message = refresh_service_versions(service_id)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return {
+        "service": definition,
+        "versions": definition.versions,
+        "source": source,
+        "message": message,
+    }
+
+
 @router.get("/installed", response_model=list[InstalledService])
 def installed(user=Depends(require_user)):
     detected = [InstalledService(id="server-engine", name="Server Engine", version="0.1.0", status="running", managed=True)]
     packages = SERVICE_PACKAGES
     for service_id, package in packages.items():
+        if service_id == "powerdns":
+            powerdns_root = service_root("powerdns")
+            marker = powerdns_root / ".serverengine-version"
+            binary = binary_path("powerdns")
+            version = marker.read_text(errors="replace").strip() if marker.exists() else None
+            if not version or not binary.exists():
+                version = _installed_package_version(package)
+            if version is not None:
+                definition = get_service(service_id)
+                running = subprocess.run(["pgrep", "-x", "pdns_server"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False).returncode == 0 if shutil.which("pgrep") else False
+                detected.append(InstalledService(id=service_id, name=definition.name if definition else service_id, version=version, status="running" if running else "stopped", port=53, managed=False))
+            continue
         if service_id == "php":
             php_root = service_root("php") / "versions"
             if php_root.exists():
@@ -181,11 +207,11 @@ def _installed_package_version(package: str) -> str | None:
 def _installed_service_version(service_id: str, package: str, version: str | None = None) -> str | None:
     root = service_root(service_id, version)
     marker = root / ".serverengine-version"
+    if marker.exists():
+        return marker.read_text().strip() or "staged"
     binary = binary_path(service_id, version)
     if not binary.exists():
         return None
-    if marker.exists():
-        return marker.read_text().strip() or "staged"
     result = subprocess.run([binary, "-v"], capture_output=True, text=True, check=False)
     output = result.stderr or result.stdout
     if service_id == "nginx" and "nginx/" in output:
@@ -270,7 +296,7 @@ def configuration(service_id: str, version: str | None = None, file: str = "fpm"
         ensure_php_fpm_layout(version)
     config_path = _configuration_path(service_id, version, file)
     path = Path(config_path)
-    content = path.read_text(errors="replace") if path.exists() else _default_configuration(service_id)
+    content = path.read_text(errors="replace") if path.exists() else _default_configuration(service_id, file)
     if service_id == "apache" and "CustomLog" not in content:
         content = content.replace(
             "IncludeOptional conf/sites/*.conf",
@@ -285,20 +311,292 @@ def _configuration_path(service_id: str, version: str | None, file: str = "fpm")
     if service_id == "php" and version:
         from app.services.service_runtime import php_fpm_paths
         return php_fpm_paths(version)["ini" if file == "ini" else "config"]
-    if service_id == "mysql":
-        return service_root("mysql") / "conf/my.cnf"
+    if service_id in {"mysql", "mariadb"}:
+        return service_root(service_id) / "conf/my.cnf"
     if service_id == "apache":
         return service_root("apache") / "conf/httpd.conf"
+    if service_id == "openlitespeed":
+        return service_root("openlitespeed") / "conf/httpd_config.conf"
+    if service_id == "caddy":
+        return service_root("caddy") / "conf/Caddyfile"
+    if service_id == "haproxy":
+        return service_root("haproxy") / "conf/haproxy.cfg"
+    if service_id == "valkey":
+        return service_root("valkey") / "conf/valkey.conf"
+    if service_id == "fail2ban":
+        return service_root("fail2ban") / "conf/jail.local"
+    if service_id == "powerdns":
+        return service_root("powerdns") / "conf/pdns.conf"
+    if service_id == "postgresql":
+        return service_root("postgresql") / "conf/pg_hba.conf" if file == "hba" else service_root("postgresql") / "conf/postgresql.conf"
+    if service_id == "redis":
+        return service_root("redis") / "conf/redis.conf"
+    if service_id == "memcached":
+        return service_root("memcached") / "conf/memcached.conf"
+    if service_id == "certbot":
+        return service_root("certbot") / "conf/cli.ini"
     return service_root(service_id) / "conf/service.conf"
 
 
-def _default_configuration(service_id: str) -> str:
+def _default_configuration(service_id: str, file: str = "fpm") -> str:
     if service_id == "nginx":
         return nginx_default_configuration(nginx_paths())
-    if service_id == "mysql":
-        return """[mysqld]\nbind-address=127.0.0.1\nport=3306\ndatadir=/opt/server-engine/services/mysql/data\nlog-error=/opt/server-engine/services/mysql/logs/error.log\nslow_query_log=ON\nmax_connections=151\nsql_mode=STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION\n\n[client]\nport=3306\n"""
+    if service_id in {"mysql", "mariadb"}:
+        root = service_root(service_id)
+        return f"""[mariadb]
+bind-address=127.0.0.1
+port=3306
+datadir={root / "data"}
+log-error={root / "logs/error.log"}
+slow_query_log=ON
+long_query_time=2
+max_connections=151
+innodb_buffer_pool_size=256M
+table_open_cache=2000
+thread_cache_size=16
+tmp_table_size=64M
+max_heap_table_size=64M
+skip_name_resolve=1
+local_infile=0
+require_secure_transport=OFF
+binlog_format=ROW
+server_id=1
+relay_log_recovery=1
+expire_logs_days=7
+
+[client]
+port=3306
+"""
     if service_id == "apache":
         return """ServerRoot \"/opt/server-engine/services/apache\"\nListen 80\nServerName localhost\n\n# Apache production baseline for Server Engine\nLoadModule mpm_event_module modules/mod_mpm_event.so\nLoadModule unixd_module modules/mod_unixd.so\nLoadModule authz_core_module modules/mod_authz_core.so\nLoadModule dir_module modules/mod_dir.so\nLoadModule mime_module modules/mod_mime.so\nLoadModule rewrite_module modules/mod_rewrite.so\nLoadModule headers_module modules/mod_headers.so\nLoadModule ssl_module modules/mod_ssl.so\nLoadModule proxy_module modules/mod_proxy.so\nLoadModule proxy_fcgi_module modules/mod_proxy_fcgi.so\nLoadModule http2_module modules/mod_http2.so\nLoadModule deflate_module modules/mod_deflate.so\n\nPidFile \"/opt/server-engine/services/apache/run/httpd.pid\"\nErrorLog \"/opt/server-engine/services/apache/logs/error.log\"\nLogLevel warn\nServerTokens Prod\nServerSignature Off\nEnableSendfile On\nKeepAlive On\nKeepAliveTimeout 5\nMaxKeepAliveRequests 100\nTimeout 60\n\nTypesConfig conf/mime.types\nDirectoryIndex index.php index.html index.htm\nDocumentRoot \"/opt/server-engine/www\"\n\n<Directory \"/opt/server-engine/www\">\n    AllowOverride All\n    Options FollowSymLinks\n    Require all granted\n</Directory>\n\n<IfModule mod_headers.c>\n    Header always set X-Content-Type-Options \"nosniff\"\n    Header always set X-Frame-Options \"SAMEORIGIN\"\n    Header always set Referrer-Policy \"strict-origin-when-cross-origin\"\n</IfModule>\n\n<IfModule mod_deflate.c>\n    AddOutputFilterByType DEFLATE text/plain text/html text/css application/javascript application/json application/xml image/svg+xml\n</IfModule>\n\nIncludeOptional conf/sites/*.conf\n"""
+    if service_id == "openlitespeed":
+        root = service_root("openlitespeed")
+        return f"""# Server Engine OpenLiteSpeed baseline
+serverName ServerEngine
+user serverengine
+group serverengine
+priority -2
+inMemBufSize 60M
+autoRestart 1
+enableIpGeo 0
+enableGzip 1
+enableBr 1
+useSendfile 1
+listener HTTP {{
+  address *:80
+  secure 0
+  map default *
+}}
+virtualHost default {{
+  vhRoot {root / "www"}
+  configFile {root / "conf/vhosts/default/vhost.conf"}
+  allowSymbolLink 1
+  enableScript 1
+  restrained 1
+}}
+errorlog {root / "logs/error.log"} {{
+  logLevel NOTICE
+  rollingSize 10M
+  keepDays 30
+}}
+accesslog {root / "logs/access.log"} {{
+  logFormat "%h %l %u %t \\\"%r\\\" %>s %b"
+  rollingSize 10M
+  keepDays 30
+}}
+"""
+    if service_id == "caddy":
+        root = service_root("caddy")
+        return f"""# Server Engine Caddy baseline
+{{
+    email admin@example.com
+    auto_https prefer_wildcard
+    admin 127.0.0.1:2019
+    storage file-system {root / "data"}
+}}
+
+:80 {{
+    root * {root / "www"}
+    encode zstd gzip
+    file_server
+    log {{
+        output file {root / "logs/access.log"} {{
+            roll_size 10MiB
+            roll_keep 10
+        }}
+        format json
+    }}
+}}
+        """
+    if service_id == "haproxy":
+        root = service_root("haproxy")
+        return f"""# Server Engine HAProxy baseline
+global
+    log stdout format raw local0
+    stats socket {root / "run/admin.sock"} mode 660 level admin
+    maxconn 4096
+
+defaults
+    mode http
+    log global
+    option httplog
+    option dontlognull
+    option redispatch
+    timeout connect 5s
+    timeout client 30s
+    timeout server 30s
+    timeout check 5s
+    default-server inter 3s fall 3 rise 2
+
+frontend http_front
+    bind *:80
+    default_backend web_back
+
+backend web_back
+    balance roundrobin
+    option httpchk GET /health
+    server app1 127.0.0.1:8080 check
+
+listen stats
+    bind 127.0.0.1:8404
+    stats enable
+    stats uri /stats
+    stats refresh 10s
+"""
+    if service_id == "valkey":
+        root = service_root("valkey")
+        return f"""# Server Engine Valkey baseline
+bind 127.0.0.1 ::1
+protected-mode yes
+port 6379
+dir {root / "data"}
+dbfilename dump.rdb
+appendonly no
+appendfsync everysec
+maxmemory 256mb
+maxmemory-policy allkeys-lru
+repl-ping-replica-period 10
+save 900 1
+save 300 10
+save 60 10000
+loglevel notice
+logfile {root / "logs/valkey.log"}
+pidfile {root / "run/valkey.pid"}
+daemonize no
+"""
+    if service_id == "fail2ban":
+        root = service_root("fail2ban")
+        return f"""# Server Engine Fail2ban baseline
+[DEFAULT]
+ignoreip = 127.0.0.1/8 ::1
+bantime = 1h
+findtime = 10m
+maxretry = 5
+backend = auto
+banaction = nftables-multiport
+action = %(action_)s
+
+[sshd]
+enabled = true
+port = ssh
+logpath = {root / "logs/sshd.log"}
+maxretry = 5
+
+[nginx-http-auth]
+enabled = false
+logpath = {root / "logs/nginx-auth.log"}
+
+[recidive]
+enabled = false
+logpath = {root / "logs/fail2ban.log"}
+bantime = 1w
+findtime = 1d
+maxretry = 5
+"""
+    if service_id == "powerdns":
+        return """# Server Engine PowerDNS Authoritative baseline
+launch=local
+local-address=0.0.0.0
+local-port=53
+default-ttl=3600
+default-soa-name=ns1.example.com.
+default-soa-mail=hostmaster.example.com.
+api=yes
+webserver=yes
+webserver-address=127.0.0.1
+webserver-port=8081
+webserver-allow-from=127.0.0.1,::1
+log-dns-queries=no
+loglevel=4
+"""
+    if service_id == "postgresql":
+        if file == "hba":
+            return """# Server Engine PostgreSQL client authentication
+local   all             all                                     scram-sha-256
+host    all             all             127.0.0.1/32            scram-sha-256
+host    all             all             ::1/128                 scram-sha-256
+"""
+        return """# Server Engine PostgreSQL baseline
+listen_addresses = '127.0.0.1'
+port = 5432
+max_connections = 100
+shared_buffers = 256MB
+work_mem = 8MB
+maintenance_work_mem = 64MB
+effective_cache_size = 768MB
+password_encryption = 'scram-sha-256'
+ssl = off
+logging_collector = on
+log_directory = 'logs'
+log_filename = 'postgresql-%Y-%m-%d_%H%M%S.log'
+wal_level = replica
+max_wal_senders = 10
+max_replication_slots = 4
+"""
+    if service_id == "redis":
+        root = service_root("redis")
+        return f"""# Server Engine Redis baseline
+bind 127.0.0.1 ::1
+protected-mode yes
+port 6379
+dir {root / "data"}
+dbfilename dump.rdb
+appendonly no
+appendfilename appendonly.aof
+appendfsync everysec
+maxmemory 256mb
+maxmemory-policy allkeys-lru
+save 900 1
+save 300 10
+save 60 10000
+loglevel notice
+logfile {root / "logs/redis.log"}
+pidfile {root / "run/redis.pid"}
+daemonize no
+"""
+    if service_id == "memcached":
+        root = service_root("memcached")
+        return f"""# Server Engine Memcached command-line configuration
+-m 256
+-p 11211
+-l 127.0.0.1
+-c 1024
+-t 4
+-U 0
+-o modern
+# Memcached is intentionally volatile; it has no persistence or replication.
+"""
+    if service_id == "certbot":
+        root = service_root("certbot")
+        return f"""# Server Engine Certbot defaults
+email =
+agree-tos = true
+non-interactive = true
+preferred-challenges = http
+config-dir = {root / "config"}
+work-dir = {root / "work"}
+logs-dir = {root / "logs"}
+"""
     return ""
 
 
@@ -359,6 +657,16 @@ def logs(
         log_path = php_fpm_paths(version)["error_log"]
     elif service_id == "apache" and kind == "response":
         log_path = service_root(service_id) / "logs/access.log"
+    elif service_id == "openlitespeed" and kind == "response":
+        log_path = service_root(service_id) / "logs/access.log"
+    elif service_id == "caddy" and kind == "response":
+        log_path = service_root(service_id) / "logs/access.log"
+    elif service_id == "haproxy" and kind == "response":
+        log_path = service_root(service_id) / "logs/access.log"
+    elif service_id == "valkey":
+        log_path = service_root(service_id) / "logs/valkey.log"
+    elif service_id == "fail2ban":
+        log_path = service_root(service_id) / "logs/fail2ban.log"
     else:
         log_path = service_root(service_id) / "logs/error.log"
     path = Path(log_path)

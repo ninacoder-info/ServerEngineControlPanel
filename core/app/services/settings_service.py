@@ -397,6 +397,12 @@ class SettingsService:
 
     @staticmethod
     def _validate(values: dict):
+        if not isinstance(values["panel_name"], str) or not 1 <= len(values["panel_name"].strip()) <= 80:
+            raise HTTPException(status_code=400, detail="panel_name must contain between 1 and 80 characters")
+        if not isinstance(values["language"], str) or values["language"] not in {"en", "vi", "fr"}:
+            raise HTTPException(status_code=400, detail="Unsupported panel language")
+        if not isinstance(values["timezone"], str) or not 1 <= len(values["timezone"]) <= 64:
+            raise HTTPException(status_code=400, detail="timezone is invalid")
         if values["panel_theme"] not in {"system", "dark", "light"}:
             raise HTTPException(status_code=400, detail="panel_theme is invalid")
         if values["panel_density"] not in {"comfortable", "compact"}:
@@ -418,6 +424,8 @@ class SettingsService:
             raise HTTPException(status_code=400, detail="panel_date_format is invalid")
         if not isinstance(values["panel_show_hints"], bool):
             raise HTTPException(status_code=400, detail="panel_show_hints is invalid")
+        if values["panel_density"] not in {"comfortable", "compact"}:
+            raise HTTPException(status_code=400, detail="panel_density is invalid")
         if values["storage_file_manager_start"] not in {"web-root", "home", "last-used"}:
             raise HTTPException(status_code=400, detail="storage_file_manager_start is invalid")
         if not isinstance(values["storage_show_hidden_files"], bool) or not isinstance(values["storage_verify_encoding"], bool):
@@ -518,7 +526,9 @@ class SettingsService:
         for key in ("session_timeout_minutes", "certbot_renew_window_days", "job_retention_days", "log_retention_days"):
             if not isinstance(values[key], int) or values[key] < 1 or values[key] > 3650:
                 raise HTTPException(status_code=400, detail=f"{key} must be between 1 and 3650")
-        if values["api_bind_host"] not in {"127.0.0.1", "0.0.0.0", "::1", "::"}:
+        if not isinstance(values["api_enabled"], bool):
+            raise HTTPException(status_code=400, detail="api_enabled must be boolean")
+        if not isinstance(values["api_bind_host"], str) or values["api_bind_host"] not in {"127.0.0.1", "0.0.0.0", "::1", "::"}:
             raise HTTPException(status_code=400, detail="api_bind_host must be a supported bind address")
         if values["api_auth_mode"] not in {"tokens", "session", "both"}:
             raise HTTPException(status_code=400, detail="api_auth_mode is invalid")
@@ -533,8 +543,6 @@ class SettingsService:
         for key, maximum in (("api_rate_limit", 100000), ("api_burst", 10000), ("api_max_page_size", 250), ("api_token_expiry_days", 3650)):
             if not isinstance(values[key], int) or values[key] < 1 or values[key] > maximum:
                 raise HTTPException(status_code=400, detail=f"{key} is out of range")
-        if values["language"] not in {"en", "vi", "fr"}:
-            raise HTTPException(status_code=400, detail="Unsupported panel language")
         if not isinstance(values["notification_email"], str) or len(values["notification_email"]) > 320:
             raise HTTPException(status_code=400, detail="notification_email is invalid")
 

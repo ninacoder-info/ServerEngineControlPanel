@@ -60,6 +60,70 @@ const field =
 const card =
   "rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900";
 
+function MongoWorkspace() {
+  const initial = {
+    bindAddress: "127.0.0.1",
+    port: "27017",
+    dbPath: "/server-engine/data/mongodb",
+    logPath: "/server-engine/logs/mongodb/mongod.log",
+    storageEngine: "WiredTiger",
+    cacheSize: "50% of RAM",
+    oplogSize: "5 GB",
+    auth: true,
+    tls: false,
+    journaling: true,
+    backups: "Daily",
+  };
+  const [settings, setSettings] = React.useState(() => {
+    try { return { ...initial, ...JSON.parse(localStorage.getItem("serverengine:mongodb") || "{}") }; } catch { return initial; }
+  });
+  const [saved, setSaved] = React.useState(false);
+  const set = (key, value) => setSettings((current) => ({ ...current, [key]: value }));
+  const save = () => { localStorage.setItem("serverengine:mongodb", JSON.stringify(settings)); setSaved(true); window.setTimeout(() => setSaved(false), 3000); };
+  const input = "mt-1.5 block min-h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100";
+  return (
+    <section className={`${card} order-1 space-y-5`}>
+      <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start"><div><div className="flex items-center gap-2"><Database size={19} className="text-emerald-500" /><h3 className="text-xl font-semibold text-slate-900 dark:text-slate-100">MongoDB configuration</h3><span className="text-xs font-semibold text-slate-500">v8.2</span></div><p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500 dark:text-slate-400">Configure the document database runtime, storage, security, backups, and application connection defaults.</p></div><span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500"><span className="h-2 w-2 rounded-full bg-slate-400" />Stopped</span></div>
+      <div className="grid gap-3 sm:grid-cols-3"><div className="rounded-md border border-slate-200 p-4 dark:border-slate-800"><span className="text-xs text-slate-500">Databases</span><strong className="mt-1 block text-2xl text-slate-900 dark:text-slate-100">—</strong><span className="text-xs text-slate-500">Connect the runtime to inspect</span></div><div className="rounded-md border border-slate-200 p-4 dark:border-slate-800"><span className="text-xs text-slate-500">Storage engine</span><strong className="mt-1 block text-lg text-slate-900 dark:text-slate-100">WiredTiger</strong><span className="text-xs text-slate-500">Recommended for production</span></div><div className="rounded-md border border-slate-200 p-4 dark:border-slate-800"><span className="text-xs text-slate-500">Replica set</span><strong className="mt-1 block text-lg text-amber-600">Standalone</strong><span className="text-xs text-slate-500">Replication not configured</span></div></div>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4"><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Bind address<input className={input} value={settings.bindAddress} onChange={(event) => set("bindAddress", event.target.value)} /></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Port<input className={input} value={settings.port} onChange={(event) => set("port", event.target.value)} /></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Storage engine<select className={input} value={settings.storageEngine} onChange={(event) => set("storageEngine", event.target.value)}><option>WiredTiger</option><option>In-memory</option></select></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Cache allocation<select className={input} value={settings.cacheSize} onChange={(event) => set("cacheSize", event.target.value)}><option>25% of RAM</option><option>50% of RAM</option><option>60% of RAM</option></select></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Data directory<input className={`${input} font-mono text-xs`} value={settings.dbPath} onChange={(event) => set("dbPath", event.target.value)} /></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Log file<input className={`${input} font-mono text-xs`} value={settings.logPath} onChange={(event) => set("logPath", event.target.value)} /></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Oplog size<select className={input} value={settings.oplogSize} onChange={(event) => set("oplogSize", event.target.value)}><option>1 GB</option><option>5 GB</option><option>10 GB</option><option>20 GB</option></select></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Backup schedule<select className={input} value={settings.backups} onChange={(event) => set("backups", event.target.value)}><option>Manual</option><option>Daily</option><option>Weekly</option></select></label></div>
+      <div className="grid gap-3 md:grid-cols-3"><label className="flex cursor-pointer gap-3 rounded-md border border-slate-200 p-4 text-sm dark:border-slate-800"><input type="checkbox" className="mt-0.5 h-4 w-4 accent-blue-600" checked={settings.auth} onChange={(event) => set("auth", event.target.checked)} /><span><strong className="block text-slate-800 dark:text-slate-200">Access control</strong><span className="mt-1 block text-xs text-slate-500">Require authenticated database users.</span></span></label><label className="flex cursor-pointer gap-3 rounded-md border border-slate-200 p-4 text-sm dark:border-slate-800"><input type="checkbox" className="mt-0.5 h-4 w-4 accent-blue-600" checked={settings.tls} onChange={(event) => set("tls", event.target.checked)} /><span><strong className="block text-slate-800 dark:text-slate-200">TLS connections</strong><span className="mt-1 block text-xs text-slate-500">Encrypt client and replica traffic.</span></span></label><label className="flex cursor-pointer gap-3 rounded-md border border-slate-200 p-4 text-sm dark:border-slate-800"><input type="checkbox" className="mt-0.5 h-4 w-4 accent-blue-600" checked={settings.journaling} onChange={(event) => set("journaling", event.target.checked)} /><span><strong className="block text-slate-800 dark:text-slate-200">Journaling</strong><span className="mt-1 block text-xs text-slate-500">Protect writes during an unexpected restart.</span></span></label></div>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4 dark:border-slate-800"><p className="text-xs text-slate-500 dark:text-slate-400">MongoDB runtime actions and backup execution will connect to the host agent later.</p><button type="button" onClick={save} className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">{saved ? "Saved" : "Save MongoDB settings"}</button></div>
+    </section>
+  );
+}
+
+function SqlServerWorkspace() {
+  const initial = {
+    edition: "Developer",
+    bindAddress: "127.0.0.1",
+    port: "1433",
+    dataPath: "/server-engine/data/sqlserver",
+    backupPath: "/server-engine/backups/sqlserver",
+    memoryLimit: "2 GB",
+    maxDop: "Auto",
+    authMode: "Mixed authentication",
+    tls: false,
+    agent: true,
+    backups: "Daily",
+  };
+  const [settings, setSettings] = React.useState(() => {
+    try { return { ...initial, ...JSON.parse(localStorage.getItem("serverengine:sqlserver") || "{}") }; } catch { return initial; }
+  });
+  const [saved, setSaved] = React.useState(false);
+  const set = (key, value) => setSettings((current) => ({ ...current, [key]: value }));
+  const save = () => { localStorage.setItem("serverengine:sqlserver", JSON.stringify(settings)); setSaved(true); window.setTimeout(() => setSaved(false), 3000); };
+  const input = "mt-1.5 block min-h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100";
+  return (
+    <section className={`${card} order-1 space-y-5`}>
+      <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start"><div><div className="flex items-center gap-2"><Database size={19} className="text-violet-500" /><h3 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Microsoft SQL Server</h3><span className="text-xs font-semibold text-slate-500">2022</span></div><p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500 dark:text-slate-400">Manage the SQL Server runtime, connection policy, resource limits, encryption, and scheduled backups.</p></div><span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500"><span className="h-2 w-2 rounded-full bg-slate-400" />Stopped</span></div>
+      <div className="grid gap-3 sm:grid-cols-3"><div className="rounded-md border border-slate-200 p-4 dark:border-slate-800"><span className="text-xs text-slate-500">Databases</span><strong className="mt-1 block text-2xl text-slate-900 dark:text-slate-100">—</strong><span className="text-xs text-slate-500">Connect the runtime to inspect</span></div><div className="rounded-md border border-slate-200 p-4 dark:border-slate-800"><span className="text-xs text-slate-500">Edition</span><strong className="mt-1 block text-lg text-slate-900 dark:text-slate-100">{settings.edition}</strong><span className="text-xs text-slate-500">License selection</span></div><div className="rounded-md border border-slate-200 p-4 dark:border-slate-800"><span className="text-xs text-slate-500">Backups</span><strong className="mt-1 block text-lg text-emerald-600">{settings.backups}</strong><span className="text-xs text-slate-500">Configured schedule</span></div></div>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4"><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Edition<select className={input} value={settings.edition} onChange={(event) => set("edition", event.target.value)}><option>Developer</option><option>Express</option><option>Web</option><option>Standard</option></select></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Bind address<input className={input} value={settings.bindAddress} onChange={(event) => set("bindAddress", event.target.value)} /></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">TCP port<input className={input} value={settings.port} onChange={(event) => set("port", event.target.value)} /></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Authentication<select className={input} value={settings.authMode} onChange={(event) => set("authMode", event.target.value)}><option>Windows authentication</option><option>Mixed authentication</option></select></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Memory limit<select className={input} value={settings.memoryLimit} onChange={(event) => set("memoryLimit", event.target.value)}><option>1 GB</option><option>2 GB</option><option>4 GB</option><option>8 GB</option><option>Use available memory</option></select></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">MAXDOP<select className={input} value={settings.maxDop} onChange={(event) => set("maxDop", event.target.value)}><option>Auto</option><option>1</option><option>2</option><option>4</option><option>8</option></select></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Data directory<input className={`${input} font-mono text-xs`} value={settings.dataPath} onChange={(event) => set("dataPath", event.target.value)} /></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Backup directory<input className={`${input} font-mono text-xs`} value={settings.backupPath} onChange={(event) => set("backupPath", event.target.value)} /></label></div>
+      <div className="grid gap-3 md:grid-cols-3"><label className="flex cursor-pointer gap-3 rounded-md border border-slate-200 p-4 text-sm dark:border-slate-800"><input type="checkbox" className="mt-0.5 h-4 w-4 accent-blue-600" checked={settings.tls} onChange={(event) => set("tls", event.target.checked)} /><span><strong className="block text-slate-800 dark:text-slate-200">Encrypt connections</strong><span className="mt-1 block text-xs text-slate-500">Require TLS for client traffic.</span></span></label><label className="flex cursor-pointer gap-3 rounded-md border border-slate-200 p-4 text-sm dark:border-slate-800"><input type="checkbox" className="mt-0.5 h-4 w-4 accent-blue-600" checked={settings.agent} onChange={(event) => set("agent", event.target.checked)} /><span><strong className="block text-slate-800 dark:text-slate-200">SQL Server Agent</strong><span className="mt-1 block text-xs text-slate-500">Enable scheduled jobs and maintenance tasks.</span></span></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Backup schedule<select className={input} value={settings.backups} onChange={(event) => set("backups", event.target.value)}><option>Manual</option><option>Daily</option><option>Weekly</option></select></label></div>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4 dark:border-slate-800"><p className="text-xs text-slate-500 dark:text-slate-400">SQL Server runs in a supported isolated deployment. Runtime and backup actions will connect to the host agent later.</p><button type="button" onClick={save} className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">{saved ? "Saved" : "Save SQL Server settings"}</button></div>
+    </section>
+  );
+}
+
 function EngineCard({ engine, selected, onSelect }) {
   return (
     <button
@@ -300,6 +364,8 @@ export default function DatabasesPage() {
   };
   return (
     <div className="flex flex-col gap-7">
+      {window.location.hash === "#mongodb" && <MongoWorkspace />}
+      {window.location.hash === "#sqlserver" && <SqlServerWorkspace />}
       <div className="flex flex-col items-start justify-between gap-4 md:flex-row md:items-end">
         <div>
           <p className="text-sm font-medium text-blue-600 dark:text-blue-400">

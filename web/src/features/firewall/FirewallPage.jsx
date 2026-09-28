@@ -22,6 +22,8 @@ import { apiRequest, readApiError } from "../../lib/api";
 
 const tabs = [
   ["rules", "Firewall rules"],
+  ["waf", "Web application firewall"],
+  ["ddos", "DDoS protection"],
   ["forwarding", "Port forwarding"],
   ["aliases", "Aliases"],
   ["blocked", "Blocked addresses"],
@@ -312,7 +314,7 @@ function RuleModal({ rule, onClose, onSave }) {
 }
 
 export default function FirewallPage() {
-  const [tab, setTab] = React.useState("rules");
+  const [tab, setTab] = React.useState(() => window.location.hash === "#waf" ? "waf" : window.location.hash === "#ddos" ? "ddos" : "rules");
   const [rules, setRules] = React.useState(initialRules);
   const [query, setQuery] = React.useState("");
   const [action, setAction] = React.useState("all");
@@ -322,6 +324,34 @@ export default function FirewallPage() {
   const [firewallStatus, setFirewallStatus] = React.useState("loading");
   const [error, setError] = React.useState("");
   const [loading, setLoading] = React.useState(true);
+  const [waf, setWaf] = React.useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("serverengine:waf-policy") || "null") || {
+        engine: "DetectionOnly",
+        crs: true,
+        paranoia: 1,
+        anomaly: 5,
+        audit: true,
+        auditParts: "ABIJDEFHZ",
+        requestBodyLimit: 131072,
+        responseBodyLimit: 524288,
+        nginx: true,
+        apache: false,
+        exclusions: "",
+      };
+    } catch {
+      return { engine: "DetectionOnly", crs: true, paranoia: 1, anomaly: 5, audit: true, auditParts: "ABIJDEFHZ", requestBodyLimit: 131072, responseBodyLimit: 524288, nginx: true, apache: false, exclusions: "" };
+    }
+  });
+  const [wafMessage, setWafMessage] = React.useState("");
+  const [ddos, setDdos] = React.useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("serverengine:ddos-policy") || "null") || { enabled: true, requestsPerSecond: 25, burst: 50, concurrent: 200, banDuration: "10m", trustedProxies: "", mode: "rate-limit", logMitigations: true };
+    } catch {
+      return { enabled: true, requestsPerSecond: 25, burst: 50, concurrent: 200, banDuration: "10m", trustedProxies: "", mode: "rate-limit", logMitigations: true };
+    }
+  });
+  const [ddosMessage, setDdosMessage] = React.useState("");
   const load = React.useCallback(async () => {
     setLoading(true);
     const response = await apiRequest("/api/v1/firewall");
@@ -379,6 +409,16 @@ export default function FirewallPage() {
         .toLowerCase()
         .includes(query.toLowerCase()),
   );
+  const updateWaf = (key, value) => setWaf((current) => ({ ...current, [key]: value }));
+  const saveWaf = () => {
+    localStorage.setItem("serverengine:waf-policy", JSON.stringify(waf));
+    setWafMessage("WAF policy saved for this panel profile.");
+  };
+  const updateDdos = (key, value) => setDdos((current) => ({ ...current, [key]: value }));
+  const saveDdos = () => {
+    localStorage.setItem("serverengine:ddos-policy", JSON.stringify(ddos));
+    setDdosMessage("DDoS protection policy saved for this panel profile.");
+  };
   return (
     <div className="space-y-7">
       <div className="flex flex-col items-start justify-between gap-4 md:flex-row md:items-end">
@@ -489,7 +529,46 @@ export default function FirewallPage() {
             ))}
           </div>
         </div>
-        {tab === "rules" ? (
+        {tab === "waf" ? (
+          <div className="space-y-6 p-5">
+            <div>
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">ModSecurity WAF</h3>
+              <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500 dark:text-slate-400">Inspect and tune OWASP Core Rule Set protection for websites behind Nginx or Apache. Start in detection mode, review events, then move to blocking after false positives are resolved.</p>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Engine mode<select className="mt-1.5 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" value={waf.engine} onChange={(event) => updateWaf("engine", event.target.value)}><option value="Off">Off</option><option value="DetectionOnly">Detection only</option><option value="On">Blocking</option></select></label>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">CRS paranoia level<select className="mt-1.5 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" value={waf.paranoia} onChange={(event) => updateWaf("paranoia", Number(event.target.value))}><option value="1">1 · Baseline</option><option value="2">2 · Hardened</option><option value="3">3 · Strict</option><option value="4">4 · Maximum</option></select></label>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Inbound anomaly threshold<input className="mt-1.5 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" type="number" min="1" value={waf.anomaly} onChange={(event) => updateWaf("anomaly", Number(event.target.value))} /></label>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Request body limit (bytes)<input className="mt-1.5 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" type="number" min="1024" value={waf.requestBodyLimit} onChange={(event) => updateWaf("requestBodyLimit", Number(event.target.value))} /></label>
+            </div>
+            <div className="space-y-3">
+              <label className="flex cursor-pointer items-start gap-3"><input type="checkbox" className="mt-1 h-4 w-4 accent-blue-600" checked={waf.crs} onChange={(event) => updateWaf("crs", event.target.checked)} /><span><span className="block text-sm font-medium text-slate-900 dark:text-slate-100">Enable OWASP Core Rule Set</span><span className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">Use the maintained generic attack-detection rules for SQL injection, XSS, protocol abuse, scanners, and common exploit patterns.</span></span></label>
+              <label className="flex cursor-pointer items-start gap-3"><input type="checkbox" className="mt-1 h-4 w-4 accent-blue-600" checked={waf.audit} onChange={(event) => updateWaf("audit", event.target.checked)} /><span><span className="block text-sm font-medium text-slate-900 dark:text-slate-100">Audit suspicious transactions</span><span className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">Keep request evidence for incident review without logging every successful request.</span></span></label>
+              <label className="flex cursor-pointer items-start gap-3"><input type="checkbox" className="mt-1 h-4 w-4 accent-blue-600" checked={waf.nginx} onChange={(event) => updateWaf("nginx", event.target.checked)} /><span className="text-sm font-medium text-slate-900 dark:text-slate-100">Protect Nginx websites</span></label>
+              <label className="flex cursor-pointer items-start gap-3"><input type="checkbox" className="mt-1 h-4 w-4 accent-blue-600" checked={waf.apache} onChange={(event) => updateWaf("apache", event.target.checked)} /><span className="text-sm font-medium text-slate-900 dark:text-slate-100">Protect Apache websites</span></label>
+            </div>
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Rule exclusions<textarea className="mt-1.5 min-h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" value={waf.exclusions} onChange={(event) => updateWaf("exclusions", event.target.value)} placeholder="One rule ID or website path per line" /></label>
+            <div className="flex items-center justify-between gap-4"><p className="text-sm text-slate-500 dark:text-slate-400">{wafMessage || "Review detection events before enabling blocking in production."}</p><button type="button" className="inline-flex cursor-pointer items-center justify-center rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700" onClick={saveWaf}>Save WAF policy</button></div>
+          </div>
+        ) : tab === "ddos" ? (
+          <div className="space-y-6 p-5">
+            <div>
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">DDoS and traffic protection</h3>
+              <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500 dark:text-slate-400">Protect the origin from connection floods and application-layer bursts. This controls the local server; upstream or provider-level volumetric attacks still require edge protection.</p>
+            </div>
+            <label className="flex cursor-pointer items-start gap-3"><input type="checkbox" className="mt-1 h-4 w-4 accent-blue-600" checked={ddos.enabled} onChange={(event) => updateDdos("enabled", event.target.checked)} /><span><span className="block text-sm font-medium text-slate-900 dark:text-slate-100">Enable origin traffic protection</span><span className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">Apply limits before requests reach the website runtime.</span></span></label>
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Mitigation mode<select className="mt-1.5 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" value={ddos.mode} onChange={(event) => updateDdos("mode", event.target.value)}><option value="rate-limit">Rate limit</option><option value="challenge">Challenge suspicious clients</option><option value="block">Block over-limit clients</option></select></label>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Requests per second<input className="mt-1.5 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" type="number" min="1" value={ddos.requestsPerSecond} onChange={(event) => updateDdos("requestsPerSecond", Number(event.target.value))} /></label>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Burst allowance<input className="mt-1.5 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" type="number" min="1" value={ddos.burst} onChange={(event) => updateDdos("burst", Number(event.target.value))} /></label>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Concurrent connections<input className="mt-1.5 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" type="number" min="1" value={ddos.concurrent} onChange={(event) => updateDdos("concurrent", Number(event.target.value))} /></label>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Temporary ban duration<input className="mt-1.5 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" value={ddos.banDuration} onChange={(event) => updateDdos("banDuration", event.target.value)} /></label>
+            </div>
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Trusted proxy networks<textarea className="mt-1.5 min-h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" value={ddos.trustedProxies} onChange={(event) => updateDdos("trustedProxies", event.target.value)} placeholder="One CIDR range per line" /></label>
+            <label className="flex cursor-pointer items-start gap-3"><input type="checkbox" className="mt-1 h-4 w-4 accent-blue-600" checked={ddos.logMitigations} onChange={(event) => updateDdos("logMitigations", event.target.checked)} /><span><span className="block text-sm font-medium text-slate-900 dark:text-slate-100">Log mitigation events</span><span className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">Record rate-limit, challenge, and temporary-ban decisions for review.</span></span></label>
+            <div className="flex items-center justify-between gap-4"><p className="text-sm text-slate-500 dark:text-slate-400">{ddosMessage || "Provider-level volumetric DDoS protection must be configured at the hosting or CDN edge."}</p><button type="button" className="inline-flex cursor-pointer items-center justify-center rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700" onClick={saveDdos}>Save DDoS policy</button></div>
+          </div>
+        ) : tab === "rules" ? (
           <div className="p-5">
             <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
               <div>

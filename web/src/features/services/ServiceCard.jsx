@@ -18,7 +18,7 @@ export default function ServiceCard({
   onTogglePin,
 }) {
   const active = installed?.status === "running";
-  const capability = service.mode !== "service";
+  const capability = service.mode !== "service" && !installed;
   return (
     <article className={`service-card ${pinned ? "service-card-pinned" : ""}`}>
       <div className="service-card-top">
@@ -34,7 +34,7 @@ export default function ServiceCard({
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <span
-              className={`status-pill ${active || installed?.status === "installed" ? "status-running" : capability ? "status-stopped" : installed?.status === "stopped" ? "status-stopped" : "status-missing"}`}
+              className={`status-pill ${active || installed?.status === "installed" ? "status-running" : capability ? "status-missing" : installed?.status === "stopped" ? "status-stopped" : "status-missing"}`}
             >
               {capability ? (
                 <ExternalLink size={13} />
@@ -48,9 +48,7 @@ export default function ServiceCard({
                 <Download size={13} />
               )}{" "}
               {capability
-                ? service.mode === "integration"
-                  ? "Integration"
-                  : "Managed feature"
+                ? "Not installed"
                 : active
                   ? "Running"
                   : installed?.status === "installed"
@@ -75,6 +73,7 @@ export default function ServiceCard({
           <span>{service.category}</span>
           <span>{service.license}</span>
           {installed?.version && <span>v{installed.version}</span>}
+          {service.default_port && <span>Port {service.default_port}</span>}
           {installedVersions.length > 1 && (
             <span>{installedVersions.length} versions installed</span>
           )}
@@ -88,7 +87,7 @@ export default function ServiceCard({
         <div className="service-actions">
           {capability ? (
             <a
-              href={service.management_path || "/settings"}
+              href={service.id === "modsecurity" ? "/firewall#waf" : service.id === "ddos-protection" ? "/firewall#ddos" : service.id === "cloudflare" ? "/domains#cloudflare" : service.id === "malware-scanner" ? "/health#malware" : service.id === "clamav" ? "/health#clamav" : service.id === "lynis" ? "/health#lynis" : service.id === "node-exporter" ? "/health#node-exporter" : service.id === "logrotate" ? "/logs#logrotate" : service.id === "rabbitmq" ? "/services#rabbitmq" : service.id === "mongodb" ? "/databases#mongodb" : service.id === "sqlserver" ? "/databases#sqlserver" : service.id === "opensearch" ? "/services#opensearch" : service.id === "docker" ? "/services#docker" : service.id === "git" ? "/services#git" : service.id === "wp-cli" ? "/services#wp-cli" : service.id === "imagemagick" ? "/services#imagemagick" : service.id === "ffmpeg" ? "/services#ffmpeg" : service.id === "supervisor" ? "/services#supervisor" : service.id === "pm2" ? "/services#pm2" : service.id === "postfix" ? "/email#postfix" : service.id === "dovecot" ? "/email#dovecot" : service.id === "rspamd" ? "/email#rspamd" : service.id === "stalwart" ? "/email#stalwart" : service.id === "bind9" ? "/domains#bind" : service.id === "unbound" ? "/domains#unbound" : service.id === "auditd" ? "/logs#auditd" : service.management_path || "/settings"}
               className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 py-2 text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
             >
               {service.management_label || "Open controls"}

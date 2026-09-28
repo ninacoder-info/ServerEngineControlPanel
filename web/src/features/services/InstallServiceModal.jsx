@@ -1,5 +1,5 @@
 import React from "react";
-import { X } from "lucide-react";
+import { RefreshCw, X } from "lucide-react";
 import { apiRequest, readApiError } from "../../lib/api";
 
 export default function InstallServiceModal({
@@ -10,8 +10,30 @@ export default function InstallServiceModal({
   const [version, setVersion] = React.useState(
     initialVersion || service.versions[0]?.version || "",
   );
+  const [versions, setVersions] = React.useState(service.versions);
   const [message, setMessage] = React.useState("");
   const [busy, setBusy] = React.useState(false);
+  const [refreshing, setRefreshing] = React.useState(false);
+
+  async function refreshVersions() {
+    setRefreshing(true);
+    setMessage("");
+    const response = await apiRequest(
+      `/api/v1/services/${service.id}/versions/refresh`,
+      { method: "POST" },
+    );
+    const body = response.ok ? await response.json() : { message: await readApiError(response) };
+    if (response.ok && body.versions?.length) {
+      setVersions(body.versions);
+      if (!body.versions.some((item) => item.version === version)) {
+        setVersion(body.versions[0].version);
+      }
+      setMessage(body.message || "Compatible versions refreshed.");
+    } else {
+      setMessage(body.message || "Unable to refresh compatible versions.");
+    }
+    setRefreshing(false);
+  }
 
   async function submit(event) {
     event.preventDefault();
@@ -65,13 +87,24 @@ export default function InstallServiceModal({
         </div>
         <form onSubmit={submit} className="mt-6 space-y-5">
           <label className="block text-sm font-medium text-slate-800 dark:text-slate-200">
-            Version
+            <span className="flex items-center justify-between gap-3">
+              <span>Version</span>
+              <button
+                type="button"
+                className="inline-flex cursor-pointer items-center gap-1.5 text-xs font-semibold text-blue-600 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60 dark:text-blue-400 dark:hover:text-blue-300"
+                onClick={refreshVersions}
+                disabled={refreshing || busy}
+              >
+                <RefreshCw size={13} className={refreshing ? "animate-spin" : ""} />
+                {refreshing ? "Fetching…" : "Fetch compatible versions"}
+              </button>
+            </span>
             <select
               value={version}
               onChange={(event) => setVersion(event.target.value)}
               className="mt-2 block min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
             >
-              {service.versions.map((item) => (
+              {versions.map((item) => (
                 <option key={item.version} value={item.version}>
                   {item.version} · {item.channel}
                 </option>
