@@ -551,6 +551,8 @@ def _configuration_path(service_id: str, version: str | None, file: str = "fpm")
         return php_fpm_paths(version)["ini" if file == "ini" else "config"]
     if service_id in {"mysql", "mariadb"}:
         return service_root(service_id) / "conf/my.cnf"
+    if service_id == "mongodb":
+        return service_root("mongodb") / "conf/mongod.conf"
     if service_id == "apache":
         return service_root("apache") / "conf/httpd.conf"
     if service_id == "openlitespeed":
@@ -604,6 +606,33 @@ expire_logs_days=7
 
 [client]
 port=3306
+"""
+    if service_id == "mongodb":
+        root = service_root("mongodb")
+        return f"""# MongoDB server configuration managed by Server Engine
+systemLog:
+  destination: file
+  path: {root / 'logs/mongod.log'}
+  logAppend: true
+  verbosity: 0
+storage:
+  dbPath: {root / 'data'}
+  journal:
+    enabled: true
+  wiredTiger:
+    engineConfig:
+      cacheSizeGB: 0.5
+net:
+  bindIp: 127.0.0.1
+  port: 27017
+  maxIncomingConnections: 1000
+security:
+  authorization: disabled
+operationProfiling:
+  mode: slowOp
+  slowOpThresholdMs: 100
+processManagement:
+  fork: false
 """
     if service_id == "apache":
         return """ServerRoot \"/opt/server-engine/services/apache\"\nListen 80\nServerName localhost\n\n# Apache production baseline for Server Engine\nLoadModule mpm_event_module modules/mod_mpm_event.so\nLoadModule unixd_module modules/mod_unixd.so\nLoadModule authz_core_module modules/mod_authz_core.so\nLoadModule dir_module modules/mod_dir.so\nLoadModule mime_module modules/mod_mime.so\nLoadModule rewrite_module modules/mod_rewrite.so\nLoadModule headers_module modules/mod_headers.so\nLoadModule ssl_module modules/mod_ssl.so\nLoadModule proxy_module modules/mod_proxy.so\nLoadModule proxy_fcgi_module modules/mod_proxy_fcgi.so\nLoadModule http2_module modules/mod_http2.so\nLoadModule deflate_module modules/mod_deflate.so\n\nPidFile \"/opt/server-engine/services/apache/run/httpd.pid\"\nErrorLog \"/opt/server-engine/services/apache/logs/error.log\"\nLogLevel warn\nServerTokens Prod\nServerSignature Off\nEnableSendfile On\nKeepAlive On\nKeepAliveTimeout 5\nMaxKeepAliveRequests 100\nTimeout 60\n\nTypesConfig conf/mime.types\nDirectoryIndex index.php index.html index.htm\nDocumentRoot \"/opt/server-engine/www\"\n\n<Directory \"/opt/server-engine/www\">\n    AllowOverride All\n    Options FollowSymLinks\n    Require all granted\n</Directory>\n\n<IfModule mod_headers.c>\n    Header always set X-Content-Type-Options \"nosniff\"\n    Header always set X-Frame-Options \"SAMEORIGIN\"\n    Header always set Referrer-Policy \"strict-origin-when-cross-origin\"\n</IfModule>\n\n<IfModule mod_deflate.c>\n    AddOutputFilterByType DEFLATE text/plain text/html text/css application/javascript application/json application/xml image/svg+xml\n</IfModule>\n\nIncludeOptional conf/sites/*.conf\n"""
@@ -687,7 +716,7 @@ defaults
     default-server inter 3s fall 3 rise 2
 
 frontend http_front
-    bind *:80
+    bind 127.0.0.1:8080
     default_backend web_back
 
 backend web_back
@@ -893,6 +922,8 @@ def logs(
     elif service_id == "php" and version:
         from app.services.service_runtime import php_fpm_paths
         log_path = php_fpm_paths(version)["error_log"]
+    elif service_id == "mongodb":
+        log_path = service_root("mongodb") / "logs/mongod.log"
     elif service_id == "apache" and kind == "response":
         log_path = service_root(service_id) / "logs/access.log"
     elif service_id == "openlitespeed" and kind == "response":
@@ -901,6 +932,8 @@ def logs(
         log_path = service_root(service_id) / "logs/access.log"
     elif service_id == "haproxy" and kind == "response":
         log_path = service_root(service_id) / "logs/access.log"
+    elif service_id == "haproxy":
+        log_path = service_root(service_id) / "logs/haproxy.log"
     elif service_id == "valkey":
         log_path = service_root(service_id) / "logs/valkey.log"
     elif service_id == "fail2ban":

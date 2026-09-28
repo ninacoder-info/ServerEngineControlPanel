@@ -11,11 +11,11 @@ import {
 } from "lucide-react";
 import { useTranslation } from "../../lib/i18n";
 
-function QuickAction({ icon: Icon, title, description, onClick }) {
+function QuickAction({ icon: Icon, title, description, href }) {
   return (
-    <button
-      onClick={onClick}
-      className="group flex items-start gap-3 rounded-lg border border-slate-200 bg-white p-4 text-left transition hover:border-blue-300 hover:bg-blue-50/40 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-blue-800 dark:hover:bg-blue-950/20"
+    <a
+      href={href}
+      className="group flex items-start gap-3 rounded-lg border border-slate-200 bg-white p-4 text-left no-underline transition hover:border-blue-300 hover:bg-blue-50/40 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-blue-800 dark:hover:bg-blue-950/20"
     >
       <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-600 group-hover:bg-blue-100 group-hover:text-blue-600 dark:bg-slate-800 dark:text-slate-300 dark:group-hover:bg-blue-950 dark:group-hover:text-blue-300">
         <Icon size={17} />
@@ -32,7 +32,7 @@ function QuickAction({ icon: Icon, title, description, onClick }) {
         size={15}
         className="ml-auto mt-1 shrink-0 text-slate-400 transition group-hover:translate-x-0.5 group-hover:text-blue-500"
       />
-    </button>
+    </a>
   );
 }
 
@@ -82,25 +82,25 @@ export default function DashboardWorkspace({ onNavigate }) {
             icon={FilePlus2}
             title={t("dashboard.createWebsite")}
             description={t("dashboard.createWebsiteDescription")}
-            onClick={() => onNavigate("/websites")}
+            href="/websites"
           />
           <QuickAction
             icon={PackagePlus}
             title={t("dashboard.installService")}
             description={t("dashboard.installServiceDescription")}
-            onClick={() => onNavigate("/services")}
+            href="/services"
           />
           <QuickAction
             icon={FolderOpen}
             title={t("dashboard.openFileManager")}
             description={t("dashboard.openFileManagerDescription")}
-            onClick={() => onNavigate("/file-manager")}
+            href="/file-manager"
           />
           <QuickAction
             icon={KeyRound}
             title={t("dashboard.reviewSecurity")}
             description={t("dashboard.reviewSecurityDescription")}
-            onClick={() => onNavigate("/settings")}
+            href="/settings"
           />
         </div>
       </div>

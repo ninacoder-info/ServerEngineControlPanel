@@ -127,17 +127,19 @@ export default function Sidebar({ open, onClose, active, onSelect }) {
             </span>
             <span className="flex items-center gap-2">
               <span className="text-xs font-semibold text-slate-400">68%</span>
-              <button
+              <a
+                href="/settings"
                 className="grid h-6 w-6 place-items-center rounded-md text-slate-500 hover:bg-slate-200 hover:text-slate-800 dark:hover:bg-slate-800 dark:hover:text-slate-200"
                 title="Open settings"
                 aria-label="Open settings"
-                onClick={() => {
+                onClick={(event) => {
+                  event.preventDefault();
                   onSelect("/settings");
                   onClose();
                 }}
               >
                 <Settings size={14} />
-              </button>
+              </a>
             </span>
           </div>
           <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">

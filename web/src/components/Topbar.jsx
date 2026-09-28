@@ -201,11 +201,15 @@ export default function Topbar({
         <Menu size={22} />
       </button>
       <div className="ml-auto flex items-center gap-2">
-        <button
+        <a
+          href="/terminal"
           className="icon-button !rounded-full relative"
           aria-label="Open terminal"
           title="Open terminal"
-          onClick={() => onNavigate("/terminal")}
+          onClick={(event) => {
+            event.preventDefault();
+            onNavigate("/terminal");
+          }}
         >
           <Terminal size={18} />
           {terminalSessions > 0 && (
@@ -213,7 +217,7 @@ export default function Topbar({
               {terminalSessions > 99 ? "99+" : terminalSessions}
             </span>
           )}
-        </button>
+        </a>
         <div className="relative" ref={jobsRef}>
           <button
             className={`icon-button !rounded-full job-button ${activeJobs ? "job-button-active" : ""}`}
@@ -397,36 +401,45 @@ export default function Topbar({
                 </p>
               </div>
               <div className="p-2">
-                <button
-                  onClick={() => {
+                <a
+                  href="/account"
+                  onClick={(event) => {
+                    event.preventDefault();
                     onNavigate("/account");
                     setAccountOpen(false);
                   }}
                   className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                  title="Account settings"
                 >
                   <UserRound size={16} />
                   Account settings
-                </button>
-                <button
-                  onClick={() => {
+                </a>
+                <a
+                  href="/settings"
+                  onClick={(event) => {
+                    event.preventDefault();
                     onNavigate("/settings");
                     setAccountOpen(false);
                   }}
                   className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                  title="Panel settings"
                 >
                   <Settings2 size={16} />
                   Panel settings
-                </button>
-                <button
-                  onClick={() => {
+                </a>
+                <a
+                  href="/logs"
+                  onClick={(event) => {
+                    event.preventDefault();
                     onNavigate("/logs");
                     setAccountOpen(false);
                   }}
                   className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                  title="View activity logs"
                 >
                   <ExternalLink size={16} />
                   View activity logs
-                </button>
+                </a>
                 <button
                   onClick={() => setAccountOpen(false)}
                   className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"

@@ -84,6 +84,7 @@ _NGINX_SOURCES: dict[str, str] = {}
 _APACHE_SOURCES: dict[str, str] = {}
 _STALWART_SOURCES: dict[str, str] = {}
 _MONGODB_SOURCES: dict[str, str] = {}
+_MONGODB_PREBUILTS: dict[str, str] = {}
 _OPENSEARCH_SOURCES: dict[str, str] = {}
 _WPCLI_SOURCES: dict[str, str] = {}
 _POSTFIX_SOURCES: dict[str, str] = {}
@@ -1192,6 +1193,65 @@ def mongodb_source_for(version: str) -> str | None:
     return _MONGODB_SOURCES.get(version)
 
 
+def _refresh_mongodb_prebuilt_versions(definition: ServiceDefinition):
+    """Fetch MongoDB Community tarballs for this Ubuntu architecture."""
+    release = {}
+    try:
+        for line in Path("/etc/os-release").read_text(errors="replace").splitlines():
+            key, _, value = line.partition("=")
+            release[key] = value.strip().strip('"')
+    except OSError:
+        return None
+    if release.get("ID") != "ubuntu":
+        return None
+    ubuntu_version = re.sub(r"[^0-9]", "", release.get("VERSION_ID", ""))
+    architecture = {"x86_64": "x86_64", "amd64": "x86_64", "aarch64": "aarch64", "arm64": "aarch64"}.get(platform.machine().lower())
+    if not ubuntu_version or not architecture:
+        return None
+    request = urllib.request.Request(
+        "https://www.mongodb.com/try/download/community-edition/releases/archive",
+        headers={"User-Agent": "Server-Engine-Control-Panel"},
+    )
+    with urllib.request.urlopen(request, timeout=20) as response:
+        html = response.read().decode("utf-8", "replace")
+    pattern = re.compile(rf"mongodb-linux-{architecture}-ubuntu{re.escape(ubuntu_version)}-(\d+\.\d+\.\d+)\.tgz")
+    versions = sorted(set(pattern.findall(html)), key=lambda item: tuple(int(part) for part in item.split(".")), reverse=True)
+    if not versions:
+        return None
+    selected = []
+    seen_minor = set()
+    sources = {}
+    for version in versions:
+        minor = ".".join(version.split(".")[:2])
+        if minor in seen_minor:
+            continue
+        filename = f"mongodb-linux-{architecture}-ubuntu{ubuntu_version}-{version}.tgz"
+        url = f"https://fastdl.mongodb.org/linux/{filename}"
+        try:
+            probe = urllib.request.Request(url, headers={"Range": "bytes=0-0", "User-Agent": "Server-Engine-Control-Panel"})
+            with urllib.request.urlopen(probe, timeout=8) as response:
+                response.read(1)
+        except Exception:
+            continue
+        seen_minor.add(minor)
+        selected.append(version)
+        sources[version] = url
+        if len(selected) == 12:
+            break
+    if not selected:
+        return None
+    _MONGODB_PREBUILTS.clear()
+    _MONGODB_PREBUILTS.update(sources)
+    _VERSION_REFRESHED_AT["mongodb-prebuilt"] = time.monotonic()
+    latest_minor = selected[0].rsplit(".", 1)[0]
+    definition.versions = [v(version, "stable" if version.rsplit(".", 1)[0] == latest_minor else "security") for version in selected]
+    return len(selected)
+
+
+def mongodb_prebuilt_for(version: str) -> str | None:
+    return _MONGODB_PREBUILTS.get(version)
+
+
 def _refresh_github_source_versions(definition: ServiceDefinition, service_id: str, repository: str, tag_prefix: str, archive_prefix: str):
     sources = {
         "opensearch": _OPENSEARCH_SOURCES,
@@ -1463,7 +1523,7 @@ CATALOG.extend([
 for _service in CATALOG:
     if _service.id in {"fail2ban", "modsecurity", "auditd", "logrotate"}:
         _service.install_methods = ["prebuilt"]
-    elif _service.id in _PREBUILT_PACKAGES:
+    elif _service.id in _PREBUILT_PACKAGES or _service.id == "mongodb":
         _service.install_methods = ["prebuilt", "source"]
     elif _service.id in {"nodejs", "python", "composer", "pm2", "sqlserver"}:
         # These adapters use versioned portable archives or package-manager
@@ -1509,6 +1569,14 @@ def refresh_service_versions(service_id: str, force: bool = False, install_metho
                 _SELECTED_PREBUILT_PACKAGES[service_id] = package
                 return definition, "apt", f"Fetched {count} {definition.name} packages compatible with this OS and architecture."
         return definition, "apt", f"No compatible prebuilt {definition.name} packages were found for this OS and architecture."
+    if install_method == "prebuilt" and service_id == "mongodb":
+        try:
+            count = _refresh_mongodb_prebuilt_versions(definition)
+            if count:
+                return definition, "mongodb-downloads", f"Fetched {count} MongoDB archives compatible with this OS and architecture."
+        except Exception:
+            pass
+        return definition, "mongodb-downloads", "No compatible prebuilt MongoDB archives were found for this OS and architecture. Choose source build instead."
     if service_id == "composer":
         try:
             count = _refresh_composer_versions(definition)
@@ -1683,6 +1751,10 @@ def refresh_service_versions(service_id: str, force: bool = False, install_metho
         return definition, "catalog", "The PowerDNS release catalog could not be reached. Refresh compatible versions and try again."
 
     if service_id == "sqlserver":
+        if platform.machine().lower() not in {"x86_64", "amd64"}:
+            _SQLSERVER_RELEASES.clear()
+            definition.versions = []
+            return definition, "unsupported-architecture", "Microsoft SQL Server's official Linux container requires an x86_64 host; no compatible ARM64 versions are available."
         try:
             count = _refresh_sqlserver_versions(definition)
             if count:

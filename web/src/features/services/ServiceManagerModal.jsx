@@ -29,6 +29,7 @@ import CaddyConfigModal from "./CaddyConfigModal";
 import HaProxyConfigModal from "./HaProxyConfigModal";
 import ValkeyConfigModal from "./ValkeyConfigModal";
 import Fail2banConfigModal from "./Fail2banConfigModal";
+import MongoDbConfigModal from "./MongoDbConfigModal";
 import SaveButton from "../../components/SaveButton";
 import Toast from "../../components/Toast";
 
@@ -1128,6 +1129,15 @@ export default function ServiceManagerModal({
   if (service.id === "mariadb") {
     return (
       <MariaDbConfigModal
+        service={service}
+        installed={installedProp}
+        onClose={onClose}
+      />
+    );
+  }
+  if (service.id === "mongodb") {
+    return (
+      <MongoDbConfigModal
         service={service}
         installed={installedProp}
         onClose={onClose}

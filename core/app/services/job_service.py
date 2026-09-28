@@ -19,7 +19,7 @@ from threading import Event, Thread
 from threading import Lock
 
 from app.models.job import JobSummary
-from app.services.service_catalog import apache_source_for, bind9_source_for, certbot_source_for, caddy_source_for, clamav_source_for, dovecot_source_for, ffmpeg_source_for, git_source_for, haproxy_source_for, imagemagick_source_for, lynis_source_for, mariadb_source_for, memcached_source_for, mongodb_source_for, mysql_release_for, nginx_source_for, opensearch_source_for, openlitespeed_source_for, php_source_for, postfix_source_for, powerdns_source_for, postgresql_source_for, prebuilt_package_for, python_asset_for, rabbitmq_source_for, redis_source_for, refresh_service_versions, rspamd_source_for, ruby_source_for, stalwart_source_for, supervisor_source_for, unbound_source_for, valkey_source_for, vsftpd_source_for, wpcli_source_for
+from app.services.service_catalog import apache_source_for, bind9_source_for, certbot_source_for, caddy_source_for, clamav_source_for, dovecot_source_for, ffmpeg_source_for, git_source_for, haproxy_source_for, imagemagick_source_for, lynis_source_for, mariadb_source_for, memcached_source_for, mongodb_prebuilt_for, mongodb_source_for, mysql_release_for, nginx_source_for, opensearch_source_for, openlitespeed_source_for, php_source_for, postfix_source_for, powerdns_source_for, postgresql_source_for, prebuilt_package_for, python_asset_for, rabbitmq_source_for, redis_source_for, refresh_service_versions, rspamd_source_for, ruby_source_for, stalwart_source_for, supervisor_source_for, unbound_source_for, valkey_source_for, vsftpd_source_for, wpcli_source_for
 from app.services.service_runtime import PHP_BASELINE_MODULES, PHP_REQUIRED_EXTENSIONS, SERVICE_PACKAGES, binary_path, enable_php_baseline_extensions, ensure_composer_cache, ensure_nginx_layout, ensure_node_runtime, ensure_php_fpm_layout, ensure_php_runtime_configuration, ensure_php_runtime_launcher, nginx_paths, normalize_php_runtime_layout, package_for, php_cli_path, php_fpm_paths, php_runtime_library_path, service_root, version_sort_key
 
 
@@ -152,6 +152,9 @@ class JobStore:
     def _run_action(self, job_id: str, service_id: str, action: str, version: str | None = None):
         if service_id in {"mysql", "mariadb"}:
             self._run_mysql_action(job_id, action, service_id)
+            return
+        if service_id == "mongodb":
+            self._run_mongodb_action(job_id, action)
             return
         if service_id == "vsftpd":
             self._run_vsftpd_action(job_id, action)
@@ -407,6 +410,27 @@ class JobStore:
             if not binary.exists():
                 raise RuntimeError("HAProxy is not installed")
             self._prepare_service_runtime(root, "conf", "logs", "run")
+            runtime_env = self._prepare_haproxy_runtime(root)
+            if not config.exists():
+                config.write_text(
+                    f"global\n    daemon\n    pidfile {pid_file}\n\n"
+                    "defaults\n    mode http\n    timeout connect 5s\n"
+                    "    timeout client 30s\n    timeout server 30s\n\n"
+                    "frontend http\n    bind 127.0.0.1:8080\n    default_backend app\n\n"
+                    "backend app\n    server app1 127.0.0.1:8080 check\n"
+                )
+            else:
+                # Migrate the original Server Engine default, which used
+                # port 80 and commonly collided with Nginx or Apache.
+                legacy_default = (
+                    f"global\n    daemon\n    pidfile {pid_file}\n\n"
+                    "defaults\n    mode http\n    timeout connect 5s\n"
+                    "    timeout client 30s\n    timeout server 30s\n\n"
+                    "frontend http\n    bind *:80\n    default_backend app\n\n"
+                    "backend app\n    server app1 127.0.0.1:8080 check\n"
+                )
+                if config.read_text(errors="replace").strip() == legacy_default.strip():
+                    config.write_text(legacy_default.replace("bind *:80", "bind 127.0.0.1:8080"))
             if action in {"stop", "restart"}:
                 self._stop_process_by_binary(binary, pid_file)
             if action == "stop":
@@ -414,13 +438,13 @@ class JobStore:
                 return
             if action not in {"start", "restart"}:
                 raise RuntimeError(f"Unsupported HAProxy action: {action}")
-            check = subprocess.run([str(binary), "-c", "-f", str(config)], capture_output=True, text=True, check=False)
+            check = subprocess.run([str(binary), "-c", "-f", str(config)], capture_output=True, text=True, check=False, env=runtime_env)
             if check.returncode != 0:
                 raise RuntimeError((check.stderr or check.stdout).strip() or "HAProxy configuration validation failed.")
-            command = [str(binary), "-db", "-f", str(config), "-p", str(pid_file)]
+            command = [str(binary), "-db", "-f", str(config)]
             self._update(job_id, status="running", message=f"Starting HAProxy with {config}…", log=[])
             stream = log_file.open("a")
-            process = subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True, cwd=root)
+            process = subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True, cwd=root, env=runtime_env)
             import time
             time.sleep(0.5)
             if process.poll() is not None:
@@ -429,6 +453,49 @@ class JobStore:
             self._update(job_id, status="succeeded", message=f"HAProxy {action} completed.", log=[])
         except Exception as error:
             self._update(job_id, status="failed", message=str(error))
+
+    def _prepare_haproxy_runtime(self, root: Path) -> dict[str, str]:
+        """Stage HAProxy's shared libraries inside its service root."""
+        library_dir = root / ".runtime-libraries"
+        library_dir.mkdir(parents=True, exist_ok=True)
+        lua_library = next(library_dir.rglob("liblua5.4.so.0"), None)
+        if lua_library is None:
+            apt = shutil.which("apt")
+            dpkg_deb = shutil.which("dpkg-deb")
+            if not apt or not dpkg_deb:
+                raise RuntimeError("HAProxy needs liblua5.4, but the isolated package tools are unavailable")
+            for archive in library_dir.glob("*.deb"):
+                archive.unlink(missing_ok=True)
+            download = subprocess.run(
+                [apt, "download", "liblua5.4-0"],
+                cwd=library_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if download.returncode != 0:
+                raise RuntimeError("Unable to stage HAProxy runtime library liblua5.4: " + (download.stderr or download.stdout).strip())
+            archives = sorted(library_dir.glob("*.deb"))
+            if not archives:
+                raise RuntimeError("The HAProxy runtime library package was not downloaded")
+            for archive in archives:
+                extracted = subprocess.run(
+                    [dpkg_deb, "-x", str(archive), str(library_dir)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                archive.unlink(missing_ok=True)
+                if extracted.returncode != 0:
+                    raise RuntimeError((extracted.stderr or extracted.stdout).strip() or "Unable to extract HAProxy runtime library")
+            lua_library = next(library_dir.rglob("liblua5.4.so.0"), None)
+        if lua_library is None:
+            raise RuntimeError("HAProxy runtime library liblua5.4.so.0 was not found after staging")
+        library_paths = [library_dir, *[path for path in library_dir.rglob("*") if path.is_dir()]]
+        environment = os.environ.copy()
+        existing = environment.get("LD_LIBRARY_PATH", "")
+        environment["LD_LIBRARY_PATH"] = ":".join(str(path) for path in library_paths if path.exists()) + ((":" + existing) if existing else "")
+        return environment
 
     def _run_postgresql_action(self, job_id: str, action: str):
         root = service_root("postgresql")
@@ -715,6 +782,62 @@ class JobStore:
             details = (error_log.read_text(errors="replace").splitlines()[-80:] if error_log.exists() else [])
             self._update(job_id, status="failed", message=str(error), log=details)
 
+    def _run_mongodb_action(self, job_id: str, action: str):
+        """Control the managed MongoDB process without relying on systemd."""
+        root = service_root("mongodb")
+        binary = root / "bin/mongod"
+        config = root / "conf/mongod.conf"
+        data = root / "data"
+        logs = root / "logs"
+        run = root / "run"
+        log_file = logs / "mongod.log"
+        pid_file = run / "mongod.pid"
+        try:
+            if not binary.exists():
+                raise RuntimeError("MongoDB is not installed in the managed service area")
+            self._prepare_service_runtime(root, "conf", "data", "logs", "run")
+            if not config.exists():
+                config.write_text(
+                    f"systemLog:\n  destination: file\n  path: {log_file}\n  logAppend: true\n"
+                    f"storage:\n  dbPath: {data}\n  journal:\n    enabled: true\n"
+                    "net:\n  bindIp: 127.0.0.1\n  port: 27017\n"
+                    "processManagement:\n  fork: false\n"
+                )
+            if action == "stop":
+                self._stop_process_by_binary(binary, pid_file)
+                pid_file.unlink(missing_ok=True)
+                self._update(job_id, status="succeeded", message="MongoDB stopped.", log=[])
+                return
+            self._stop_process_by_binary(binary, pid_file)
+            runtime_user = self._ensure_service_user()
+            # The child runs as serverengine.  Create the rotatable log before
+            # launching it and explicitly transfer ownership; opening it as
+            # root in the parent would otherwise leave MongoDB unable to
+            # initialize its rotating log file.
+            log_file.touch(exist_ok=True)
+            if os.geteuid() == 0:
+                subprocess.run(
+                    ["chown", f"{runtime_user}:{runtime_user}", str(log_file)],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            command = [str(binary), "--config", str(config)]
+            if os.geteuid() == 0 and shutil.which("runuser"):
+                command = ["runuser", "-u", runtime_user, "--", *command]
+            self._update(job_id, status="running", message=f"Starting MongoDB with {config}…", log=[f"$ {' '.join(command)}"])
+            with log_file.open("a") as stream:
+                process = subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True)
+            time.sleep(0.8)
+            if process.poll() is not None:
+                details = log_file.read_text(errors="replace").splitlines()[-30:] if log_file.exists() else []
+                raise RuntimeError("MongoDB exited during startup: " + (" | ".join(details) if details else f"exit code {process.returncode}"))
+            pid_file.write_text(str(process.pid))
+            self._update(job_id, status="succeeded", message=f"MongoDB {action} completed on port 27017.", log=log_file.read_text(errors="replace").splitlines()[-80:])
+        except Exception as error:
+            details = log_file.read_text(errors="replace").splitlines()[-80:] if log_file.exists() else []
+            self._update(job_id, status="failed", message=str(error), log=details)
+
     def _prepare_mysql_runtime(self, root: Path) -> dict[str, str]:
         """Stage shared runtime libraries without installing packages globally."""
         library_dir = root / ".runtime-libraries"
@@ -919,6 +1042,9 @@ class JobStore:
         if service_id == "wp-cli":
             self._run_wpcli_binary(job_id, requested_version, php_version)
             return
+        if service_id == "mongodb" and install_method == "prebuilt":
+            self._run_mongodb_prebuilt(job_id, requested_version)
+            return
         if install_method == "prebuilt" and prebuilt_package_for(service_id):
             if service_id == "redis":
                 self._run_redis_prebuilt(job_id, requested_version)
@@ -1077,7 +1203,7 @@ class JobStore:
             # MongoDB's source bootstrap imports boto3 even when it falls back
             # to its requests-based downloader. Keep both modules available so
             # the upstream Bazel bootstrap can resolve tool archives.
-            "mongodb": base | {"python3", "python3-boto3", "python3-requests", "libcurl4-openssl-dev", "liblzma-dev"},
+            "mongodb": base | {"git", "python3", "python3-boto3", "python3-requests", "python-is-python3", "libcurl4-openssl-dev", "liblzma-dev"},
             "opensearch": {"openjdk-21-jdk-headless"},
             "rspamd": base | {"libglib2.0-dev", "libgmime-3.0-dev", "liblua5.4-dev", "libsodium-dev", "libicu-dev", "libevent-dev", "libpcre2-dev", "libcurl4-openssl-dev", "libzstd-dev"},
             "bind9": base | {"libuv1-dev", "libjson-c-dev", "libidn2-dev", "libnghttp2-dev", "libcap-dev"},
@@ -1108,6 +1234,7 @@ class JobStore:
                 "libjson-c-dev": "json-c-devel", "libxml2-dev": "libxml2-devel", "libncurses-dev": "ncurses-devel",
                 "libpcre2-dev": "pcre2-devel", "libpam0g-dev": "pam-devel", "libcap-dev": "libcap-devel",
                 "libpcre3-dev": "pcre-devel",
+                "python-is-python3": "python3",
                 "python3-boto3": "python3-boto3", "python3-requests": "python3-requests",
                 "libglib2.0-dev": "glib2-devel", "libgmime-3.0-dev": "gmime30-devel", "liblua5.4-dev": "lua-devel",
                 "libsodium-dev": "libsodium-devel", "libicu-dev": "libicu-devel", "libevent-dev": "libevent-devel",
@@ -2767,7 +2894,7 @@ class JobStore:
                 directory.mkdir(parents=True, exist_ok=True)
             config = root / "conf/haproxy.cfg"
             if not config.exists():
-                config.write_text(f"global\n    daemon\n    pidfile {root / 'run/haproxy.pid'}\n\ndefaults\n    mode http\n    timeout connect 5s\n    timeout client 30s\n    timeout server 30s\n\nfrontend http\n    bind *:80\n    default_backend app\n\nbackend app\n    server app1 127.0.0.1:8080 check\n")
+                config.write_text(f"global\n    daemon\n    pidfile {root / 'run/haproxy.pid'}\n\ndefaults\n    mode http\n    timeout connect 5s\n    timeout client 30s\n    timeout server 30s\n\nfrontend http\n    bind 127.0.0.1:8080\n    default_backend app\n\nbackend app\n    server app1 127.0.0.1:8080 check\n")
             self._update(job_id, status="succeeded", progress=100, message=f"HAProxy {requested_version} was built from source in {root}; the host HAProxy package was not changed.")
         except Exception as error:
             self._update(job_id, status="failed", message=str(error))
@@ -3422,6 +3549,77 @@ class JobStore:
                 directory.mkdir(parents=True, exist_ok=True)
             (root / ".serverengine-version").write_text(requested_version + "\n")
             self._update(job_id, status="succeeded", progress=100, message=f"Stalwart {requested_version} was built from source in {root}; no host mail package was changed.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+        finally:
+            archive.unlink(missing_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+
+    def _run_mongodb_prebuilt(self, job_id: str, requested_version: str):
+        """Install MongoDB's official Ubuntu archive into its service root."""
+        archive_url = mongodb_prebuilt_for(requested_version)
+        if not archive_url:
+            try:
+                definition, _, _ = refresh_service_versions("mongodb", force=True, install_method="prebuilt")
+                if any(item.version == requested_version for item in definition.versions):
+                    archive_url = mongodb_prebuilt_for(requested_version)
+            except Exception:
+                archive_url = None
+        if not archive_url:
+            self._update(job_id, status="failed", message=f"MongoDB {requested_version} has no compatible prebuilt archive for this OS and architecture. Choose source build instead.")
+            return
+        root = service_root("mongodb")
+        staging = root.parent / f".mongodb-{job_id}-prebuilt"
+        archive = staging / "mongodb.tgz"
+        try:
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True, exist_ok=True)
+            self._update(job_id, status="running", progress=5, message=f"Downloading prebuilt MongoDB {requested_version}…", log=[f"$ curl -fL {archive_url}"])
+            request = urllib.request.Request(archive_url, headers={"User-Agent": "Server-Engine-Control-Panel"})
+            with urllib.request.urlopen(request, timeout=180) as response, archive.open("wb") as output:
+                total = int(response.headers.get("Content-Length", "0") or 0)
+                downloaded = 0
+                while True:
+                    self._raise_if_cancelled(job_id)
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    output.write(chunk)
+                    downloaded += len(chunk)
+                    progress = 5 + round(downloaded * 35 / total) if total else 20
+                    self._update(job_id, progress=min(40, progress), message=f"Downloading prebuilt MongoDB {requested_version}…")
+            extracted = staging / "root"
+            extracted.mkdir()
+            self._update(job_id, progress=45, message=f"Extracting MongoDB {requested_version} into the Server Engine service area…")
+            with tarfile.open(archive, "r:gz") as package:
+                members = package.getmembers()
+                if any(member.name.startswith("/") or ".." in Path(member.name).parts for member in members):
+                    raise RuntimeError("The MongoDB archive contains an unsafe path")
+                package.extractall(extracted)
+            source = next((item for item in extracted.iterdir() if item.is_dir()), extracted)
+            binary = next(source.glob("bin/mongod"), None)
+            if binary is None or not binary.exists():
+                raise RuntimeError("The MongoDB archive did not contain a mongod executable")
+            if root.exists():
+                shutil.rmtree(root)
+            root.mkdir(parents=True, exist_ok=True)
+            for item in source.iterdir():
+                target = root / item.name
+                if item.is_symlink():
+                    target.symlink_to(os.readlink(item), target_is_directory=item.is_dir())
+                elif item.is_dir():
+                    shutil.copytree(item, target, dirs_exist_ok=True, symlinks=True)
+                else:
+                    shutil.copy2(item, target)
+            (root / ".serverengine-version").write_text(requested_version + "\n")
+            (root / ".serverengine-install-method").write_text("prebuilt\n")
+            for directory in (root / "conf", root / "data", root / "logs", root / "run"):
+                directory.mkdir(parents=True, exist_ok=True)
+            (root / "conf/mongod.conf").write_text(
+                f"systemLog:\n  destination: file\n  path: {root / 'logs/mongod.log'}\n  logAppend: true\nstorage:\n  dbPath: {root / 'data'}\nnet:\n  bindIp: 127.0.0.1\n  port: 27017\nprocessManagement:\n  fork: false\n"
+            )
+            self._prepare_service_runtime(root, "conf", "data", "logs", "run")
+            self._update(job_id, status="succeeded", progress=100, message=f"MongoDB {requested_version} was installed from an official prebuilt archive in {root}; no host MongoDB package was changed.")
         except Exception as error:
             self._update(job_id, status="failed", message=str(error))
         finally:
