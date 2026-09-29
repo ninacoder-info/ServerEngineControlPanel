@@ -14,6 +14,7 @@ export default function NodeRuntimesPage({ modal = false, onClose }) {
   const [menuVersion, setMenuVersion] = React.useState(null);
   const [copiedPath, setCopiedPath] = React.useState(null);
   const [notice, setNotice] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
 
   const load = React.useCallback(async () => {
     const [catalogResponse, installedResponse] = await Promise.all([
@@ -27,7 +28,7 @@ export default function NodeRuntimesPage({ modal = false, onClose }) {
   }, []);
 
   React.useEffect(() => {
-    load().catch(() => {});
+    load().catch(() => {}).finally(() => setLoading(false));
     const refreshAfterJob = () => load().catch(() => {});
     window.addEventListener("serverengine:jobs-updated", refreshAfterJob);
     return () => window.removeEventListener("serverengine:jobs-updated", refreshAfterJob);
@@ -66,8 +67,6 @@ export default function NodeRuntimesPage({ modal = false, onClose }) {
     window.setTimeout(() => setNotice(null), 3500);
   }
 
-  if (!service) return <div className="loading-screen">Loading Node.js runtimes…</div>;
-
   return (
     <div className={modal ? "fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/50 p-4 sm:p-8" : ""}>
       <section className={modal ? "relative max-h-[calc(100vh-2rem)] w-full max-w-4xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl dark:bg-slate-900" : "space-y-7"}>
@@ -82,10 +81,10 @@ export default function NodeRuntimesPage({ modal = false, onClose }) {
         ) : (
           <>
             <nav aria-label="Breadcrumb"><ol className="flex items-center gap-1.5 text-sm text-slate-500 dark:text-slate-400"><li><button type="button" className="font-medium hover:text-blue-600 dark:hover:text-blue-400" onClick={() => navigate("/services")}>Services</button></li><li aria-hidden="true"><ChevronRight size={15} /></li><li className="font-medium text-slate-900 dark:text-slate-100" aria-current="page">Node.js runtimes</li></ol></nav>
-            <div className="flex items-start justify-between gap-4"><div><p className="text-sm text-cyan-300">Application runtimes</p><h2 className="mt-1 flex items-center gap-2 text-3xl font-semibold tracking-tight"><Server size={25} />Node.js runtimes</h2><p className="mt-2 text-slate-400">Install and manage multiple Node.js versions side by side.</p></div><button type="button" className={`${linkButton} bg-blue-600 text-white hover:bg-blue-700`} onClick={() => setSelected({ service })}><Download size={14} />Install</button></div>
+            <div className="flex items-start justify-between gap-4"><div><p className="text-sm text-cyan-300">Application runtimes</p><h2 className="mt-1 flex items-center gap-2 text-3xl font-semibold tracking-tight"><Server size={25} />Node.js runtimes</h2><p className="mt-2 text-slate-400">Install and manage multiple Node.js versions side by side.</p></div><button type="button" disabled={!service || loading} className={`${linkButton} bg-blue-600 text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60`} onClick={() => setSelected({ service })}><Download size={14} />Install</button></div>
           </>
         )}
-        <section className="overflow-visible rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900"><div className="overflow-visible"><table className="w-full min-w-[760px] border-collapse text-left text-sm"><thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-950 dark:text-slate-400"><tr><th className="px-4 py-3 font-semibold">Version</th><th className="px-4 py-3 font-semibold">Channel</th><th className="px-4 py-3 font-semibold">Status</th><th className="px-4 py-3 text-right font-semibold" /></tr></thead><tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+        {loading ? <div className="animate-pulse overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700" aria-label="Loading Node.js runtimes" aria-busy="true"><div className="flex gap-4 bg-slate-50 px-4 py-3 dark:bg-slate-950">{["w-32", "w-24", "w-24", "w-20"].map((width) => <div key={width} className={`h-3 ${width} rounded bg-slate-200 dark:bg-slate-800`} />)}</div>{[1, 2, 3].map((item) => <div key={item} className="flex items-center gap-4 border-t border-slate-200 px-4 py-5 dark:border-slate-700"><div className="h-4 w-32 rounded bg-slate-200 dark:bg-slate-800" /><div className="h-4 w-24 rounded bg-slate-200 dark:bg-slate-800" /><div className="h-5 w-20 rounded-full bg-slate-200 dark:bg-slate-800" /><div className="ml-auto h-8 w-20 rounded bg-slate-200 dark:bg-slate-800" /></div>)}</div> : <section className="overflow-visible rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900"><div className="overflow-visible"><table className="w-full min-w-[760px] border-collapse text-left text-sm"><thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-950 dark:text-slate-400"><tr><th className="px-4 py-3 font-semibold">Version</th><th className="px-4 py-3 font-semibold">Channel</th><th className="px-4 py-3 font-semibold">Status</th><th className="px-4 py-3 text-right font-semibold" /></tr></thead><tbody className="divide-y divide-slate-200 dark:divide-slate-700">
           {!rows.length && (
             <tr>
               <td colSpan="4" className="px-4 py-10 text-center text-sm text-slate-500 dark:text-slate-400">
@@ -98,7 +97,7 @@ export default function NodeRuntimesPage({ modal = false, onClose }) {
             const active = current?.status === "running";
             return <tr key={item.version} className="hover:bg-slate-50 dark:hover:bg-slate-800/50"><td className="px-4 py-4 font-semibold text-slate-900 dark:text-slate-100">Node.js {item.version}</td><td className="px-4 py-4 capitalize text-slate-500 dark:text-slate-400">{item.channel || "—"}</td><td className="px-4 py-4"><span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${active ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" : current ? "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300" : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400"}`}>{active ? <CheckCircle2 size={13} /> : current ? <CircleStop size={13} /> : <Download size={13} />}{active ? "Running" : current ? "Installed" : "Not installed"}</span></td><td className="relative px-4 py-4 text-right">{current ? <div className="relative flex items-center justify-end gap-2" data-node-actions><button type="button" className={linkButton} onClick={() => setSelected({ service, initialVersion: item.version })}><RefreshCw size={14} />Reinstall</button><button type="button" aria-label={`More actions for Node.js ${item.version}`} className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100" onClick={() => setMenuVersion(menuVersion === item.version ? null : item.version)}><MoreHorizontal size={17} /></button>{menuVersion === item.version && <div className="absolute bottom-11 right-0 z-50 w-60 rounded-lg border border-slate-200 bg-white p-1 text-left shadow-lg dark:border-slate-700 dark:bg-slate-900">{["node", "npm", "root"].map((kind) => <button key={kind} type="button" className="flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800" onClick={() => copyPath(item.version, kind)}>{copiedPath === `${item.version}-${kind}` ? <Check size={15} className="text-emerald-600" /> : <Copy size={15} />}{copiedPath === `${item.version}-${kind}` ? "Copied" : `Copy ${kind === "root" ? "runtime directory" : `${kind} executable`}`}</button>)}<button type="button" className="flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/30" onClick={() => uninstall(item.version)}><Trash2 size={15} />Uninstall Node.js {item.version}</button></div>}</div> : <button type="button" className={linkButton} onClick={() => setSelected({ service, initialVersion: item.version })}><Download size={14} />Install</button>}</td></tr>;
           })}
-        </tbody></table></div></section>
+        </tbody></table></div></section>}
         {notice && <p className="text-sm text-slate-600 dark:text-slate-300">{notice}</p>}
         {selected && <InstallServiceModal service={selected.service} initialVersion={selected.initialVersion} onClose={() => setSelected(null)} />}
       </section>

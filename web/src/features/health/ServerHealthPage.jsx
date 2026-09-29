@@ -238,11 +238,6 @@ export default function ServerHealthPage() {
   });
   const [lynisSaved, setLynisSaved] = React.useState(false);
   const [lynisScanning, setLynisScanning] = React.useState(false);
-  const [exporter, setExporter] = React.useState(() => {
-    try { return { ...defaultExporterPolicy, ...JSON.parse(localStorage.getItem("serverengine:node-exporter") || "{}") }; } catch { return defaultExporterPolicy; }
-  });
-  const [exporterSaved, setExporterSaved] = React.useState(false);
-  const [exporterTesting, setExporterTesting] = React.useState(false);
   const load = React.useCallback(async () => {
     const response = await apiRequest("/api/v1/metrics");
     if (!response.ok) return;
@@ -277,9 +272,6 @@ export default function ServerHealthPage() {
   const updateLynis = (key, value) => setLynis((current) => ({ ...current, [key]: value }));
   const saveLynis = () => { localStorage.setItem("serverengine:lynis-policy", JSON.stringify(lynis)); setLynisSaved(true); window.setTimeout(() => setLynisSaved(false), 3000); };
   const runLynis = () => { setLynisScanning(true); window.setTimeout(() => setLynisScanning(false), 1400); };
-  const updateExporter = (key, value) => setExporter((current) => ({ ...current, [key]: value }));
-  const saveExporter = () => { localStorage.setItem("serverengine:node-exporter", JSON.stringify(exporter)); setExporterSaved(true); window.setTimeout(() => setExporterSaved(false), 3000); };
-  const testExporter = () => { setExporterTesting(true); window.setTimeout(() => setExporterTesting(false), 1200); };
   return (
     <div className="space-y-7">
       <div className="flex flex-col items-start justify-between gap-4 md:flex-row md:items-end">
@@ -536,9 +528,6 @@ export default function ServerHealthPage() {
       )}
       {window.location.hash === "#lynis" && (
         <LynisWorkspace policy={lynis} updatePolicy={updateLynis} onSave={saveLynis} saved={lynisSaved} onScan={runLynis} scanning={lynisScanning} />
-      )}
-      {window.location.hash === "#node-exporter" && (
-        <NodeExporterWorkspace policy={exporter} updatePolicy={updateExporter} onSave={saveExporter} saved={exporterSaved} onTest={testExporter} testing={exporterTesting} />
       )}
       {window.location.hash === "#malware" && (
         <section className="space-y-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">

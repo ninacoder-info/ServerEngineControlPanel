@@ -1,6 +1,7 @@
 import os
 import pwd
 import re
+import shutil
 import subprocess
 import tempfile
 import json
@@ -37,7 +38,6 @@ SERVICE_PACKAGES = {
     "clamav": "clamav",
     "auditd": "auditd",
     "logrotate": "logrotate",
-    "node-exporter": "prometheus-node-exporter",
     "modsecurity": "libmodsecurity3",
     "git": "git",
     "imagemagick": "imagemagick",
@@ -117,6 +117,37 @@ def service_root(service_id: str, version: str | None = None) -> Path:
 
 def package_for(service_id: str) -> str | None:
     return SERVICE_PACKAGES.get(service_id)
+
+
+def prepare_mysql_runtime(root: Path) -> dict[str, str]:
+    """Stage MySQL's shared libraries inside its managed service root."""
+    library_dir = root / ".runtime-libraries"
+    library_dir.mkdir(parents=True, exist_ok=True)
+    required_libraries = ("libaio.so*", "libnuma.so*", "libncurses.so*", "libtinfo.so*")
+    if any(not any(library_dir.rglob(pattern)) for pattern in required_libraries):
+        apt = shutil.which("apt")
+        dpkg_deb = shutil.which("dpkg-deb")
+        if not apt or not dpkg_deb:
+            raise RuntimeError("MySQL needs its runtime libraries, but the isolated package tools are unavailable")
+        for archive in library_dir.glob("*.deb"):
+            archive.unlink(missing_ok=True)
+        download = subprocess.run([apt, "download", "libaio1t64", "libnuma1", "libncurses6", "libtinfo6"], cwd=library_dir, capture_output=True, text=True, check=False)
+        if download.returncode != 0:
+            raise RuntimeError("Unable to stage MySQL runtime libraries: " + (download.stderr or download.stdout).strip())
+        archives = sorted(library_dir.glob("*.deb"))
+        if len(archives) < 4:
+            raise RuntimeError("MySQL runtime library packages were not downloaded")
+        for archive in archives:
+            subprocess.run([dpkg_deb, "-x", str(archive), str(library_dir)], check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            archive.unlink(missing_ok=True)
+    aio_candidates = list(library_dir.rglob("libaio.so.1t64"))
+    aio_link = next((path.parent / "libaio.so.1" for path in aio_candidates), None)
+    if aio_link and not aio_link.exists():
+        aio_link.symlink_to(aio_candidates[0].name)
+    library_paths = [library_dir, *[path for path in library_dir.rglob("*") if path.is_dir()]]
+    environment = os.environ.copy()
+    environment["LD_LIBRARY_PATH"] = ":".join(str(path) for path in library_paths)
+    return environment
 
 
 def binary_path(service_id: str, version: str | None = None) -> Path:

@@ -1,12 +1,14 @@
 import os
 import subprocess
+import shlex
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.dependencies import require_user
 from app.models.database import DatabaseCreateRequest
-from app.services.service_runtime import binary_path, service_root
+from app.services.service_runtime import binary_path, prepare_mysql_runtime, service_root
+from app.services import cron_service as cron_service_module
 
 router = APIRouter(prefix="/api/v1/databases", tags=["databases"])
 
@@ -62,7 +64,7 @@ def _mysql_query(sql: str) -> list[list[str]]:
         raise RuntimeError("MySQL is not installed")
     if not socket.exists():
         raise RuntimeError("MySQL is installed but stopped")
-    result = subprocess.run([str(client), "--protocol=SOCKET", f"--socket={socket}", "-uroot", "--batch", "--raw", "--skip-column-names", "-e", sql], capture_output=True, text=True, check=False, env=_mysql_environment(library_root), timeout=8)
+    result = subprocess.run([str(client), "--protocol=SOCKET", f"--socket={socket}", "-uroot", "--batch", "--raw", "--skip-column-names", "-e", sql], capture_output=True, text=True, check=False, env=prepare_mysql_runtime(service_root("mysql")), timeout=8)
     if result.returncode != 0:
         raise RuntimeError((result.stderr or result.stdout).strip() or "MySQL query failed")
     return [line.split("\t") for line in result.stdout.splitlines() if line.strip()]
@@ -107,3 +109,20 @@ def create_database(payload: DatabaseCreateRequest, user=Depends(require_user)):
     password = payload.password.replace("'", "''")
     _mysql_query(f"CREATE DATABASE IF NOT EXISTS `{database}`; CREATE USER IF NOT EXISTS '{username}'@'localhost' IDENTIFIED BY '{password}'; ALTER USER '{username}'@'localhost' IDENTIFIED BY '{password}'; GRANT ALL PRIVILEGES ON `{database}`.* TO '{username}'@'localhost'; FLUSH PRIVILEGES;")
     return {"created": True, "database": {"id": f"mysql:{payload.name}", "name": payload.name, "engine": "mysql", "username": payload.username, "backup": payload.backup, "status": "Ready", "size": 0, "location": "localhost"}}
+
+
+@router.post("/{engine}/{database_name}/backup-job")
+def create_backup_job(engine: str, database_name: str, user=Depends(require_user)):
+    if engine != "mysql":
+        raise HTTPException(status_code=400, detail="Database backup jobs currently support MySQL only")
+    if cron_service_module.cron_service is None:
+        raise HTTPException(status_code=503, detail="Cron scheduler is not ready")
+    safe_name = shlex.quote(database_name)
+    job_name = f"Backup database: {database_name}"
+    existing = next((job for job in cron_service_module.cron_service.list() if job["name"] == job_name), None)
+    if existing:
+        return {"created": False, "job": existing}
+    command = f"mkdir -p /server-engine/backups/databases && /opt/server-engine/services/mysql/bin/mysqldump --protocol=SOCKET --socket=/opt/server-engine/services/mysql/run/mysql.sock -uroot --single-transaction --routines --triggers --databases {safe_name} > /server-engine/backups/databases/{shlex.quote(database_name)}-$(date +%Y%m%d-%H%M%S).sql"
+    from app.models.cron import CronJobRequest
+    job = cron_service_module.cron_service.create(CronJobRequest(name=job_name, group="Backup", owner="root", minute="0", hour="2", day="*", month="*", weekday="*", command=command, enabled=True))
+    return {"created": True, "job": job}

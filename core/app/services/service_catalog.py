@@ -1662,12 +1662,11 @@ CATALOG.extend([
     ServiceDefinition(id="auditd", name="Linux audit", category="Security & operations", description="Kernel audit event collection for privileged actions, file changes, and authentication review.", vendor="Linux Audit", license="GPL-2.0", versions=[], mode="service", installable=True, management_path="/logs", management_label="Open audit logs"),
     ServiceDefinition(id="lynis", name="Lynis hardening audit", category="Security & operations", description="Security audit and hardening recommendations for the host and its services.", vendor="CISOfy", license="GPL-3.0", versions=[], mode="service", installable=True, management_path="/health", management_label="Open health checks"),
     ServiceDefinition(id="logrotate", name="Logrotate", category="Monitoring & operations", description="Host log retention, compression, and rotation policies.", vendor="Linux", license="GPL-2.0", versions=[], mode="service", installable=True, management_path="/logs", management_label="Open log controls"),
-    ServiceDefinition(id="node-exporter", name="Prometheus Node Exporter", category="Monitoring & operations", description="Host metrics for CPU, memory, disk, network, and filesystems.", vendor="Prometheus", license="Apache-2.0", versions=[v("1.10", "stable"), v("1.9", "security")], mode="integration", installable=False, management_path="/health", management_label="Open monitoring"),
     ServiceDefinition(id="rabbitmq", name="RabbitMQ", category="Queues & messaging", description="Reliable queues and messaging for workers, event processing, and distributed applications.", vendor="Broadcom", license="MPL-2.0", versions=[], mode="service", installable=True, management_path="/services", management_label="Open queue managers"),
     ServiceDefinition(id="mongodb", name="MongoDB", category="Databases", description="Document database for flexible application data and event-oriented workloads.", vendor="MongoDB", license="SSPL-1.0", versions=[], mode="service", installable=True, management_path="/databases", management_label="Open database manager"),
     ServiceDefinition(id="sqlserver", name="Microsoft SQL Server", category="Databases", description="Microsoft relational database engine managed in a dedicated Docker container on supported x86_64 Linux hosts.", vendor="Microsoft", license="Commercial", versions=[], mode="service", installable=True, management_path="/databases", management_label="Open database manager"),
     ServiceDefinition(id="opensearch", name="OpenSearch", category="Databases & search", description="Search and analytics engine for application search, logs, and dashboards.", vendor="OpenSearch", license="Apache-2.0", versions=[], mode="service", installable=True, management_path="/services", management_label="Open search services"),
-    ServiceDefinition(id="docker", name="Docker Engine", category="Deployment tools", description="Host container runtime used by optional Server Engine integrations.", vendor="Docker", license="Apache-2.0 / Commercial", versions=[v("latest", "stable")], mode="integration", installable=False, management_path="/services", management_label="Open container tools"),
+    ServiceDefinition(id="docker", name="Docker Engine", category="Deployment tools", description="Host container runtime used by optional Server Engine integrations.", vendor="Docker", license="Apache-2.0 / Commercial", versions=[v("latest", "stable")], mode="integration", installable=True, management_path="/services", management_label="Open container tools"),
     ServiceDefinition(id="git", name="Git", category="Deployment tools", description="Repository checkout, deployment hooks, rollback, and application source management.", vendor="Git", license="GPL-2.0", versions=[], mode="service", installable=True, management_path="/websites", management_label="Open deployment tools"),
     ServiceDefinition(id="composer", name="Composer", category="Deployment tools", description="PHP dependency manager for Laravel, WordPress, and modern PHP applications.", requirements="PHP CLI is needed to install and manage project dependencies.", vendor="Composer", license="MIT", versions=[]),
     ServiceDefinition(id="wp-cli", name="WP-CLI", category="Deployment tools", description="WordPress installation, updates, database tasks, cache control, and scripted maintenance.", requirements="PHP CLI and Composer enable full WordPress project automation.", vendor="WordPress", license="MIT", versions=[], mode="service", installable=True, management_path="/websites", management_label="Open website tools"),
@@ -1683,7 +1682,7 @@ for _service in CATALOG:
         _service.install_methods = ["prebuilt"]
     elif _service.id in _PREBUILT_PACKAGES or _service.id == "mongodb":
         _service.install_methods = ["prebuilt", "source"]
-    elif _service.id in {"nodejs", "composer", "pm2", "sqlserver"}:
+    elif _service.id in {"nodejs", "composer", "pm2", "sqlserver", "docker"}:
         # These adapters use versioned portable archives or package-manager
         # artifacts extracted under Server Engine; they do not expose a
         # generic source-build implementation.
@@ -1737,6 +1736,9 @@ def refresh_service_versions(service_id: str, force: bool = False, install_metho
             _SELECTED_PREBUILT_PACKAGES[service_id] = "mariadb-server"
             return definition, "apt", f"Fetched {count} MariaDB packages from the operating system repository."
         return definition, "apt", "No compatible MariaDB packages were found for this OS and architecture."
+    if install_method == "prebuilt" and service_id == "docker":
+        definition.versions = [v("latest", "stable")]
+        return definition, "host-package", "Docker Engine will be installed as a host package."
     if install_method == "prebuilt" and service_id in _PREBUILT_PACKAGES:
         packages = _PREBUILT_PACKAGE_CHOICES.get(service_id, [_PREBUILT_PACKAGES[service_id]])
         for package in packages:
@@ -2145,7 +2147,7 @@ def refresh_service_versions(service_id: str, force: bool = False, install_metho
         "supervisor": "supervisor", "postfix": "postfix", "dovecot": "dovecot-imapd",
         "rspamd": "rspamd", "bind9": "bind9", "unbound": "unbound",
         "clamav": "clamav", "auditd": "auditd", "lynis": "lynis",
-        "logrotate": "logrotate", "node-exporter": "prometheus-node-exporter",
+        "logrotate": "logrotate",
         "modsecurity": "libmodsecurity3",
     }
     package = package_services.get(service_id)

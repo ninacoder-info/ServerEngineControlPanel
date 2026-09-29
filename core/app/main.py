@@ -8,11 +8,12 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.dependencies import require_user
-from app.api.routes import api_access, auth, databases, domains, file_manager, firewall, ftp, jobs, servers, services, settings, system, terminal, websites
+from app.api.routes import activity, api_access, auth, cron, databases, domains, file_manager, firewall, ftp, jobs, servers, services, settings, system, terminal, websites
 from app.auth import AuthStore
 from app.services.auth_service import AuthService
 from app.services.job_service import enqueue_startup_services
 from app.services.log_rotation_service import log_rotation_service
+from app.services.cron_service import configure_cron_service
 from app.version import APP_VERSION
 
 DB_PATH = os.getenv("SE_DB_PATH", "/var/lib/server-engine/control.db")
@@ -28,7 +29,11 @@ async def lifespan(application: FastAPI):
         print(f"Server Engine bootstrap password for {BOOTSTRAP_USER}: {BOOTSTRAP_PASSWORD}", flush=True)
     enqueue_startup_services()
     log_rotation_service.start()
+    scheduler = configure_cron_service(DB_PATH)
+    if scheduler.enabled:
+        scheduler.start()
     yield
+    scheduler.stop()
     log_rotation_service.stop()
 
 
@@ -42,6 +47,8 @@ app.include_router(firewall.router)
 app.include_router(system.router)
 app.include_router(servers.router)
 app.include_router(jobs.router)
+app.include_router(cron.router)
+app.include_router(activity.router)
 app.include_router(services.router)
 app.include_router(file_manager.router)
 app.include_router(settings.router)

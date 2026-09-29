@@ -18,6 +18,8 @@ from app.services.service_runtime import PHP_BASELINE_MODULES, SERVICE_PACKAGES,
 
 router = APIRouter(prefix="/api/v1/services", tags=["services"])
 
+NON_DAEMON_SERVICES = {"git", "imagemagick", "ffmpeg", "ruby", "lynis"}
+
 
 def _configured_service_port(service_id: str) -> int:
     defaults = {"mysql": 3306, "mariadb": 3306}
@@ -389,6 +391,15 @@ def installed(user=Depends(require_user)):
                 running = subprocess.run(["pgrep", "-x", "pdns_server"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False).returncode == 0 if shutil.which("pgrep") else False
                 detected.append(InstalledService(id=service_id, name=definition.name if definition else service_id, version=version, status="running" if running else "stopped", port=53, managed=False))
             continue
+        if service_id == "docker":
+            version_result = subprocess.run(["docker", "--version"], capture_output=True, text=True, check=False) if shutil.which("docker") else None
+            if version_result and version_result.returncode == 0:
+                match = re.search(r"Docker version\s+([^,\s]+)", version_result.stdout)
+                version = match.group(1) if match else version_result.stdout.strip()
+                running = subprocess.run(["docker", "info"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False).returncode == 0
+                definition = get_service(service_id)
+                detected.append(InstalledService(id=service_id, name=definition.name if definition else "Docker Engine", version=version, status="running" if running else "installed", managed=False))
+            continue
         if service_id == "php":
             php_root = service_root("php") / "versions"
             if php_root.exists():
@@ -437,7 +448,8 @@ def installed(user=Depends(require_user)):
         definition = get_service(service_id)
         process_name = service_id
         running = _process_running(process_name)
-        detected.append(InstalledService(id=service_id, name=definition.name if definition else service_id, version=version, status="running" if running else "stopped", managed=False))
+        status = "installed" if service_id in NON_DAEMON_SERVICES else "running" if running else "stopped"
+        detected.append(InstalledService(id=service_id, name=definition.name if definition else service_id, version=version, status=status, managed=False))
     composer_root = service_root("composer") / "versions"
     if composer_root.exists() and composer_path().exists():
         version_root = composer_path().parents[1]

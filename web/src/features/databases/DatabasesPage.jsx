@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { apiRequest, readApiError } from "../../lib/api";
+import Toast from "../../components/Toast";
 
 const engines = [
   {
@@ -293,6 +294,8 @@ export default function DatabasesPage() {
   const [query, setQuery] = React.useState("");
   const [modal, setModal] = React.useState(false);
   const [notice, setNotice] = React.useState("");
+  const [toast, setToast] = React.useState(null);
+  const [actionMenu, setActionMenu] = React.useState(null);
   const [loading, setLoading] = React.useState(true);
   const [page, setPage] = React.useState(1);
   const pageSize = 10;
@@ -326,9 +329,10 @@ export default function DatabasesPage() {
             defaultEngineSelected.current = true;
           }
           setDatabases(inventory.databases || []);
-          setNotice(inventory.error || "");
+          setNotice("");
+          if (inventory.error) setToast({ type: "error", message: inventory.error });
         })
-        .catch(() => alive && setNotice("Unable to load database inventory."))
+        .catch(() => alive && setToast({ type: "error", message: "Unable to load database inventory." }))
         .finally(() => alive && setLoading(false));
     };
     load();
@@ -349,6 +353,11 @@ export default function DatabasesPage() {
   const selectedEngine = engineCatalog.find((item) => item.id === engine);
   const pageCount = Math.max(1, Math.ceil(visible.length / pageSize));
   const pageRows = visible.slice((page - 1) * pageSize, page * pageSize);
+  const createBackupJob = async (database) => {
+    setActionMenu(null);
+    const response = await apiRequest(`/api/v1/databases/${database.engine}/${encodeURIComponent(database.name)}/backup-job`, { method: "POST" });
+    setNotice(response.ok ? `Daily backup job created for ${database.name}.` : await readApiError(response, "Unable to create backup job."));
+  };
   const storage = databases.reduce(
     (total, item) => total + (item.size || 0),
     0,
@@ -558,9 +567,16 @@ export default function DatabasesPage() {
                       </span>
                     </td>
                     <td className="px-3 py-4 text-right">
-                      <button className="rounded-md p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">
+                      <button type="button" onClick={() => setActionMenu(actionMenu === item.id ? null : item.id)} className="rounded-md p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">
                         <MoreHorizontal size={17} />
                       </button>
+                      {actionMenu === item.id && (
+                        <div className="relative z-10 ml-auto w-48 rounded-md border border-slate-200 bg-white py-1 text-left shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                          <button type="button" onClick={() => createBackupJob(item)} className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800">
+                            <Archive size={15} /> Create daily backup job
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -625,6 +641,11 @@ export default function DatabasesPage() {
           {notice}
         </p>
       )}
+      <Toast
+        message={toast?.message}
+        type={toast?.type}
+        onClose={() => setToast(null)}
+      />
       {modal && (
         <CreateDatabase
           onClose={() => setModal(false)}

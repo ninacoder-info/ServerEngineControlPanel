@@ -1472,7 +1472,7 @@ function ApiTab({ values, onChange, onSave, onReset, saving, dirty, message, err
   );
 }
 
-function NotificationsTab({ values, onChange, onReset, saving, dirty, message, errors = {} }) {
+function NotificationsTab({ values, onChange, onSave, onReset, saving, dirty, message, errors = {} }) {
   const o = notificationSettingsValues(values);
   const set = (key, value) => onChange(key, value);
   return (
@@ -1948,32 +1948,32 @@ function MaintenanceTab({ values, onChange, onSave, onReset, saving, dirty, mess
           checked={o.log_rotation_enabled}
           onChange={(v) => set("log_rotation_enabled", v)}
         />
-        <div className="grid gap-4 md:grid-cols-2">
-          <Control label="Maximum log size" description="Size threshold used for size-only rotation and active-log protection." error={errors.log_rotation_max_size_mb}>
+        <div className="space-y-4">
+          <Control full label="Maximum log size" description="Size threshold used for size-only rotation and active-log protection." error={errors.log_rotation_max_size_mb}>
             <div className="flex items-center gap-2"><input className={input} type="number" min="1" max="100000" value={o.log_rotation_max_size_mb} onChange={(e) => set("log_rotation_max_size_mb", Number(e.target.value))} /><span className="shrink-0 text-sm text-slate-500">MB</span></div>
           </Control>
-          <SelectControl label="Rotation schedule" description="Daily and weekly rotation run during the maintenance window." value={o.log_rotation_schedule} onChange={(v) => set("log_rotation_schedule", v)}>
+          <SelectControl full label="Rotation schedule" description="Daily and weekly rotation run during the maintenance window." value={o.log_rotation_schedule} onChange={(v) => set("log_rotation_schedule", v)}>
             <option value="size-only">When size limit is reached</option><option value="daily">Daily and when size limit is reached</option><option value="weekly">Weekly and when size limit is reached</option>
           </SelectControl>
-          <SelectControl label="Compression" description="Compressed archives use gzip while the active log remains available." value={o.log_rotation_compression} onChange={(v) => set("log_rotation_compression", v)}>
+          <SelectControl full label="Compression" description="Compressed archives use gzip while the active log remains available." value={o.log_rotation_compression} onChange={(v) => set("log_rotation_compression", v)}>
             <option value="gzip">gzip</option><option value="none">Do not compress</option>
           </SelectControl>
-          <Control label="Retention count" description="Rotated archives kept for each log file." error={errors.log_rotation_retention_count}>
+          <Control full label="Retention count" description="Rotated archives kept for each log file." error={errors.log_rotation_retention_count}>
             <input className={input} type="number" min="1" max="100000" value={o.log_rotation_retention_count} onChange={(e) => set("log_rotation_retention_count", Number(e.target.value))} />
           </Control>
         </div>
         <div className="border-t border-slate-200 pt-5 dark:border-slate-800">
-          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-            <SelectControl label="Per-service override" description="Override the global policy for one managed service." value={policyService} onChange={setPolicyService}>
+          <div className="space-y-4">
+            <SelectControl full label="Per-service override" description="Override the global policy for one managed service." value={policyService} onChange={setPolicyService}>
               {policyServices.map((service) => <option key={service} value={service}>{service}</option>)}
             </SelectControl>
-            <div className="flex items-end justify-end gap-3 pb-1"><button type="button" className="cursor-pointer text-sm font-semibold text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white" onClick={clearPolicy}>Use global defaults</button><button type="button" className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800" onClick={onRun} disabled={rotationRunning}>{rotationRunning ? "Rotating…" : "Run now"}</button></div>
+            <div className="flex flex-wrap items-center justify-between gap-3"><button type="button" className="cursor-pointer text-sm font-semibold text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white" onClick={clearPolicy}>Use global defaults</button><button type="button" className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800" onClick={onRun} disabled={rotationRunning}>{rotationRunning ? "Rotating…" : "Run now"}</button></div>
           </div>
-          <div className="mt-4 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <Control label="Service max size"><input className={input} type="number" min="1" value={policy.max_size_mb ?? o.log_rotation_max_size_mb} onChange={(e) => setPolicy("max_size_mb", Number(e.target.value))} /></Control>
-            <SelectControl label="Service schedule" value={policy.schedule ?? o.log_rotation_schedule} onChange={(v) => setPolicy("schedule", v)}><option value="size-only">Size only</option><option value="daily">Daily</option><option value="weekly">Weekly</option></SelectControl>
-            <SelectControl label="Service compression" value={policy.compression ?? o.log_rotation_compression} onChange={(v) => setPolicy("compression", v)}><option value="gzip">gzip</option><option value="none">None</option></SelectControl>
-            <Control label="Service archives"><input className={input} type="number" min="1" value={policy.retention_count ?? o.log_rotation_retention_count} onChange={(e) => setPolicy("retention_count", Number(e.target.value))} /></Control>
+          <div className="mt-4 space-y-4">
+            <Control full label="Service max size"><input className={input} type="number" min="1" value={policy.max_size_mb ?? o.log_rotation_max_size_mb} onChange={(e) => setPolicy("max_size_mb", Number(e.target.value))} /></Control>
+            <SelectControl full label="Service schedule" value={policy.schedule ?? o.log_rotation_schedule} onChange={(v) => setPolicy("schedule", v)}><option value="size-only">Size only</option><option value="daily">Daily</option><option value="weekly">Weekly</option></SelectControl>
+            <SelectControl full label="Service compression" value={policy.compression ?? o.log_rotation_compression} onChange={(v) => setPolicy("compression", v)}><option value="gzip">gzip</option><option value="none">None</option></SelectControl>
+            <Control full label="Service archives"><input className={input} type="number" min="1" value={policy.retention_count ?? o.log_rotation_retention_count} onChange={(e) => setPolicy("retention_count", Number(e.target.value))} /></Control>
           </div>
         </div>
       </Section>

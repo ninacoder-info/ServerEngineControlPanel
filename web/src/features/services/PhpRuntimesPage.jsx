@@ -14,6 +14,7 @@ export default function PhpRuntimesPage({ modal = false, onClose }) {
   const [selected, setSelected] = React.useState(null);
   const [manage, setManage] = React.useState(null);
   const [notice, setNotice] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
   const installedRuntimes = React.useMemo(
     () => runtimes.filter(
       (runtime) =>
@@ -24,8 +25,9 @@ export default function PhpRuntimesPage({ modal = false, onClose }) {
   );
   React.useEffect(() => {
     let alive = true;
-    const load = () =>
-      Promise.all([
+    const load = () => {
+      setLoading(true);
+      return Promise.all([
         apiRequest("/api/v1/services/catalog").then((r) => r.json()),
         apiRequest("/api/v1/services/installed").then((r) => r.json()),
         apiRequest("/api/v1/services/php/runtimes").then((r) => r.json()),
@@ -37,7 +39,9 @@ export default function PhpRuntimesPage({ modal = false, onClose }) {
             setRuntimes(available);
           }
         })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => alive && setLoading(false));
+    };
     load();
     const refreshAfterJob = () => load();
     window.addEventListener("serverengine:jobs-updated", refreshAfterJob);
@@ -46,8 +50,6 @@ export default function PhpRuntimesPage({ modal = false, onClose }) {
       window.removeEventListener("serverengine:jobs-updated", refreshAfterJob);
     };
   }, []);
-  if (!service)
-    return <div className="loading-screen">Loading PHP runtimes…</div>;
   return (
     <div
       className={
@@ -138,26 +140,31 @@ export default function PhpRuntimesPage({ modal = false, onClose }) {
           </div>
         </>
       )}
-      <PhpRuntimeTable
-        service={service}
-        runtimes={installedRuntimes}
-        installed={installed}
-        onInstall={(item, version) =>
-          setSelected({ service: item, initialVersion: version })
-        }
-        onManage={(item, runtime) =>
-          setManage({ service: item, versions: [runtime] })
-        }
-        onUninstall={(version) => {
-          apiRequest(`/api/v1/services/php/${version}`, { method: "DELETE" })
-            .then(async (response) => {
-              if (!response.ok) throw new Error("Unable to uninstall PHP-FPM");
-              setNotice(`PHP-FPM ${version} uninstall started.`);
-            })
-            .catch((error) => setNotice(error.message))
-            .finally(() => window.setTimeout(() => setNotice(null), 3500));
-        }}
-      />
+      {loading ? (
+        <div className="animate-pulse overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700" aria-label="Loading PHP runtimes" aria-busy="true">
+          <div className="flex gap-4 border-b border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-950">
+            {["w-32", "w-24", "w-24", "w-20"].map((width) => <div key={width} className={`h-3 ${width} rounded bg-slate-200 dark:bg-slate-800`} />)}
+          </div>
+          {[1, 2, 3].map((item) => <div key={item} className="flex items-center gap-4 border-b border-slate-200 px-4 py-5 last:border-0 dark:border-slate-700"><div className="h-4 w-32 rounded bg-slate-200 dark:bg-slate-800" /><div className="h-4 w-24 rounded bg-slate-200 dark:bg-slate-800" /><div className="h-4 w-28 rounded bg-slate-200 dark:bg-slate-800" /><div className="ml-auto h-8 w-20 rounded bg-slate-200 dark:bg-slate-800" /></div>)}
+        </div>
+      ) : (
+        <PhpRuntimeTable
+          service={service}
+          runtimes={installedRuntimes}
+          installed={installed}
+          onInstall={(item, version) => setSelected({ service: item, initialVersion: version })}
+          onManage={(item, runtime) => setManage({ service: item, versions: [runtime] })}
+          onUninstall={(version) => {
+            apiRequest(`/api/v1/services/php/${version}`, { method: "DELETE" })
+              .then(async (response) => {
+                if (!response.ok) throw new Error("Unable to uninstall PHP-FPM");
+                setNotice(`PHP-FPM ${version} uninstall started.`);
+              })
+              .catch((error) => setNotice(error.message))
+              .finally(() => window.setTimeout(() => setNotice(null), 3500));
+          }}
+        />
+      )}
       {notice && (
         <p className="text-sm text-slate-600 dark:text-slate-300">{notice}</p>
       )}

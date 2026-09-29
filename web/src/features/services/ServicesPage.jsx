@@ -44,6 +44,7 @@ export default function ServicesPage() {
   });
   const [query, setQuery] = React.useState("");
   const [category, setCategory] = React.useState("All");
+  const [loading, setLoading] = React.useState(true);
   const [selected, setSelected] = React.useState(null);
   const [manage, setManage] = React.useState(null);
   const [nodeRuntimesOpen, setNodeRuntimesOpen] = React.useState(false);
@@ -60,8 +61,9 @@ export default function ServicesPage() {
   }, [pinned]);
   React.useEffect(() => {
     let alive = true;
-    const load = () =>
-      Promise.all([
+    const load = () => {
+      setLoading(true);
+      return Promise.all([
         apiRequest("/api/v1/services/catalog").then((r) => r.json()),
         apiRequest("/api/v1/services/installed").then((r) => r.json()),
       ])
@@ -71,7 +73,9 @@ export default function ServicesPage() {
             setInstalled(detected);
           }
         })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => alive && setLoading(false));
+    };
     load();
     const refreshAfterJob = () => load();
     window.addEventListener("serverengine:jobs-updated", refreshAfterJob);
@@ -86,6 +90,19 @@ export default function ServicesPage() {
       .then((value) => value && setFtpConfig(value))
       .catch(() => {});
   }, []);
+  React.useEffect(() => {
+    const openAuditInstaller = () => {
+      if (window.location.hash !== "#auditd" || selected) return;
+      const auditd = catalog.find((service) => service.id === "auditd");
+      const alreadyInstalled = installed.some(
+        (service) => service.id === "auditd" || service.id.startsWith("auditd@"),
+      );
+      if (auditd && !alreadyInstalled) setSelected({ service: auditd });
+    };
+    openAuditInstaller();
+    window.addEventListener("hashchange", openAuditInstaller);
+    return () => window.removeEventListener("hashchange", openAuditInstaller);
+  }, [catalog, installed, selected]);
 
   const togglePin = (serviceId) =>
     setPinned((current) =>
@@ -129,11 +146,11 @@ export default function ServicesPage() {
         <div className="service-summary">
           <Server size={17} />
           <span>
-            {installed.filter((item) => item.status === "running").length}{" "}
-            running
+            {loading ? "Loading…" : installed.filter((item) => item.status === "running").length}{" "}
+            {loading ? "" : "running"}
           </span>
           <span>·</span>
-          <span>{installed.length} detected</span>
+          <span>{loading ? "Checking services…" : `${installed.length} detected`}</span>
         </div>
       </div>
       <div className="service-toolbar">
@@ -158,7 +175,24 @@ export default function ServicesPage() {
       {window.location.hash === "#opensearch" && <OpenSearchWorkspace />}
       {window.location.hash === "#docker" && <DockerWorkspace />}
       {window.location.hash === "#wp-cli" && <WpCliWorkspace />}
-      <div className="service-grid">
+      {loading ? (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3" aria-label="Loading services" aria-busy="true">
+          {[1, 2, 3, 4, 5, 6].map((item) => (
+            <div key={item} className="animate-pulse rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-lg bg-slate-200 dark:bg-slate-800" />
+                  <div className="space-y-2"><div className="h-4 w-32 rounded bg-slate-200 dark:bg-slate-800" /><div className="h-3 w-20 rounded bg-slate-200 dark:bg-slate-800" /></div>
+                </div>
+                <div className="h-8 w-8 rounded-full bg-slate-200 dark:bg-slate-800" />
+              </div>
+              <div className="mt-5 h-3 w-full rounded bg-slate-200 dark:bg-slate-800" />
+              <div className="mt-2 h-3 w-4/5 rounded bg-slate-200 dark:bg-slate-800" />
+              <div className="mt-6 h-9 w-24 rounded-md bg-slate-200 dark:bg-slate-800" />
+            </div>
+          ))}
+        </div>
+      ) : <div className="service-grid">
         {visible.map((service) => {
           const matches = matchesFor(service);
           if (service.id === "php")
@@ -213,7 +247,7 @@ export default function ServicesPage() {
             />
           );
         })}
-      </div>
+      </div>}
       {selected && (
         <InstallServiceModal
           service={selected.service}

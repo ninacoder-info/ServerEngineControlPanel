@@ -39,13 +39,15 @@ export default function WebsitesPage() {
   const [php, setPhp] = React.useState([]);
   const [serverType, setServerType] = React.useState("nginx");
   const [query, setQuery] = React.useState("");
+  const [loading, setLoading] = React.useState(true);
   const [modal, setModal] = React.useState(null);
   const [dialog, setDialog] = React.useState(null);
   const [error, setError] = React.useState("");
   const [toast, setToast] = React.useState(null);
   const load = React.useCallback(
-    () =>
-      Promise.all([
+    () => {
+      setLoading(true);
+      return Promise.all([
         apiRequest("/api/v1/websites"),
         apiRequest("/api/v1/settings"),
         apiRequest("/api/v1/services/php/runtimes"),
@@ -83,7 +85,9 @@ export default function WebsitesPage() {
         )
         .catch((reason) =>
           setError(reason.message || "Unable to load websites"),
-        ),
+        )
+        .finally(() => setLoading(false));
+    },
     [],
   );
   React.useEffect(() => {
@@ -304,7 +308,7 @@ export default function WebsitesPage() {
         </label>
         <span className="inline-flex items-center gap-1.5 text-sm text-slate-500 dark:text-slate-400">
           <Globe2 size={15} />
-          {sites.length} websites
+          {loading ? "Loading…" : `${sites.length} websites`}
         </span>
       </div>
       <div className="flex items-center justify-between gap-4">
@@ -325,7 +329,37 @@ export default function WebsitesPage() {
           Create website
         </Button>
       </div>
-      {visible.length ? (
+      {loading ? (
+        <div className="space-y-3" aria-label="Loading websites" aria-busy="true">
+          {[1, 2, 3].map((item) => (
+            <div
+              key={item}
+              className="animate-pulse rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"
+            >
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
+                <div className="flex min-w-0 flex-1 items-start gap-3">
+                  <div className="h-10 w-10 shrink-0 rounded-lg bg-slate-200 dark:bg-slate-800" />
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <div className="h-4 w-44 rounded bg-slate-200 dark:bg-slate-800" />
+                    <div className="h-3 w-64 max-w-full rounded bg-slate-200 dark:bg-slate-800" />
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  <div className="h-3 w-16 rounded bg-slate-200 dark:bg-slate-800" />
+                  <div className="h-3 w-20 rounded bg-slate-200 dark:bg-slate-800" />
+                  <div className="h-3 w-14 rounded bg-slate-200 dark:bg-slate-800" />
+                  <div className="h-3 w-12 rounded bg-slate-200 dark:bg-slate-800" />
+                </div>
+                <div className="flex gap-1">
+                  <div className="h-8 w-8 rounded-md bg-slate-200 dark:bg-slate-800" />
+                  <div className="h-8 w-8 rounded-md bg-slate-200 dark:bg-slate-800" />
+                  <div className="h-8 w-8 rounded-md bg-slate-200 dark:bg-slate-800" />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : visible.length ? (
         <div className="space-y-3">
           {visible.map((site) => (
             <article

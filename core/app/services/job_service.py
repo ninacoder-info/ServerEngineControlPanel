@@ -20,7 +20,7 @@ from threading import Lock
 
 from app.models.job import JobSummary
 from app.services.service_catalog import apache_source_for, bind9_source_for, certbot_source_for, caddy_source_for, clamav_source_for, dovecot_source_for, ffmpeg_source_for, git_source_for, haproxy_source_for, imagemagick_source_for, lynis_source_for, mariadb_source_for, memcached_source_for, mongodb_prebuilt_for, mongodb_source_for, mysql_release_for, nginx_source_for, opensearch_source_for, openlitespeed_prebuilt_for, openlitespeed_source_for, php_source_for, postfix_source_for, powerdns_source_for, postgresql_source_for, prebuilt_package_for, python_asset_for, python_source_for, rabbitmq_source_for, redis_source_for, refresh_service_versions, rspamd_source_for, ruby_source_for, stalwart_source_for, supervisor_source_for, unbound_source_for, valkey_source_for, vsftpd_source_for, wpcli_source_for
-from app.services.service_runtime import PHP_BASELINE_MODULES, PHP_REQUIRED_EXTENSIONS, SERVICE_PACKAGES, binary_path, enable_php_baseline_extensions, ensure_composer_cache, ensure_nginx_layout, ensure_node_runtime, ensure_php_fpm_layout, ensure_php_runtime_configuration, ensure_php_runtime_launcher, nginx_paths, normalize_php_runtime_layout, package_for, php_cli_path, php_fpm_paths, php_runtime_library_path, service_root, startup_enabled, version_sort_key
+from app.services.service_runtime import PHP_BASELINE_MODULES, PHP_REQUIRED_EXTENSIONS, SERVICE_PACKAGES, binary_path, enable_php_baseline_extensions, ensure_composer_cache, ensure_nginx_layout, ensure_node_runtime, ensure_php_fpm_layout, ensure_php_runtime_configuration, ensure_php_runtime_launcher, nginx_paths, normalize_php_runtime_layout, package_for, php_cli_path, php_fpm_paths, php_runtime_library_path, prepare_mysql_runtime, service_root, startup_enabled, version_sort_key
 
 
 class InstallCancelled(Exception):
@@ -863,32 +863,7 @@ class JobStore:
 
     def _prepare_mysql_runtime(self, root: Path) -> dict[str, str]:
         """Stage shared runtime libraries without installing packages globally."""
-        library_dir = root / ".runtime-libraries"
-        library_dir.mkdir(parents=True, exist_ok=True)
-        if not any(library_dir.rglob("libaio.so*")) or not any(library_dir.rglob("libnuma.so*")):
-            apt = shutil.which("apt")
-            dpkg_deb = shutil.which("dpkg-deb")
-            if not apt or not dpkg_deb:
-                raise RuntimeError("MySQL needs libaio and libnuma, but the isolated Debian package tools are unavailable")
-            for archive in library_dir.glob("*.deb"):
-                archive.unlink(missing_ok=True)
-            download = subprocess.run([apt, "download", "libaio1t64", "libnuma1"], cwd=library_dir, capture_output=True, text=True, check=False)
-            if download.returncode != 0:
-                raise RuntimeError("Unable to stage MySQL runtime libraries: " + (download.stderr or download.stdout).strip())
-            archives = sorted(library_dir.glob("*.deb"))
-            if len(archives) < 2:
-                raise RuntimeError("MySQL runtime library packages were not downloaded")
-            for archive in archives:
-                subprocess.run([dpkg_deb, "-x", str(archive), str(library_dir)], check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-                archive.unlink(missing_ok=True)
-        aio_candidates = list(library_dir.rglob("libaio.so.1t64"))
-        aio_link = next((path.parent / "libaio.so.1" for path in aio_candidates), None)
-        if aio_link and not aio_link.exists():
-            aio_link.symlink_to(aio_candidates[0].name)
-        library_paths = [library_dir, *[path for path in library_dir.rglob("*") if path.is_dir()]]
-        environment = os.environ.copy()
-        environment["LD_LIBRARY_PATH"] = ":".join(str(path) for path in library_paths)
-        return environment
+        return prepare_mysql_runtime(root)
 
     def _ensure_service_user(self) -> str:
         try:
@@ -1104,6 +1079,9 @@ class JobStore:
         self._broadcast(updated)
 
     def _run_install(self, job_id: str, service_id: str, requested_version: str, install_method: str = "prebuilt", php_version: str | None = None, composer_version: str | None = None):
+        if service_id == "docker":
+            self._run_docker_host_install(job_id)
+            return
         if service_id == "php" and install_method == "source":
             self._run_php_source_binary(job_id, requested_version)
             return
@@ -1129,6 +1107,25 @@ class JobStore:
                 self._run_debian_prebuilt(job_id, service_id, requested_version)
             return
         self._run_isolated_package(job_id, service_id, requested_version)
+
+    def _run_docker_host_install(self, job_id: str):
+        apt = shutil.which("apt-get")
+        if not apt:
+            raise RuntimeError("Docker installation currently requires an apt-based Linux host.")
+        self._update(job_id, status="running", progress=5, message="Refreshing host package metadata for Docker Engine…", log=["$ apt-get update"])
+        metadata = subprocess.run([apt, "update"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=False)
+        self._update(job_id, log=[line for line in metadata.stdout.splitlines() if line.strip()][-40:])
+        if metadata.returncode:
+            raise RuntimeError("Unable to refresh the host package catalog for Docker Engine.")
+        self._raise_if_cancelled(job_id)
+        self._update(job_id, progress=45, message="Installing Docker Engine on the host…", log=["$ apt-get install -y docker.io docker-compose-v2"])
+        installed = subprocess.run([apt, "install", "-y", "docker.io", "docker-compose-v2"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=False)
+        self._update(job_id, log=[line for line in installed.stdout.splitlines() if line.strip()][-80:])
+        if installed.returncode:
+            raise RuntimeError("Docker Engine host installation failed.")
+        docker = shutil.which("docker")
+        version = subprocess.run([docker, "--version"], capture_output=True, text=True, check=False).stdout.strip() if docker else "Docker Engine"
+        self._update(job_id, status="succeeded", progress=100, message=f"{version} is installed on the host.", log=[f"$ {version}"])
 
     def _resolve_apt_version(self, package: str, requested_version: str) -> str:
         """Resolve the UI's epoch-free version to the exact APT version."""

@@ -20,7 +20,7 @@ import {
   UserRound,
   XCircle,
 } from "lucide-react";
-import { apiRequest } from "../../lib/api";
+import { apiRequest, readApiError } from "../../lib/api";
 import { formatPanelDate } from "../../lib/panelPreferences";
 
 const filters = [
@@ -164,24 +164,46 @@ export default function ActivityPage() {
   const [query, setQuery] = React.useState("");
   const [status, setStatus] = React.useState("all");
   const [expanded, setExpanded] = React.useState(null);
-  const [jobs, setJobs] = React.useState([]);
+  const [events, setEvents] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const icons = { websites: Globe2, services: Package, security: ShieldCheck, system: Server };
+  const loadActivity = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await apiRequest(`/api/v1/activity?range=${range}`);
+      if (!response.ok) throw new Error(await readApiError(response, "Could not load activity"));
+      const data = await response.json();
+      setEvents(data.map((event) => ({ ...event, icon: icons[event.category] || FileCog })));
+    } catch (error) {
+      setEvents([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [range]);
+  React.useEffect(() => { loadActivity(); }, [loadActivity]);
   React.useEffect(() => {
-    apiRequest("/api/v1/jobs").then((response) => response.ok ? response.json() : []).then(setJobs).catch(() => {});
-  }, []);
-  const jobEvents = jobs.map((job) => ({ id: `job-${job.id}`, category: "services", type: job.type, actor: "server-engine", target: job.service || "Managed service", detail: job.message || "A managed operation was recorded.", time: job.updated_at || job.created_at, status: job.status === "failed" ? "error" : job.status === "succeeded" ? "success" : "info", icon: FileCog, metadata: { Status: job.status, Job: job.id, Details: job.message || "No additional details" } }));
-  const events = [...jobEvents, ...seedEvents];
+    let socket;
+    try {
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      socket = new WebSocket(`${protocol}//${window.location.host}/api/v1/jobs/ws`);
+      socket.onmessage = () => loadActivity();
+    } catch {
+      socket = null;
+    }
+    return () => socket?.close();
+  }, [loadActivity]);
   const visible = events.filter((event) => (activeFilter === "all" || event.category === activeFilter) && (status === "all" || event.status === status) && `${event.type} ${event.actor} ${event.target} ${event.detail}`.toLowerCase().includes(query.toLowerCase()));
   const attention = events.filter((event) => event.status === "warning" || event.status === "error").length;
   return (
     <div className="space-y-6">
       <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
         <div><p className="text-sm font-medium text-blue-600 dark:text-blue-400">Operations center</p><h2 className="mt-1 text-3xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Activity</h2><p className="mt-2 max-w-2xl text-sm text-slate-500 dark:text-slate-400">A clear record of changes, service operations, security events, and account activity across this server.</p></div>
-        <div className="flex items-center gap-2"><label className="sr-only" htmlFor="activity-range">Activity range</label><select id="activity-range" value={range} onChange={(event) => setRange(event.target.value)} className="cursor-pointer rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"><option value="24h">Last 24 hours</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="all">All activity</option></select><button type="button" className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800" onClick={() => window.location.reload()}><RefreshCw size={15} />Refresh</button></div>
+        <div className="flex items-center gap-2"><label className="sr-only" htmlFor="activity-range">Activity range</label><select id="activity-range" value={range} onChange={(event) => setRange(event.target.value)} className="cursor-pointer rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"><option value="24h">Last 24 hours</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="all">All activity</option></select><button type="button" className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800" onClick={loadActivity}><RefreshCw className={loading ? "animate-spin" : ""} size={15} />Refresh</button></div>
       </div>
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Summary icon={ActivityIcon} label="Events in range" value={visible.length} detail="Recorded control-plane activity" tone="blue" /><Summary icon={CheckCircle2} label="Completed" value={events.filter((event) => event.status === "success").length} detail="Successful operations and changes" tone="emerald" /><Summary icon={AlertTriangle} label="Needs attention" value={attention} detail="Warnings and failed operations" tone="amber" /><Summary icon={Clock3} label="Latest event" value="Just now" detail="Activity feed is ready for live events" /></section>
       <section className="rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
         <div className="border-b border-slate-200 px-4 pt-4 dark:border-slate-800"><div className="flex gap-5 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">{filters.map(([id, label, Icon]) => <button type="button" key={id} onClick={() => setActiveFilter(id)} className={`inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap border-b-2 px-1 pb-3 text-sm font-medium ${activeFilter === id ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"}`}><Icon size={15} />{label}</button>)}</div></div>
-        <div className="p-4"><div className="flex flex-col justify-between gap-3 xl:flex-row xl:items-center"><div><h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Recent activity</h3><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Select an event to inspect the recorded context.</p></div><div className="flex flex-col gap-2 sm:flex-row"><label className="flex min-w-64 items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-slate-400 dark:border-slate-700"><Search size={15} /><input className="w-full bg-transparent text-sm text-slate-900 outline-none dark:text-slate-100" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search activity" /></label><select value={status} onChange={(event) => setStatus(event.target.value)} className="cursor-pointer rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"><option value="all">All statuses</option><option value="success">Completed</option><option value="info">Information</option><option value="warning">Needs attention</option><option value="error">Failed</option></select><button type="button" title="Export activity" aria-label="Export activity" className="inline-flex cursor-pointer items-center justify-center rounded-md border border-slate-300 px-3 py-2 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"><ArrowDownToLine size={16} /></button></div></div><div className="mt-4">{visible.length ? visible.map((event) => <ActivityRow key={event.id} event={event} expanded={expanded === event.id} onExpand={() => setExpanded(expanded === event.id ? null : event.id)} />) : <div className="py-14 text-center"><ActivityIcon className="mx-auto text-slate-300 dark:text-slate-700" size={28} /><p className="mt-3 text-sm font-medium text-slate-700 dark:text-slate-300">No activity matches these filters</p><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Try another category, status, or search term.</p></div>}</div></div>
+        <div className="p-4"><div className="flex flex-col justify-between gap-3 xl:flex-row xl:items-center"><div><h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Recent activity</h3><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Select an event to inspect the recorded context.</p></div><div className="flex flex-col gap-2 sm:flex-row"><label className="flex min-w-64 items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-slate-400 dark:border-slate-700"><Search size={15} /><input className="w-full bg-transparent text-sm text-slate-900 outline-none dark:text-slate-100" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search activity" /></label><select value={status} onChange={(event) => setStatus(event.target.value)} className="cursor-pointer rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"><option value="all">All statuses</option><option value="success">Completed</option><option value="info">Information</option><option value="warning">Needs attention</option><option value="error">Failed</option></select><button type="button" title="Export activity" aria-label="Export activity" className="inline-flex cursor-pointer items-center justify-center rounded-md border border-slate-300 px-3 py-2 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800" onClick={() => { const rows = visible.map((event) => [event.time, event.status, event.type, event.actor, event.target, event.detail]); const csv = [["Time", "Status", "Type", "Actor", "Target", "Details"], ...rows].map((row) => row.map((value) => `"${String(value ?? "").replaceAll('"', '""')}"`).join(",")).join("\n"); const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); const link = document.createElement("a"); link.href = url; link.download = "server-engine-activity.csv"; link.click(); URL.revokeObjectURL(url); }}><ArrowDownToLine size={16} /></button></div></div><div className="mt-4">{loading ? <div className="py-14 text-center text-sm text-slate-500 dark:text-slate-400">Loading activity…</div> : visible.length ? visible.map((event) => <ActivityRow key={event.id} event={event} expanded={expanded === event.id} onExpand={() => setExpanded(expanded === event.id ? null : event.id)} />) : <div className="py-14 text-center"><ActivityIcon className="mx-auto text-slate-300 dark:text-slate-700" size={28} /><p className="mt-3 text-sm font-medium text-slate-700 dark:text-slate-300">No activity matches these filters</p><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Try another category, status, or search term.</p></div>}</div></div>
       </section>
     </div>
   );
