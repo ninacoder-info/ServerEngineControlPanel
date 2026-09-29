@@ -19,8 +19,8 @@ from threading import Event, Thread
 from threading import Lock
 
 from app.models.job import JobSummary
-from app.services.service_catalog import apache_source_for, bind9_source_for, certbot_source_for, caddy_source_for, clamav_source_for, dovecot_source_for, ffmpeg_source_for, git_source_for, haproxy_source_for, imagemagick_source_for, lynis_source_for, mariadb_source_for, memcached_source_for, mongodb_prebuilt_for, mongodb_source_for, mysql_release_for, nginx_source_for, opensearch_source_for, openlitespeed_source_for, php_source_for, postfix_source_for, powerdns_source_for, postgresql_source_for, prebuilt_package_for, python_asset_for, rabbitmq_source_for, redis_source_for, refresh_service_versions, rspamd_source_for, ruby_source_for, stalwart_source_for, supervisor_source_for, unbound_source_for, valkey_source_for, vsftpd_source_for, wpcli_source_for
-from app.services.service_runtime import PHP_BASELINE_MODULES, PHP_REQUIRED_EXTENSIONS, SERVICE_PACKAGES, binary_path, enable_php_baseline_extensions, ensure_composer_cache, ensure_nginx_layout, ensure_node_runtime, ensure_php_fpm_layout, ensure_php_runtime_configuration, ensure_php_runtime_launcher, nginx_paths, normalize_php_runtime_layout, package_for, php_cli_path, php_fpm_paths, php_runtime_library_path, service_root, version_sort_key
+from app.services.service_catalog import apache_source_for, bind9_source_for, certbot_source_for, caddy_source_for, clamav_source_for, dovecot_source_for, ffmpeg_source_for, git_source_for, haproxy_source_for, imagemagick_source_for, lynis_source_for, mariadb_source_for, memcached_source_for, mongodb_prebuilt_for, mongodb_source_for, mysql_release_for, nginx_source_for, opensearch_source_for, openlitespeed_prebuilt_for, openlitespeed_source_for, php_source_for, postfix_source_for, powerdns_source_for, postgresql_source_for, prebuilt_package_for, python_asset_for, python_source_for, rabbitmq_source_for, redis_source_for, refresh_service_versions, rspamd_source_for, ruby_source_for, stalwart_source_for, supervisor_source_for, unbound_source_for, valkey_source_for, vsftpd_source_for, wpcli_source_for
+from app.services.service_runtime import PHP_BASELINE_MODULES, PHP_REQUIRED_EXTENSIONS, SERVICE_PACKAGES, binary_path, enable_php_baseline_extensions, ensure_composer_cache, ensure_nginx_layout, ensure_node_runtime, ensure_php_fpm_layout, ensure_php_runtime_configuration, ensure_php_runtime_launcher, nginx_paths, normalize_php_runtime_layout, package_for, php_cli_path, php_fpm_paths, php_runtime_library_path, service_root, startup_enabled, version_sort_key
 
 
 class InstallCancelled(Exception):
@@ -35,6 +35,11 @@ class JobStore:
         self._cancel_events: dict[str, Event] = {}
         self._subscribers: set[tuple[asyncio.AbstractEventLoop, asyncio.Queue]] = set()
         self._lock = Lock()
+        # Installations, builds, package extraction, and service actions are
+        # deliberately serialized. Running multiple privileged jobs at once
+        # can corrupt the package database or exhaust the server while source
+        # builds compete for CPU, memory, and disk.
+        self._task_lock = Lock()
         self._extension_install_lock = Lock()
 
     def snapshot(self) -> list[dict]:
@@ -95,18 +100,36 @@ class JobStore:
     def enqueue_install(self, job_id: str, service_id: str, requested_version: str, install_method: str = "prebuilt", php_version: str | None = None, composer_version: str | None = None) -> JobSummary:
         method_label = "Prebuilt package" if install_method == "prebuilt" else ("Official release" if service_id == "wp-cli" else "Build from source")
         job = self.create(job_id, f"Install {service_id} {requested_version} · {method_label}")
-        Thread(target=self._run_install, args=(job_id, service_id, requested_version, install_method, php_version, composer_version), daemon=True).start()
+        Thread(target=self._run_serialized, args=(self._run_install, job_id, service_id, requested_version, install_method, php_version, composer_version), daemon=True).start()
         return job
 
     def enqueue_action(self, job_id: str, service_id: str, action: str, version: str | None = None) -> JobSummary:
         job = self.create(job_id, f"{action.title()} {service_id}" + (f" {version}" if version else ""))
-        Thread(target=self._run_action, args=(job_id, service_id, action, version), daemon=True).start()
+        Thread(target=self._run_serialized, args=(self._run_action, job_id, service_id, action, version), daemon=True).start()
         return job
 
     def enqueue_extension(self, job_id: str, version: str, extension: str) -> JobSummary:
         job = self.create(job_id, f"Install PHP {version} extension {extension}")
-        Thread(target=self._run_extension_install, args=(job_id, version, extension), daemon=True).start()
+        Thread(target=self._run_serialized, args=(self._run_extension_install, job_id, version, extension), daemon=True).start()
         return job
+
+    def _run_serialized(self, runner, job_id: str, *args):
+        """Run exactly one privileged job at a time.
+
+        Jobs are still created immediately so the UI can show them as queued,
+        but package operations, source builds, and service actions cannot
+        overlap. This protects APT/dpkg and prevents concurrent builds from
+        exhausting the host.
+        """
+        with self._task_lock:
+            if self._is_cancelled(job_id):
+                return
+            try:
+                runner(job_id, *args)
+            except InstallCancelled:
+                self._update(job_id, status="cancelled", message="Job cancelled.")
+            except Exception as error:
+                self._update(job_id, status="failed", message=str(error))
 
     def _run_extension_install(self, job_id: str, version: str, extension: str):
         minor = ".".join(version.removeprefix("php").split(".")[:2])
@@ -939,6 +962,38 @@ class JobStore:
         bash = shutil.which("bash")
         if not bash:
             raise RuntimeError("bash is required to configure the official MariaDB package source")
+        # The official helper script uses curl internally. Server Engine must
+        # still work on minimal hosts where curl is not installed, so create
+        # the equivalent signed APT source directly with Python's downloader.
+        if not shutil.which("curl"):
+            os_release = {}
+            try:
+                for line in Path("/etc/os-release").read_text(errors="replace").splitlines():
+                    key, _, value = line.partition("=")
+                    os_release[key] = value.strip().strip('"')
+            except OSError as error:
+                raise RuntimeError(f"Unable to determine the host distribution: {error}") from error
+            distro = "ubuntu" if os_release.get("ID") in {"ubuntu", "linuxmint"} else "debian" if os_release.get("ID") == "debian" else None
+            codename = os_release.get("VERSION_CODENAME")
+            if not distro or not codename:
+                raise RuntimeError("MariaDB's official repository does not support this host distribution")
+            architecture = subprocess.run(
+                ["dpkg", "--print-architecture"], capture_output=True, text=True, check=False
+            ).stdout.strip() if shutil.which("dpkg") else ""
+            keyring = Path("/etc/apt/keyrings/server-engine-mariadb.gpg")
+            source_file = Path("/etc/apt/sources.list.d/server-engine-mariadb.sources")
+            keyring.parent.mkdir(parents=True, exist_ok=True)
+            with urllib.request.urlopen("https://mariadb.org/mariadb_release_signing_key.pgp", timeout=30) as response:
+                keyring.write_bytes(response.read())
+            source_file.write_text(
+                "Types: deb\n"
+                f"URIs: https://deb.mariadb.org/{release}/{distro}\n"
+                f"Suites: {codename}\n"
+                "Components: main\n"
+                f"Architectures: {architecture}\n"
+                f"Signed-By: {keyring}\n"
+            )
+            return
         script_path = None
         try:
             with urllib.request.urlopen("https://downloads.mariadb.com/MariaDB/mariadb_repo_setup", timeout=30) as response:
@@ -948,19 +1003,35 @@ class JobStore:
                 script_path = Path(handle.name)
             script_path.chmod(0o700)
             result = subprocess.run(
-                [bash, str(script_path), f"--mariadb-server-version={release}"],
+                [
+                    bash,
+                    str(script_path),
+                    f"--mariadb-server-version={release}",
+                    "--skip-check-installed",
+                ],
                 capture_output=True,
                 text=True,
                 check=False,
             )
             if result.returncode != 0:
                 detail = (result.stderr or result.stdout).strip().splitlines()
-                raise RuntimeError("Unable to configure the official MariaDB repository: " + (detail[-1] if detail else "setup failed"))
+                excerpt = " | ".join(detail[-8:]) if detail else "setup failed"
+                raise RuntimeError("Unable to configure the official MariaDB repository: " + excerpt)
         except urllib.error.URLError as error:
             raise RuntimeError(f"Unable to download the official MariaDB repository setup: {error.reason}") from error
         finally:
             if script_path:
                 script_path.unlink(missing_ok=True)
+
+    def _remove_mariadb_repository_sources(self):
+        """Remove the obsolete MariaDB repository override from old installs."""
+        source_dir = Path("/etc/apt/sources.list.d")
+        if source_dir.exists():
+            for source in source_dir.iterdir():
+                if source.is_file() and "mariadb" in source.name.lower():
+                    source.unlink(missing_ok=True)
+        Path("/etc/apt/keyrings/server-engine-mariadb.gpg").unlink(missing_ok=True)
+
     def _stop_process_by_binary(self, binary: Path, pid_file: Path | None = None):
         """Terminate a managed process without requiring pkill or pgrep."""
         pids = []
@@ -1036,6 +1107,9 @@ class JobStore:
         if service_id == "php" and install_method == "source":
             self._run_php_source_binary(job_id, requested_version)
             return
+        if service_id == "python" and install_method == "source":
+            self._run_python_source_binary(job_id, requested_version)
+            return
         if service_id == "composer":
             self._run_composer_binary(job_id, requested_version, php_version)
             return
@@ -1044,6 +1118,9 @@ class JobStore:
             return
         if service_id == "mongodb" and install_method == "prebuilt":
             self._run_mongodb_prebuilt(job_id, requested_version)
+            return
+        if service_id == "openlitespeed" and install_method == "prebuilt":
+            self._run_openlitespeed_prebuilt(job_id, requested_version)
             return
         if install_method == "prebuilt" and prebuilt_package_for(service_id):
             if service_id == "redis":
@@ -1088,6 +1165,31 @@ class JobStore:
         try:
             shutil.rmtree(staging, ignore_errors=True)
             package_dir.mkdir(parents=True, exist_ok=True)
+            if service_id == "mariadb":
+                # MariaDB prebuilt versions come only from the host's current
+                # package catalog. The selected package is still extracted
+                # into Server Engine; the host package is never installed.
+                self._remove_mariadb_repository_sources()
+                self._update(
+                    job_id,
+                    status="running",
+                    progress=2,
+                    message=f"Checking the host-compatible MariaDB package catalog for {requested_version}…",
+                    log=["$ apt-get update"],
+                )
+                metadata = subprocess.run(
+                    [apt, "update"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    check=False,
+                )
+                if metadata.returncode:
+                    metadata_log = [line.strip() for line in metadata.stdout.splitlines() if line.strip()][-40:]
+                    raise RuntimeError(
+                        "The host package catalog could not be refreshed: "
+                        + (metadata_log[-1] if metadata_log else "apt update failed")
+                    )
             exact_version = self._resolve_apt_version(package, requested_version)
             self._update(job_id, status="running", progress=5, message=f"Downloading prebuilt {service_id} {requested_version}…", log=[f"$ apt-get download {package}={exact_version}"])
             packages = [f"{package}={exact_version}"]
@@ -1180,16 +1282,46 @@ class JobStore:
             shutil.rmtree(staging, ignore_errors=True)
 
     def _prepare_node_runtime(self, root: Path):
+        self._stage_node_runtime_libraries(root)
         node = root / "usr/bin/node"
         real_node = root / "usr/bin/node.bin"
         if not node.exists() or node.is_symlink():
             return
-        if not real_node.exists():
+        if not real_node.exists() and node.is_file():
             node.rename(real_node)
-        library_paths = [root / "lib", root / "usr/lib", root / "lib/aarch64-linux-gnu", root / "usr/lib/aarch64-linux-gnu", root / "lib/x86_64-linux-gnu", root / "usr/lib/x86_64-linux-gnu"]
+        library_paths = [root / "lib", root / "usr/lib", root / ".runtime-libraries/lib", root / ".runtime-libraries/usr/lib", root / ".runtime-libraries/usr/lib/aarch64-linux-gnu", root / ".runtime-libraries/usr/lib/x86_64-linux-gnu", root / "lib/aarch64-linux-gnu", root / "usr/lib/aarch64-linux-gnu", root / "lib/x86_64-linux-gnu", root / "usr/lib/x86_64-linux-gnu"]
         paths = ":".join(str(item) for item in library_paths if item.exists())
         node.write_text(f"#!/bin/sh\nexport LD_LIBRARY_PATH=\"{paths}:$LD_LIBRARY_PATH\"\nexec \"{real_node}\" \"$@\"\n")
         node.chmod(0o755)
+
+    def _stage_node_runtime_libraries(self, root: Path):
+        """Stage Node's small native dependencies without changing the host OS."""
+        library_root = root / ".runtime-libraries"
+        marker = library_root / ".libatomic-ready"
+        if marker.exists():
+            return
+        apt = shutil.which("apt")
+        dpkg_deb = shutil.which("dpkg-deb")
+        if not apt or not dpkg_deb:
+            raise RuntimeError("Node.js needs libatomic1, but the isolated package tools are unavailable")
+        library_root.mkdir(parents=True, exist_ok=True)
+        result = subprocess.run(
+            [apt, "download", "libatomic1"],
+            cwd=library_root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=120,
+        )
+        package = next(iter(sorted(library_root.glob("libatomic1_*.deb"))), None)
+        if result.returncode != 0 or not package:
+            detail = (result.stderr or result.stdout).strip()
+            raise RuntimeError(f"Unable to stage Node.js dependency libatomic1{(': ' + detail) if detail else ''}")
+        extracted = subprocess.run([dpkg_deb, "-x", str(package), str(library_root)], capture_output=True, text=True, check=False)
+        package.unlink(missing_ok=True)
+        if extracted.returncode != 0:
+            raise RuntimeError((extracted.stderr or extracted.stdout).strip() or "Unable to extract Node.js dependency libatomic1")
+        marker.write_text("ready\n")
 
     def _ensure_source_build_dependencies(self, job_id: str, service_id: str):
         """Install only the build prerequisites needed by the selected source service."""
@@ -1198,7 +1330,9 @@ class JobStore:
         }
         dependencies = {
             "apache": base | {"automake", "libexpat1-dev", "libnghttp2-dev", "libpcre3-dev", "libpcre2-dev", "perl"},
+            "mariadb": base | {"bison", "libaio-dev", "libcurl4-openssl-dev", "libevent-dev", "libfmt-dev", "libgcrypt20-dev", "liblz4-dev", "libncurses-dev", "libnuma-dev", "libpcre2-dev", "libsnappy-dev", "liburing-dev", "libzstd-dev"},
             "php": base | {"autoconf", "bison", "re2c", "libxml2-dev", "libcurl4-openssl-dev", "libsqlite3-dev", "libonig-dev", "libzip-dev", "libreadline-dev", "libxslt1-dev", "libjpeg-dev", "libpng-dev", "libwebp-dev", "libfreetype6-dev", "libicu-dev", "libpq-dev"},
+            "python": base | {"libbz2-dev", "libffi-dev", "liblzma-dev", "libncurses-dev", "libreadline-dev", "libsqlite3-dev", "libgdbm-dev", "libnss3-dev", "libuuid1", "uuid-dev", "tk-dev"},
             "stalwart": base | {"cargo", "rustc"},
             # MongoDB's source bootstrap imports boto3 even when it falls back
             # to its requests-based downloader. Keep both modules available so
@@ -1211,6 +1345,7 @@ class JobStore:
             "clamav": base | {"cargo", "rustc", "libcurl4-openssl-dev", "libjson-c-dev", "libxml2-dev", "libncurses-dev", "libpcre2-dev"},
             "postfix": base,
             "dovecot": base | {"autoconf", "automake", "libtool", "gettext", "libcap-dev", "libpam0g-dev"},
+            "openlitespeed": base | {"git", "golang-go", "xz-utils", "libexpat1-dev", "libcap-dev", "libaio-dev", "autoconf", "automake", "libtool", "patch", "curl"},
         }.get(service_id)
         if not dependencies:
             return
@@ -1219,13 +1354,43 @@ class JobStore:
         apt = shutil.which("apt-get")
         dnf = shutil.which("dnf")
         yum = shutil.which("yum")
+
+        def run_logged(command: list[str], progress: int, message: str):
+            self._update(job_id, progress=progress, message=message, log=[f"$ {' '.join(command)}"])
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+            output = []
+            for line in process.stdout or []:
+                line = line.rstrip()
+                if not line:
+                    continue
+                output.append(line)
+                if len(output) == 1 or len(output) % 3 == 0:
+                    self._update(job_id, progress=progress, message=message, log=output[-80:])
+            return process.wait(), output
+
         if apt:
+            if service_id == "mariadb":
+                self._remove_mariadb_repository_sources()
             packages = sorted(dependencies)
-            self._update(job_id, progress=1, message=f"Preparing build dependencies for {service_id}…", log=["$ apt-get install " + " ".join(packages)])
-            update = subprocess.run([apt, "update"], capture_output=True, text=True, check=False)
-            if update.returncode != 0:
-                raise RuntimeError((update.stderr or update.stdout).strip() or f"Unable to refresh APT metadata for {service_id}")
-            install = subprocess.run([apt, "install", "-y", *packages], capture_output=True, text=True, check=False)
+            update_code, update_output = run_logged(
+                [apt, "update"],
+                1,
+                f"Refreshing package metadata for {service_id}…",
+            )
+            if update_code != 0:
+                raise RuntimeError("\n".join(update_output[-30:]) or f"Unable to refresh APT metadata for {service_id}")
+            install_code, install_output = run_logged(
+                [apt, "install", "-y", *packages],
+                2,
+                f"Installing {len(packages)} build dependencies for {service_id}…",
+            )
+            install = install_code, install_output
         elif dnf or yum:
             manager = dnf or yum
             package_map = {
@@ -1234,22 +1399,29 @@ class JobStore:
                 "libjson-c-dev": "json-c-devel", "libxml2-dev": "libxml2-devel", "libncurses-dev": "ncurses-devel",
                 "libpcre2-dev": "pcre2-devel", "libpam0g-dev": "pam-devel", "libcap-dev": "libcap-devel",
                 "libpcre3-dev": "pcre-devel",
+                "libaio-dev": "libaio-devel", "libcurl4-openssl-dev": "libcurl-devel", "libevent-dev": "libevent-devel",
+                "libfmt-dev": "fmt-devel", "libgcrypt20-dev": "libgcrypt-devel", "liblz4-dev": "lz4-devel",
+                "libncurses-dev": "ncurses-devel", "libnuma-dev": "numactl-devel", "libpcre2-dev": "pcre2-devel",
+                "libsnappy-dev": "snappy-devel", "liburing-dev": "liburing-devel", "libzstd-dev": "libzstd-devel",
+                "golang-go": "golang", "xz-utils": "xz",
                 "python-is-python3": "python3",
                 "python3-boto3": "python3-boto3", "python3-requests": "python3-requests",
                 "libglib2.0-dev": "glib2-devel", "libgmime-3.0-dev": "gmime30-devel", "liblua5.4-dev": "lua-devel",
-                "libsodium-dev": "libsodium-devel", "libicu-dev": "libicu-devel", "libevent-dev": "libevent-devel",
-                "libzstd-dev": "libzstd-devel", "liblzma-dev": "xz-devel", "libuv1-dev": "libuv-devel",
+                "libsodium-dev": "libsodium-devel", "libicu-dev": "libicu-devel", "liblzma-dev": "xz-devel", "libuv1-dev": "libuv-devel",
                 "libidn2-dev": "libidn2-devel", "libnghttp2-dev": "libnghttp2-devel", "openjdk-21-jdk-headless": "java-21-openjdk-devel",
             }
             packages = sorted({item for package in dependencies for item in package_map.get(package, package).split()})
-            self._update(job_id, progress=1, message=f"Preparing build dependencies for {service_id}…", log=[f"$ {manager} install -y {' '.join(packages)}"])
-            install = subprocess.run([manager, "install", "-y", *packages], capture_output=True, text=True, check=False)
+            install = run_logged(
+                [manager, "install", "-y", *packages],
+                2,
+                f"Installing {len(packages)} build dependencies for {service_id}…",
+            )
         else:
             raise RuntimeError(f"No supported package manager was found to prepare the {service_id} source build.")
-        output = (install.stdout or "") + (install.stderr or "")
-        if install.returncode != 0:
-            raise RuntimeError(output.strip()[-2000:] or f"Unable to install build dependencies for {service_id}")
-        self._update(job_id, progress=3, message=f"Build dependencies for {service_id} are ready.", log=output.splitlines()[-80:])
+        install_code, install_output = install
+        if install_code != 0:
+            raise RuntimeError("\n".join(install_output[-30:]) or f"Unable to install build dependencies for {service_id}")
+        self._update(job_id, progress=3, message=f"Build dependencies for {service_id} are ready.", log=install_output[-80:])
 
     def _run_php_source_binary(self, job_id: str, requested_version: str):
         """Build PHP-FPM from the official source archive inside its version root."""
@@ -1322,7 +1494,7 @@ class JobStore:
             shutil.rmtree(staging, ignore_errors=True)
 
     def _run_isolated_package(self, job_id: str, service_id: str, requested_version: str, package_override: str | None = None):
-        if service_id in {"apache", "stalwart", "mongodb", "opensearch", "wp-cli", "postfix", "dovecot", "rspamd", "bind9", "unbound", "clamav", "supervisor", "lynis"}:
+        if service_id in {"apache", "mariadb", "stalwart", "mongodb", "opensearch", "wp-cli", "postfix", "dovecot", "rspamd", "bind9", "unbound", "clamav", "supervisor", "lynis", "openlitespeed"}:
             self._ensure_source_build_dependencies(job_id, service_id)
         if service_id == "mysql":
             self._run_mysql_binary(job_id, requested_version)
@@ -1843,6 +2015,89 @@ class JobStore:
             shutil.rmtree(staging, ignore_errors=True)
             archive.unlink(missing_ok=True)
 
+    def _run_openlitespeed_prebuilt(self, job_id: str, requested_version: str):
+        """Extract LiteSpeed's official architecture-specific binary package."""
+        archive_url = openlitespeed_prebuilt_for(requested_version)
+        if not archive_url:
+            try:
+                definition, _, _ = refresh_service_versions("openlitespeed", force=True, install_method="prebuilt")
+                if any(item.version == requested_version for item in definition.versions):
+                    archive_url = openlitespeed_prebuilt_for(requested_version)
+            except Exception:
+                archive_url = None
+        if not archive_url:
+            self._update(job_id, status="failed", message=f"OpenLiteSpeed {requested_version} has no official prebuilt binary for this OS and architecture. Choose source build instead.")
+            return
+        root = service_root("openlitespeed")
+        staging = root.parent / f".openlitespeed-{job_id}-prebuilt"
+        archive = staging / "openlitespeed.tgz"
+        try:
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True, exist_ok=True)
+            self._update(job_id, status="running", progress=5, message=f"Downloading prebuilt OpenLiteSpeed {requested_version}…", log=[f"$ curl -fL {archive_url}"])
+            request = urllib.request.Request(archive_url, headers={"User-Agent": "Server-Engine-Control-Panel"})
+            with urllib.request.urlopen(request, timeout=180) as response, archive.open("wb") as output:
+                total = int(response.headers.get("Content-Length", "0") or 0)
+                downloaded = 0
+                while True:
+                    self._raise_if_cancelled(job_id)
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    output.write(chunk)
+                    downloaded += len(chunk)
+                    progress = 5 + round(downloaded * 35 / total) if total else 20
+                    self._update(job_id, progress=min(40, progress), message=f"Downloading prebuilt OpenLiteSpeed {requested_version}…")
+            extracted = staging / "root"
+            extracted.mkdir()
+            self._update(job_id, progress=45, message=f"Extracting OpenLiteSpeed {requested_version} into the Server Engine service area…")
+            with tarfile.open(archive, "r:gz") as package:
+                members = package.getmembers()
+                if any(member.name.startswith("/") or ".." in Path(member.name).parts for member in members):
+                    raise RuntimeError("The OpenLiteSpeed archive contains an unsafe path")
+                package.extractall(extracted)
+            package_root = next((item for item in extracted.iterdir() if item.is_dir()), extracted)
+            distribution = package_root
+            if not (distribution / "bin/openlitespeed").exists():
+                raise RuntimeError("The OpenLiteSpeed binary package did not contain bin/openlitespeed.")
+            if root.exists():
+                shutil.rmtree(root)
+            root.mkdir(parents=True, exist_ok=True)
+            for item in distribution.iterdir():
+                target = root / item.name
+                if item.is_symlink():
+                    target.symlink_to(os.readlink(item), target_is_directory=item.is_dir())
+                elif item.is_dir():
+                    shutil.copytree(item, target, dirs_exist_ok=True, symlinks=True)
+                else:
+                    shutil.copy2(item, target)
+            binary = root / "bin/openlitespeed"
+            binary.chmod(binary.stat().st_mode | 0o111)
+            lshttpd = root / "bin/lshttpd"
+            if not lshttpd.exists():
+                lshttpd.symlink_to("./openlitespeed")
+            for directory in (root / "conf/vhosts/default", root / "www", root / "logs", root / "run"):
+                directory.mkdir(parents=True, exist_ok=True)
+            config = root / "conf/httpd_config.conf"
+            config.write_text(
+                f"serverName ServerEngine\nuser serverengine\ngroup serverengine\nautoRestart 1\n"
+                f"enableGzip 1\nenableBr 1\nlistener HTTP {{\n  address *:80\n  secure 0\n  map default *\n}}\n"
+                f"virtualHost default {{\n  vhRoot {root / 'www'}\n  configFile {root / 'conf/vhosts/default/vhost.conf'}\n  allowSymbolLink 1\n  enableScript 1\n}}\n"
+                f"errorlog {root / 'logs/error.log'} {{ logLevel NOTICE rollingSize 10M keepDays 30 }}\n"
+                f"accesslog {root / 'logs/access.log'} {{ rollingSize 10M keepDays 30 }}\n"
+            )
+            vhost = root / "conf/vhosts/default/vhost.conf"
+            vhost.write_text("docRoot $VH_ROOT/www\nindex {\n  useServer 0\n  indexFiles index.php, index.html\n}\n")
+            self._prepare_service_runtime(root, "conf", "logs", "run", "www")
+            (root / ".serverengine-version").write_text(requested_version + "\n")
+            (root / ".serverengine-install-method").write_text("prebuilt\n")
+            self._update(job_id, status="succeeded", progress=100, message=f"OpenLiteSpeed {requested_version} was installed from the official prebuilt archive in {root}; no host OpenLiteSpeed package was changed.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+        finally:
+            archive.unlink(missing_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+
     def _run_ruby_binary(self, job_id: str, requested_version: str):
         """Build MRI Ruby from the official source archive into its own root."""
         source_url = ruby_source_for(requested_version)
@@ -2351,6 +2606,7 @@ class JobStore:
         if node_root is None:
             self._update(job_id, status="failed", message="Install an isolated Node.js runtime first. PM2 uses that runtime and does not install Node.js globally.")
             return
+        self._stage_node_runtime_libraries(node_root)
         ensure_node_runtime(node_root)
         npm = node_root / "bin/npm"
         node = binary_path("nodejs", node_root.name)
@@ -2467,6 +2723,104 @@ class JobStore:
             if staging.exists():
                 shutil.rmtree(staging, ignore_errors=True)
             self._update(job_id, status="failed", message=str(error))
+
+    def _run_python_source_binary(self, job_id: str, requested_version: str):
+        """Build official CPython source into its own managed version root."""
+        source_url = python_source_for(requested_version)
+        if not source_url:
+            try:
+                definition, _, _ = refresh_service_versions("python", install_method="source")
+                if any(item.version == requested_version for item in definition.versions):
+                    source_url = python_source_for(requested_version)
+            except Exception:
+                source_url = None
+        if not source_url:
+            self._update(job_id, status="failed", message=f"Python {requested_version} is not available from the official source catalog. Refresh compatible versions and try again.")
+            return
+        root = service_root("python", requested_version)
+        staging = root.parent / f".python-{requested_version}-{job_id}-staging"
+        archive = root.parent / f"python-{requested_version}.tgz"
+        try:
+            self._ensure_source_build_dependencies(job_id, "python")
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True, exist_ok=True)
+            archive.unlink(missing_ok=True)
+            self._update(job_id, status="running", progress=5, message=f"Downloading Python {requested_version} source…", log=[f"$ curl -L {source_url}"])
+            request = urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"})
+            with urllib.request.urlopen(request, timeout=120) as response, archive.open("wb") as output:
+                total = int(response.headers.get("Content-Length", "0") or 0)
+                downloaded = 0
+                while True:
+                    self._raise_if_cancelled(job_id)
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    output.write(chunk)
+                    downloaded += len(chunk)
+                    progress = 5 + round(downloaded * 25 / total) if total else 15
+                    self._update(job_id, progress=min(30, progress), message=f"Downloading Python {requested_version} source…")
+            with tarfile.open(archive, "r:gz") as package:
+                members = package.getmembers()
+                if any(member.name.startswith("/") or ".." in Path(member.name).parts for member in members):
+                    raise RuntimeError("The Python source archive contains an unsafe path")
+                package.extractall(staging)
+            source = next((item for item in staging.iterdir() if item.is_dir()), staging)
+            if root.exists():
+                shutil.rmtree(root)
+            configure = [
+                "./configure",
+                f"--prefix={root}",
+                "--with-ensurepip=install",
+                "--enable-shared",
+                "--with-system-expat",
+            ]
+            environment = {**os.environ, "LDFLAGS": f"-Wl,-rpath,{root / 'lib'}"}
+            self._update(job_id, progress=34, message=f"Configuring Python {requested_version}…", log=[f"$ {' '.join(configure)}"])
+            configured = subprocess.run(configure, cwd=source, env=environment, capture_output=True, text=True, check=False)
+            configure_log = (configured.stdout + configured.stderr).splitlines()
+            if configure_log:
+                self._update(job_id, log=configure_log[-100:])
+            if configured.returncode != 0:
+                raise RuntimeError("Python configure failed; see the job output for the missing library or compiler error.")
+            jobs = str(max(1, min(os.cpu_count() or 1, 4)))
+            command = ["make", f"-j{jobs}"]
+            self._update(job_id, progress=50, message=f"Building Python {requested_version} from source…", log=[f"$ {' '.join(command)}"])
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=source, env=environment)
+            output = []
+            for line in process.stdout or []:
+                line = line.rstrip()
+                if line:
+                    output.append(line)
+                    if len(output) == 1 or len(output) % 5 == 0:
+                        self._update(job_id, progress=50, log=output[-80:])
+            if process.wait() != 0:
+                raise RuntimeError("Python compilation failed; see the job output for the compiler error.")
+            self._update(job_id, progress=82, message="Installing Python into the managed runtime…", log=["$ make install"])
+            installed = subprocess.run(["make", "install"], cwd=source, env=environment, capture_output=True, text=True, check=False)
+            install_log = (installed.stdout + installed.stderr).splitlines()
+            if install_log:
+                self._update(job_id, log=install_log[-100:])
+            if installed.returncode != 0:
+                raise RuntimeError("Python installation failed; see the job output for the installer error.")
+            binary_candidates = sorted(root.glob("bin/python3.*"), reverse=True)
+            if not binary_candidates:
+                raise RuntimeError("The Python source build did not create a usable interpreter")
+            binary = binary_candidates[0]
+            for name in ("python", "python3"):
+                link = root / "bin" / name
+                if not link.exists():
+                    link.symlink_to(binary.name)
+            (root / ".serverengine-version").write_text(requested_version + "\n")
+            (root / ".serverengine-install-method").write_text("source\n")
+            self._prepare_service_runtime(root, "logs", "run", "tmp")
+            result = subprocess.run([str(root / "bin/python"), "--version"], capture_output=True, text=True, check=False, env=environment)
+            detected = (result.stdout or result.stderr).strip()
+            self._update(job_id, status="succeeded", progress=100, message=f"Python {requested_version} was built inside {root}. {detected}")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+        finally:
+            archive.unlink(missing_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
 
     def _run_redis_prebuilt(self, job_id: str, requested_version: str):
         """Extract the distro Redis package without registering a host service."""
@@ -2737,8 +3091,11 @@ class JobStore:
         cmake = shutil.which("cmake")
         make = shutil.which("make")
         compiler = shutil.which("c++") or shutil.which("g++")
-        if not source_url or not cmake or not make or not compiler:
-            self._update(job_id, status="failed", message="MariaDB source or the CMake/C++ build toolchain is unavailable. Install the isolated build toolchain, then refresh and retry.")
+        if not source_url:
+            self._update(job_id, status="failed", message="MariaDB source release is not available. Refresh compatible versions and retry.")
+            return
+        if not cmake or not make or not compiler:
+            self._update(job_id, status="failed", message="The MariaDB build toolchain could not be prepared. Check the build-dependency output and retry.")
             return
         root = service_root("mariadb")
         staging = root.parent / f".mariadb-{job_id}-staging"
@@ -2755,7 +3112,7 @@ class JobStore:
                 package.extractall(staging, filter="data")
             source = next((item for item in staging.iterdir() if item.is_dir()), staging)
             build_dir = staging / "build"
-            configure = [cmake, "-S", str(source), "-B", str(build_dir), f"-DCMAKE_INSTALL_PREFIX={root}", "-DWITHOUT_TOKUDB=1", "-DWITH_WSREP=0", "-DWITH_UNIT=OFF", "-DPLUGIN_ROCKSDB=NO"]
+            configure = [cmake, "-S", str(source), "-B", str(build_dir), f"-DCMAKE_INSTALL_PREFIX={root}", "-DWITHOUT_TOKUDB=1", "-DWITH_WSREP=0", "-DWITH_UNIT=OFF", "-DPLUGIN_ROCKSDB=NO", "-DPLUGIN_DUCKDB=NO"]
             self._update(job_id, progress=30, message=f"Configuring MariaDB {requested_version} source build…", log=[f"$ {' '.join(configure)}"])
             configured = subprocess.run(configure, capture_output=True, text=True, check=False)
             if configured.returncode != 0:
@@ -4184,6 +4541,7 @@ class JobStore:
                 if source.exists():
                     shutil.copytree(source, target, dirs_exist_ok=True)
             (root / ".serverengine-version").write_text(requested_version)
+            self._stage_node_runtime_libraries(root)
             ensure_node_runtime(root)
             self._update(job_id, status="succeeded", progress=100, message=f"Node.js {full_version} installed in {root}.")
         except Exception as error:
@@ -4357,22 +4715,49 @@ def enqueue_startup_services() -> None:
         for version_root in sorted(item for item in php_versions.iterdir() if item.is_dir()):
             version = version_root.name
             paths = php_fpm_paths(version)
-            if paths["binary"].exists() and not _managed_process_alive(paths["pid"]):
+            if startup_enabled("php", version) and paths["binary"].exists() and not _managed_process_alive(paths["pid"]):
                 job_store.enqueue_action(f"startup-php-{version}", "php", "start", version)
 
     nginx = nginx_paths()
     apache_root = service_root("apache")
-    if nginx["binary"].exists() and nginx["config"].exists() and not _managed_process_alive(nginx["pid"]):
+    if startup_enabled("nginx") and nginx["binary"].exists() and nginx["config"].exists() and not _managed_process_alive(nginx["pid"]):
         job_store.enqueue_action("startup-nginx", "nginx", "start")
-    elif binary_path("apache").exists() and (apache_root / "conf/httpd.conf").exists() and not _managed_process_alive(apache_root / "run/httpd.pid"):
+    elif startup_enabled("apache") and binary_path("apache").exists() and (apache_root / "conf/httpd.conf").exists() and not _managed_process_alive(apache_root / "run/httpd.pid"):
         job_store.enqueue_action("startup-apache", "apache", "start")
 
-    database = next((service_id for service_id in ("mysql", "mariadb") if binary_path(service_id).exists()), None)
+    database = next(
+        (
+            service_id
+            for service_id in ("mysql", "mariadb")
+            if binary_path(service_id).exists() and startup_enabled(service_id)
+        ),
+        None,
+    )
     if database:
         pid_file = service_root(database) / "run/mysqld.pid"
         if not _managed_process_alive(pid_file):
             job_store.enqueue_action(f"startup-{database}", database, "start")
 
     ftp_root = service_root("vsftpd")
-    if binary_path("vsftpd").exists() and not _managed_process_alive(ftp_root / "run/vsftpd.pid"):
+    if startup_enabled("vsftpd") and binary_path("vsftpd").exists() and not _managed_process_alive(ftp_root / "run/vsftpd.pid"):
         job_store.enqueue_action("startup-vsftpd", "vsftpd", "start")
+
+    # Other long-running services are opt-in. Their Runtime toggles persist
+    # the choice, and this boot hook starts them only when explicitly enabled.
+    optional_services = {
+        "postgresql": "postmaster.pid",
+        "redis": "redis.pid",
+        "valkey": "valkey.pid",
+        "memcached": "memcached.pid",
+        "mongodb": "mongod.pid",
+        "powerdns": "pdns.pid",
+        "haproxy": "haproxy.pid",
+        "caddy": "caddy.pid",
+        "fail2ban": "fail2ban.pid",
+        "supervisor": "supervisord.pid",
+    }
+    for service_id, pid_name in optional_services.items():
+        if startup_enabled(service_id) and binary_path(service_id).exists():
+            pid_file = service_root(service_id) / "run" / pid_name
+            if not _managed_process_alive(pid_file):
+                job_store.enqueue_action(f"startup-{service_id}", service_id, "start")

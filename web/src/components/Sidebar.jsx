@@ -16,6 +16,7 @@ import {
   Package,
   Server,
   Settings,
+  ScanSearch,
   ShieldCheck,
   ShieldAlert,
   Users,
@@ -75,6 +76,7 @@ const sections = [
     "Security & access",
     [
       ["Firewall", "/firewall", ShieldCheck],
+      ["Malware Scanner", "/malware-scanner", ScanSearch],
       ["Application Shield", "/application-shield", ShieldAlert],
       ["Logs", "/logs", Logs],
     ],

@@ -19,6 +19,7 @@ import {
 import { apiRequest } from "../lib/api";
 import Toast from "./Toast";
 import { formatPanelDate } from "../lib/panelPreferences";
+import { setJobFavicon } from "../lib/jobFavicon";
 import englishFlag from "../assets/flags/en.svg";
 import vietnameseFlag from "../assets/flags/vi.svg";
 import frenchFlag from "../assets/flags/fr.svg";
@@ -60,6 +61,8 @@ export default function Topbar({
   const [copiedJobId, setCopiedJobId] = React.useState(null);
   const jobsInitialized = React.useRef(false);
   const previousJobStatuses = React.useRef(new Map());
+  const activeJobsRef = React.useRef(0);
+  const faviconResetTimer = React.useRef(null);
   const jobsRef = React.useRef(null);
   const accountRef = React.useRef(null);
   const languageRef = React.useRef(null);
@@ -94,6 +97,10 @@ export default function Topbar({
     const applySnapshot = (items) => {
       if (!alive) return;
       previousJobStatuses.current = new Map(items.map((job) => [job.id, job.status]));
+      activeJobsRef.current = items.filter(
+        (job) => job.status === "queued" || job.status === "running",
+      ).length;
+      setJobFavicon(activeJobsRef.current ? "processing" : "idle");
       jobsInitialized.current = true;
       setJobs(items);
     };
@@ -102,6 +109,20 @@ export default function Topbar({
       const previous = previousJobStatuses.current.get(job.id);
       const finished = ["succeeded", "failed", "cancelled"].includes(job.status);
       const statusChanged = previous !== job.status;
+      const nextStatuses = new Map(previousJobStatuses.current);
+      nextStatuses.set(job.id, job.status);
+      activeJobsRef.current = [...nextStatuses.values()].filter(
+        (status) => status === "queued" || status === "running",
+      ).length;
+      if (activeJobsRef.current) {
+        setJobFavicon("processing");
+      } else if (finished && statusChanged) {
+        setJobFavicon(job.status === "succeeded" ? "success" : "failed");
+        window.clearTimeout(faviconResetTimer.current);
+        faviconResetTimer.current = window.setTimeout(() => {
+          if (activeJobsRef.current === 0) setJobFavicon("idle");
+        }, 5000);
+      }
       if (jobsInitialized.current && previous !== job.status && finished) {
         setOperationToast({
           type: job.status === "succeeded" ? "success" : "error",
@@ -139,6 +160,8 @@ export default function Topbar({
       alive = false;
       window.clearTimeout(connectTimer);
       window.clearTimeout(reconnectTimer);
+      window.clearTimeout(faviconResetTimer.current);
+      setJobFavicon("idle");
       socket?.close();
     };
   }, []);

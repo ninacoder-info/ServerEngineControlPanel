@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import subprocess
 import math
@@ -13,9 +14,64 @@ from app.api.dependencies import require_user
 from app.models.service import ConfigurationSaveRequest, ExtensionInstallRequest, InstallServiceRequest, InstalledService, ServiceActionRequest, ServiceDefinition, SwitchVersionRequest
 from app.services.service_catalog import CATALOG, PHP_EXTENSIONS, get_service, refresh_service_versions
 from app.services.job_service import job_store
-from app.services.service_runtime import PHP_BASELINE_MODULES, SERVICE_PACKAGES, binary_path, composer_path, composer_php_version, enable_php_baseline_extensions, ensure_composer_launcher, ensure_nginx_layout, ensure_node_runtime, ensure_php_fpm_layout, ensure_php_runtime_launcher, ensure_php_terminal_launcher, normalize_php_runtime_layout, nginx_default_configuration, nginx_paths, php_cli_path, php_runtime_library_path, service_root, version_sort_key
+from app.services.service_runtime import PHP_BASELINE_MODULES, SERVICE_PACKAGES, binary_path, composer_path, composer_php_version, default_startup_enabled, enable_php_baseline_extensions, ensure_composer_launcher, ensure_nginx_layout, ensure_node_runtime, ensure_php_fpm_layout, ensure_php_runtime_launcher, ensure_php_terminal_launcher, normalize_php_runtime_layout, nginx_default_configuration, nginx_paths, php_cli_path, php_runtime_library_path, service_root, set_startup_enabled, startup_enabled, version_sort_key
 
 router = APIRouter(prefix="/api/v1/services", tags=["services"])
+
+
+def _configured_service_port(service_id: str) -> int:
+    defaults = {"mysql": 3306, "mariadb": 3306}
+    path = service_root(service_id) / "conf/my.cnf"
+    try:
+        content = path.read_text(errors="replace")
+    except OSError:
+        return defaults.get(service_id, 0)
+    match = re.search(r"(?mi)^\s*port\s*=\s*(\d+)\s*$", content)
+    return int(match.group(1)) if match else defaults.get(service_id, 0)
+
+
+@router.get("/{service_id}/startup")
+def get_startup_policy(service_id: str, version: str | None = Query(default=None), user=Depends(require_user)):
+    if not get_service(service_id):
+        raise HTTPException(status_code=404, detail="Service not found")
+    if service_id == "php" and not version:
+        raise HTTPException(status_code=400, detail="A PHP version is required")
+    return {"service": service_id, "version": version, "enabled": startup_enabled(service_id, version), "default": default_startup_enabled(service_id)}
+
+
+@router.put("/{service_id}/startup")
+def update_startup_policy(service_id: str, payload: dict, version: str | None = Query(default=None), user=Depends(require_user)):
+    if not get_service(service_id):
+        raise HTTPException(status_code=404, detail="Service not found")
+    selected_version = str(payload.get("version") or version or "").strip() or None
+    if service_id == "php" and not selected_version:
+        raise HTTPException(status_code=400, detail="A PHP version is required")
+    enabled = set_startup_enabled(service_id, bool(payload.get("enabled", False)), selected_version)
+    warning = None
+    web_servers = {"nginx", "apache", "openlitespeed", "caddy"}
+    if enabled and service_id in web_servers:
+        other = next(
+            (
+                candidate
+                for candidate in web_servers
+                if candidate != service_id and startup_enabled(candidate)
+            ),
+            None,
+        )
+        if other:
+            warning = (
+                f"{service_id.title()} and {other.title()} are both enabled for startup. "
+                "Only one web server can own ports 80 and 443."
+            )
+    if enabled and service_id in {"mysql", "mariadb"}:
+        other = "mariadb" if service_id == "mysql" else "mysql"
+        if startup_enabled(other) and _configured_service_port(service_id) == _configured_service_port(other):
+            port = _configured_service_port(service_id)
+            warning = (
+                f"{service_id.title()} and {other.title()} are both enabled for startup "
+                f"and both use port {port}. Choose different database ports before enabling both."
+            )
+    return {"service": service_id, "version": selected_version, "enabled": enabled, "warning": warning}
 
 
 @router.get("/composer/terminal")
@@ -556,6 +612,8 @@ def _configuration_path(service_id: str, version: str | None, file: str = "fpm")
     if service_id == "apache":
         return service_root("apache") / "conf/httpd.conf"
     if service_id == "openlitespeed":
+        if file == "vhost":
+            return service_root("openlitespeed") / "conf/vhosts/default/vhost.conf"
         return service_root("openlitespeed") / "conf/httpd_config.conf"
     if service_id == "caddy":
         return service_root("caddy") / "conf/Caddyfile"

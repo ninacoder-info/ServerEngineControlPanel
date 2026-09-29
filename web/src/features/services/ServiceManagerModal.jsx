@@ -1233,6 +1233,7 @@ export default function ServiceManagerModal({
   const [phpTerminalEnabled, setPhpTerminalEnabled] = React.useState(false);
   const [phpTerminalPath, setPhpTerminalPath] = React.useState("");
   const [terminalToast, setTerminalToast] = React.useState(null);
+  const [startupEnabled, setStartupEnabled] = React.useState(false);
   React.useEffect(() => {
     setAvailableVersions(service.versions);
   }, [service.id, service.versions]);
@@ -1305,6 +1306,17 @@ export default function ServiceManagerModal({
       })
       .catch(() => {});
   }, [service.id, query]);
+  React.useEffect(() => {
+    if (!installed || (isPhp && !version)) return undefined;
+    const startupQuery = isPhp ? `?version=${encodeURIComponent(version)}` : "";
+    apiRequest(`/api/v1/services/${service.id}/startup${startupQuery}`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((value) => {
+        if (value) setStartupEnabled(Boolean(value.enabled));
+      })
+      .catch(() => {});
+    return undefined;
+  }, [service.id, isPhp, version, Boolean(installed)]);
   React.useEffect(() => {
     if (!isPhp || !version) return undefined;
     apiRequest(`/api/v1/services/php/${encodeURIComponent(version)}/terminal`)
@@ -1467,6 +1479,27 @@ export default function ServiceManagerModal({
       setTerminalToast({ type: "error", message: body.message });
     }
     setBusy(false);
+    return r.ok;
+  }
+  async function saveStartupPolicy(nextEnabled) {
+    setStartupEnabled(nextEnabled);
+    const r = await apiRequest(
+      `/api/v1/services/${service.id}/startup${isPhp ? `?version=${encodeURIComponent(version)}` : ""}`,
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          enabled: nextEnabled,
+          ...(isPhp ? { version } : {}),
+        }),
+      },
+    );
+    const body = r.ok ? await r.json() : { message: await readApiError(r) };
+    setTerminalToast({
+      type: r.ok ? "success" : "error",
+      message: r.ok
+        ? `${serviceLabel} will ${nextEnabled ? "start" : "stay stopped"} with the operating system.`
+        : body.message || "Unable to save startup preference.",
+    });
     return r.ok;
   }
   async function serviceAction(actionName) {
@@ -1773,9 +1806,9 @@ export default function ServiceManagerModal({
         )}
         {tab === "runtime" && (
           <div className="manager-pane">
-            <div className="flex items-start gap-3">
+            <div className="flex w-full flex-col gap-3">
               <Server size={18} />
-              <div>
+              <div className="w-full">
                 <strong>
                   {running
                     ? `${serviceLabel} is running`
@@ -1788,6 +1821,44 @@ export default function ServiceManagerModal({
                       ? "MySQL uses its own data directory, port, process, and error log."
                       : `${service.name} runs from the Server Engine service root.`}
                 </p>
+                <div className="mb-5 flex items-center justify-between gap-4 border-b border-slate-200 pb-4 dark:border-slate-800">
+                  <label className="flex cursor-pointer items-start gap-3 text-sm text-slate-700 dark:text-slate-300">
+                    <input
+                      className="mt-0.5 h-4 w-4 cursor-pointer rounded border-slate-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-800"
+                      type="checkbox"
+                      checked={startupEnabled}
+                      onChange={(event) => saveStartupPolicy(event.target.checked)}
+                    />
+                    <span>
+                      <span className="block font-medium text-slate-900 dark:text-slate-100">
+                        Start with operating system
+                      </span>
+                      <span className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">
+                        Starts this service automatically when Server Engine starts.
+                      </span>
+                    </span>
+                  </label>
+                </div>
+                <div className="mb-5 divide-y divide-slate-200 border-y border-slate-200 dark:divide-slate-800 dark:border-slate-800">
+                  <div className="flex items-center justify-between gap-4 py-3">
+                    <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Service state</span>
+                    <span className={`text-sm font-semibold ${running ? "text-emerald-600 dark:text-emerald-400" : "text-slate-700 dark:text-slate-300"}`}>
+                      {running ? "Running" : "Stopped"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-4 py-3">
+                    <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Version</span>
+                    <span className="text-sm text-slate-700 dark:text-slate-300">{installed?.version ? `v${installed.version}` : "—"}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-4 py-3">
+                    <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Configuration</span>
+                    <code className="max-w-[70%] break-all text-right text-xs text-slate-500 dark:text-slate-400">{config?.config_path || "Managed service configuration"}</code>
+                  </div>
+                  <div className="flex items-center justify-between gap-4 py-3">
+                    <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Runtime</span>
+                    <span className="text-sm text-slate-700 dark:text-slate-300">{isPhp ? "PHP-FPM pool and socket" : isMysql ? "MySQL server process" : "Managed service process"}</span>
+                  </div>
+                </div>
                 <div className="service-control-actions">
                   <button
                     className={

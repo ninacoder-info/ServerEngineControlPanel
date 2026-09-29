@@ -79,7 +79,9 @@ function Toggle({ label, description, checked, onChange }) {
 function Row({ label, value }) {
   return (
     <div className="flex flex-col gap-1 border-b border-slate-200 py-3 last:border-b-0 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-      <span className="text-sm text-slate-500 dark:text-slate-400">{label}</span>
+      <span className="text-sm text-slate-500 dark:text-slate-400">
+        {label}
+      </span>
       <code className="break-all text-xs text-slate-700 dark:text-slate-300 sm:text-right">
         {value}
       </code>
@@ -102,9 +104,12 @@ function parseConfig(text) {
     authenticator: readOption(text, "authenticator", "webroot"),
     webroot: readOption(text, "webroot-path", defaults.webroot),
     automaticRenewal: readOption(text, "renew-by-default", "true") !== "false",
-    renewalDays: Number(readOption(text, "renew-within", defaults.renewalDays)) || defaults.renewalDays,
+    renewalDays:
+      Number(readOption(text, "renew-within", defaults.renewalDays)) ||
+      defaults.renewalDays,
     renewalTime: readOption(text, "renewal-time", defaults.renewalTime),
-    keepUntilExpiring: readOption(text, "keep-until-expiring", "true") === "true",
+    keepUntilExpiring:
+      readOption(text, "keep-until-expiring", "true") === "true",
   };
 }
 
@@ -143,9 +148,7 @@ function SaveButton({ busy, onClick, children }) {
 }
 
 export default function CertbotConfigModal({ installed, onClose }) {
-  const current = Array.isArray(installed)
-    ? installed[0]
-    : installed;
+  const current = Array.isArray(installed) ? installed[0] : installed;
   const [tab, setTab] = React.useState("certificates");
   const [config, setConfig] = React.useState(null);
   const [text, setText] = React.useState("");
@@ -190,10 +193,13 @@ export default function CertbotConfigModal({ installed, onClose }) {
 
   const save = async (content = buildConfig(values)) => {
     setBusy(true);
-    const response = await apiRequest("/api/v1/services/certbot/configuration", {
-      method: "PUT",
-      body: JSON.stringify({ content }),
-    });
+    const response = await apiRequest(
+      "/api/v1/services/certbot/configuration",
+      {
+        method: "PUT",
+        body: JSON.stringify({ content }),
+      },
+    );
     const body = response.ok
       ? await response.json()
       : { message: await readApiError(response) };
@@ -204,7 +210,10 @@ export default function CertbotConfigModal({ installed, onClose }) {
     );
     if (response.ok) {
       setText(content);
-      setValues((currentValues) => ({ ...currentValues, ...parseConfig(content) }));
+      setValues((currentValues) => ({
+        ...currentValues,
+        ...parseConfig(content),
+      }));
     }
     setBusy(false);
   };
@@ -222,7 +231,10 @@ export default function CertbotConfigModal({ installed, onClose }) {
       >
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 id="certbot-title" className="text-xl font-semibold text-slate-900 dark:text-slate-100">
+            <h2
+              id="certbot-title"
+              className="text-xl font-semibold text-slate-900 dark:text-slate-100"
+            >
               Certbot
             </h2>
             <p className="mt-1 flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
@@ -258,24 +270,42 @@ export default function CertbotConfigModal({ installed, onClose }) {
           {tab === "certificates" && (
             <div className="space-y-5">
               <div>
-                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Certificate management</h3>
+                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                  Certificate management
+                </h3>
                 <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
-                  Certbot requests and renews certificates for websites configured in Server Engine. Choose the website and certificate action from its SSL settings.
+                  Certbot requests and renews certificates for websites
+                  configured in Server Engine. Choose the website and
+                  certificate action from its SSL settings.
                 </p>
               </div>
               <div className="rounded-md border border-slate-200 p-4 dark:border-slate-800">
                 <div className="flex items-start gap-3">
                   <CheckCircle2 className="mt-0.5 text-emerald-600" size={18} />
                   <div>
-                    <p className="text-sm font-medium text-slate-900 dark:text-slate-100">ACME client ready</p>
-                    <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">HTTP-01 is the safe default for normal websites. DNS-01 is required for wildcard certificates.</p>
+                    <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                      ACME client ready
+                    </p>
+                    <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                      HTTP-01 is the safe default for normal websites. DNS-01 is
+                      required for wildcard certificates.
+                    </p>
                   </div>
                 </div>
               </div>
               <div>
-                <Row label="Certbot executable" value={`${root}/venv/bin/certbot or ${root}/usr/bin/certbot`} />
-                <Row label="Certificate storage" value={`${root}/config/live`} />
-                <Row label="Renewal configuration" value={`${root}/config/renewal`} />
+                <Row
+                  label="Certbot executable"
+                  value={`${root}/venv/bin/certbot or ${root}/usr/bin/certbot`}
+                />
+                <Row
+                  label="Certificate storage"
+                  value={`${root}/config/live`}
+                />
+                <Row
+                  label="Renewal configuration"
+                  value={`${root}/config/renewal`}
+                />
               </div>
             </div>
           )}
@@ -283,78 +313,184 @@ export default function CertbotConfigModal({ installed, onClose }) {
           {tab === "account" && (
             <div className="space-y-5">
               <div>
-                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">ACME account</h3>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Use a monitored address for expiry notices and agree to the certificate authority terms once.</p>
+                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                  ACME account
+                </h3>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  Use a monitored address for expiry notices and agree to the
+                  certificate authority terms once.
+                </p>
               </div>
-              <Field label="Account email" hint="Certbot uses this address for important certificate expiry and account notices.">
-                <input className={inputClass} type="email" value={values.email} onChange={(event) => setValue("email", event.target.value)} placeholder="admin@example.com" />
+              <Field
+                label="Account email"
+                hint="Certbot uses this address for important certificate expiry and account notices."
+              >
+                <input
+                  className={inputClass}
+                  type="email"
+                  value={values.email}
+                  onChange={(event) => setValue("email", event.target.value)}
+                  placeholder="admin@example.com"
+                />
               </Field>
-              <Toggle label="Agree to the ACME terms of service" description="Required for non-interactive certificate requests. Review the current provider terms before production use." checked={values.agreeTos} onChange={(value) => setValue("agreeTos", value)} />
-              <SaveButton busy={busy} onClick={() => save()}>Save account settings</SaveButton>
+              <Toggle
+                label="Agree to the ACME terms of service"
+                description="Required for non-interactive certificate requests. Review the current provider terms before production use."
+                checked={values.agreeTos}
+                onChange={(value) => setValue("agreeTos", value)}
+              />
+              <SaveButton busy={busy} onClick={() => save()}>
+                Save account settings
+              </SaveButton>
             </div>
           )}
 
           {tab === "issuance" && (
             <div className="space-y-5">
               <div>
-                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Certificate issuance</h3>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Set the default ACME challenge for new website certificates.</p>
+                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                  Certificate issuance
+                </h3>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  Set the default ACME challenge for new website certificates.
+                </p>
               </div>
-              <Field label="ACME environment" hint="Staging avoids production rate limits while testing DNS and web-server configuration.">
-                <select className={inputClass} value={values.staging ? "staging" : "production"} onChange={(event) => setValue("staging", event.target.value === "staging")}>
+              <Field
+                label="ACME environment"
+                hint="Staging avoids production rate limits while testing DNS and web-server configuration."
+              >
+                <select
+                  className={inputClass}
+                  value={values.staging ? "staging" : "production"}
+                  onChange={(event) =>
+                    setValue("staging", event.target.value === "staging")
+                  }
+                >
                   <option value="production">Let’s Encrypt production</option>
                   <option value="staging">Let’s Encrypt staging</option>
                 </select>
               </Field>
               <Field label="Challenge method">
-                <select className={inputClass} value={values.challenge} onChange={(event) => setValue("challenge", event.target.value)}>
+                <select
+                  className={inputClass}
+                  value={values.challenge}
+                  onChange={(event) =>
+                    setValue("challenge", event.target.value)
+                  }
+                >
                   <option value="http">HTTP-01</option>
                   <option value="dns">DNS-01</option>
                   <option value="tls-alpn">TLS-ALPN-01</option>
                 </select>
               </Field>
               <Field label="Authenticator">
-                <select className={inputClass} value={values.authenticator} onChange={(event) => setValue("authenticator", event.target.value)}>
+                <select
+                  className={inputClass}
+                  value={values.authenticator}
+                  onChange={(event) =>
+                    setValue("authenticator", event.target.value)
+                  }
+                >
                   <option value="webroot">Webroot</option>
                   <option value="standalone">Standalone listener</option>
                   <option value="dns">DNS provider plugin</option>
                 </select>
               </Field>
-              <Field label="Webroot path" hint="Used by HTTP-01 when the webroot authenticator is selected.">
-                <input className={inputClass} value={values.webroot} onChange={(event) => setValue("webroot", event.target.value)} />
+              <Field
+                label="Webroot path"
+                hint="Used by HTTP-01 when the webroot authenticator is selected."
+              >
+                <input
+                  className={inputClass}
+                  value={values.webroot}
+                  onChange={(event) => setValue("webroot", event.target.value)}
+                />
               </Field>
-              <SaveButton busy={busy} onClick={() => save()}>Save issuance settings</SaveButton>
+              <SaveButton busy={busy} onClick={() => save()}>
+                Save issuance settings
+              </SaveButton>
             </div>
           )}
 
           {tab === "renewal" && (
             <div className="space-y-5">
               <div>
-                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Renewal policy</h3>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Certbot renewal is safe to run repeatedly; it only renews certificates that are close to expiry.</p>
+                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                  Renewal policy
+                </h3>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  Certbot renewal is safe to run repeatedly; it only renews
+                  certificates that are close to expiry.
+                </p>
               </div>
-              <Toggle label="Automatic renewal" description="Allow the Server Engine scheduler to run certbot renew for managed certificate lineages." checked={values.automaticRenewal} onChange={(value) => setValue("automaticRenewal", value)} />
-              <Field label="Renew when fewer than (days)" hint="The renewal command still respects Certbot’s certificate lineage rules.">
-                <input className={inputClass} type="number" min="1" max="90" value={values.renewalDays} onChange={(event) => setValue("renewalDays", Number(event.target.value))} />
+              <Toggle
+                label="Automatic renewal"
+                description="Allow the Server Engine scheduler to run certbot renew for managed certificate lineages."
+                checked={values.automaticRenewal}
+                onChange={(value) => setValue("automaticRenewal", value)}
+              />
+              <Field
+                label="Renew when fewer than (days)"
+                hint="The renewal command still respects Certbot’s certificate lineage rules."
+              >
+                <input
+                  className={inputClass}
+                  type="number"
+                  min="1"
+                  max="90"
+                  value={values.renewalDays}
+                  onChange={(event) =>
+                    setValue("renewalDays", Number(event.target.value))
+                  }
+                />
               </Field>
               <Field label="Preferred renewal time">
-                <input className={inputClass} type="time" value={values.renewalTime} onChange={(event) => setValue("renewalTime", event.target.value)} />
+                <input
+                  className={inputClass}
+                  type="time"
+                  value={values.renewalTime}
+                  onChange={(event) =>
+                    setValue("renewalTime", event.target.value)
+                  }
+                />
               </Field>
-              <Toggle label="Keep certificates until they are due for renewal" description="Avoid unnecessary replacements and reduce ACME requests during routine runs." checked={values.keepUntilExpiring} onChange={(value) => setValue("keepUntilExpiring", value)} />
-              <SaveButton busy={busy} onClick={() => save()}>Save renewal policy</SaveButton>
+              <Toggle
+                label="Keep certificates until they are due for renewal"
+                description="Avoid unnecessary replacements and reduce ACME requests during routine runs."
+                checked={values.keepUntilExpiring}
+                onChange={(value) => setValue("keepUntilExpiring", value)}
+              />
+              <SaveButton busy={busy} onClick={() => save()}>
+                Save renewal policy
+              </SaveButton>
             </div>
           )}
 
           {tab === "runtime" && (
             <div className="space-y-5">
               <div>
-                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Certbot runtime</h3>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Certbot runs only when issuing or renewing a certificate. There is no persistent service to start or stop.</p>
+                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                  Certbot runtime
+                </h3>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  Certbot runs only when issuing or renewing a certificate.
+                  There is no persistent service to start or stop.
+                </p>
               </div>
               <div>
                 <Row label="Status" value={current?.status || "installed"} />
-                <Row label="Version" value={current?.version ? `v${current.version}` : "Detected by Server Engine"} />
-                <Row label="Configuration" value={config?.config_path || `${root}/conf/cli.ini`} />
+                <Row
+                  label="Version"
+                  value={
+                    current?.version
+                      ? `v${current.version}`
+                      : "Detected by Server Engine"
+                  }
+                />
+                <Row
+                  label="Configuration"
+                  value={config?.config_path || `${root}/conf/cli.ini`}
+                />
                 <Row label="Certificate store" value={`${root}/config`} />
                 <Row label="Working directory" value={`${root}/work`} />
                 <Row label="Logs directory" value={`${root}/logs`} />
@@ -366,35 +502,79 @@ export default function CertbotConfigModal({ installed, onClose }) {
             <div className="space-y-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Certbot activity log</h3>
-                  <p className="mt-1 break-all text-xs text-slate-500 dark:text-slate-400">{logs?.path || `${root}/logs/letsencrypt.log`}</p>
+                  <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                    Certbot activity log
+                  </h3>
+                  <p className="mt-1 break-all text-xs text-slate-500 dark:text-slate-400">
+                    {logs?.path || `${root}/logs/letsencrypt.log`}
+                  </p>
                 </div>
-                <button type="button" className={`${buttonClass} border border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300`} onClick={() => apiRequest("/api/v1/services/certbot/logs?page_size=50").then((response) => (response.ok ? response.json() : null)).then(setLogs)}>
+                <button
+                  type="button"
+                  className={`${buttonClass} border border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300`}
+                  onClick={() =>
+                    apiRequest("/api/v1/services/certbot/logs?page_size=50")
+                      .then((response) =>
+                        response.ok ? response.json() : null,
+                      )
+                      .then(setLogs)
+                  }
+                >
                   <RefreshCw size={14} />
                   Reload
                 </button>
               </div>
-              <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-md bg-slate-950 p-4 text-xs leading-5 text-slate-300">{logs?.available ? logs.lines.join("\n") || "No Certbot activity recorded." : logs ? "No Certbot log exists yet." : "Loading…"}</pre>
+              <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-md bg-slate-950 p-4 text-xs leading-5 text-slate-300">
+                {logs?.available
+                  ? logs.lines.join("\n") || "No Certbot activity recorded."
+                  : logs
+                    ? "No Certbot log exists yet."
+                    : "Loading…"}
+              </pre>
             </div>
           )}
 
           {tab === "configuration" && (
             <div className="space-y-4">
               <div>
-                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">cli.ini</h3>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Advanced Certbot defaults. Website-specific certificate settings remain attached to the website.</p>
-                <code className="mt-2 block break-all text-xs text-slate-500 dark:text-slate-400">{config?.config_path || `${root}/conf/cli.ini`}</code>
+                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                  cli.ini
+                </h3>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  Advanced Certbot defaults. Website-specific certificate
+                  settings remain attached to the website.
+                </p>
+                <code className="mt-2 block break-all text-xs text-slate-500 dark:text-slate-400">
+                  {config?.config_path || `${root}/conf/cli.ini`}
+                </code>
               </div>
               <ConfigEditor path="cli.ini" value={text} onChange={setText} />
               <div className="flex justify-end gap-3">
-                <button type="button" className={`${buttonClass} border border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300`} onClick={loadConfig}>Reset edits</button>
-                <button type="button" className={`${buttonClass} bg-blue-600 text-white hover:bg-blue-700`} disabled={busy} onClick={() => save(text)}>{busy ? "Saving…" : "Save cli.ini"}</button>
+                <button
+                  type="button"
+                  className={`${buttonClass} border border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300`}
+                  onClick={loadConfig}
+                >
+                  Reset edits
+                </button>
+                <button
+                  type="button"
+                  className={`${buttonClass} bg-blue-600 text-white hover:bg-blue-700`}
+                  disabled={busy}
+                  onClick={() => save(text)}
+                >
+                  {busy ? "Saving…" : "Save cli.ini"}
+                </button>
               </div>
             </div>
           )}
         </div>
 
-        {message && <p className="mt-5 text-sm text-slate-600 dark:text-slate-300">{message}</p>}
+        {message && (
+          <p className="mt-5 text-sm text-slate-600 dark:text-slate-300">
+            {message}
+          </p>
+        )}
       </section>
     </div>
   );

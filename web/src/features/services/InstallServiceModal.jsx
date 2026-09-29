@@ -138,12 +138,9 @@ export default function InstallServiceModal({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4"
-      onMouseDown={(event) => event.target === event.currentTarget && onClose()}
-    >
+    <div className="fixed inset-0 z-[70] flex h-[100dvh] min-h-full w-screen items-start justify-center overflow-y-auto overscroll-contain bg-slate-950/50 p-4 sm:p-8">
       <section
-        className="max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-6 shadow-xl dark:bg-slate-900"
+        className="my-auto max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-6 shadow-xl dark:bg-slate-900 sm:max-h-[calc(100dvh-4rem)]"
         role="dialog"
         aria-modal="true"
         aria-labelledby="install-service-title"
@@ -239,10 +236,6 @@ export default function InstallServiceModal({
               </span>
             </label>
           )}
-          <p className="text-sm leading-6 text-slate-500 dark:text-slate-400">
-            The service will be installed in Server Engine service area. The
-            global system package database will not be changed.
-          </p>
           {message && (
             <p className={`text-sm ${messageTone === "success" ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
               {message}

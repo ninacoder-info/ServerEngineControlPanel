@@ -8,6 +8,7 @@ export default function ActionDialog({ dialog, onClose, onSubmit }) {
     onClose();
   };
   const form = dialog.kind === "form";
+  const permissions = dialog.kind === "permissions";
   const danger =
     dialog.kind === "error" ||
     (dialog.kind === "confirm" && dialog.tone !== "primary");
@@ -67,6 +68,68 @@ export default function ActionDialog({ dialog, onClose, onSubmit }) {
               )}
             </label>
           )}
+          {permissions && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-medium text-slate-800 dark:text-slate-200">
+                  Access permissions
+                </span>
+                <code className="rounded bg-slate-100 px-2 py-1 text-sm font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                  {dialog.mode}
+                </code>
+              </div>
+              <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
+                <div className="grid grid-cols-[minmax(5rem,1fr)_repeat(3,minmax(4.5rem,1fr))] border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-400">
+                  <span className="px-3 py-2">Role</span>
+                  <span className="px-3 py-2 text-center">Read</span>
+                  <span className="px-3 py-2 text-center">Write</span>
+                  <span className="px-3 py-2 text-center">Execute</span>
+                </div>
+                {["Owner", "Group", "Others"].map((role, groupIndex) => (
+                  <div
+                    key={role}
+                    className="grid grid-cols-[minmax(5rem,1fr)_repeat(3,minmax(4.5rem,1fr))] border-b border-slate-200 last:border-b-0 dark:border-slate-700"
+                  >
+                    <span className="px-3 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-200">
+                      {role}
+                    </span>
+                    {[4, 2, 1].map((bit) => {
+                      const digit = Number.parseInt(
+                        dialog.mode?.[groupIndex + 1] || "0",
+                        8,
+                      );
+                      const active = Boolean(digit & bit);
+                      return (
+                        <label
+                          key={bit}
+                          className="m-1.5 flex cursor-pointer items-center justify-center rounded-md px-2 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={active}
+                            onChange={() => {
+                              const digits = (dialog.mode || "0644")
+                                .padStart(4, "0")
+                                .split("");
+                              const nextDigit = active ? digit - bit : digit + bit;
+                              digits[groupIndex + 1] = String(nextDigit);
+                              dialog.onModeChange(digits.join(""));
+                            }}
+                            className="h-4 w-4 rounded border-slate-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-900"
+                          />
+                        </label>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+              {dialog.hint && (
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {dialog.hint}
+                </p>
+              )}
+            </div>
+          )}
         </div>
         <div className="mt-6 flex justify-end gap-3">
           <button
@@ -76,7 +139,7 @@ export default function ActionDialog({ dialog, onClose, onSubmit }) {
           >
             {dialog.cancelLabel || "Cancel"}
           </button>
-          {(form || dialog.kind === "confirm") && (
+          {(form || permissions || dialog.kind === "confirm") && (
             <button
               type="button"
               onClick={() => onSubmit(dialog.value)}

@@ -13,6 +13,7 @@ from app.services.settings_service import (
     API_SETTINGS_KEYS,
     settings_service,
 )
+from app.services.log_rotation_service import log_rotation_service
 
 router = APIRouter(prefix="/api/v1/settings", tags=["settings"])
 
@@ -127,6 +128,16 @@ def update_maintenance_settings(payload: SettingsUpdate, user=Depends(require_us
 @router.post("/maintenance/reset")
 def reset_maintenance_settings(user=Depends(require_user)):
     return {"saved": True, "values": settings_service.reset_maintenance()}
+
+
+@router.get("/maintenance/log-rotation/status")
+def get_log_rotation_status(user=Depends(require_user)):
+    return log_rotation_service.status()
+
+
+@router.post("/maintenance/log-rotation/run")
+def run_log_rotation(user=Depends(require_user)):
+    return {"ran": True, **log_rotation_service.rotate_now()}
 
 
 @router.get("")

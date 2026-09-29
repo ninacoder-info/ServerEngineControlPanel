@@ -17,6 +17,7 @@ def v(version: str, channel: str):
 
 
 _PYTHON_ASSETS: dict[str, str] = {}
+_PYTHON_SOURCES: dict[str, str] = {}
 _PHP_SOURCES: dict[str, str] = {}
 _REDIS_SOURCES: dict[str, str] = {}
 _POSTGRES_SOURCES: dict[str, str] = {}
@@ -69,6 +70,7 @@ _PREBUILT_PACKAGE_CHOICES = {
 }
 _CADDY_SOURCES: dict[str, str] = {}
 _MARIADB_SOURCES: dict[str, str] = {}
+_MARIADB_PREBUILTS: list[str] = []
 _HAPROXY_SOURCES: dict[str, str] = {}
 _MEMCACHED_SOURCES: dict[str, str] = {}
 _VALKEY_SOURCES: dict[str, str] = {}
@@ -80,6 +82,7 @@ _IMAGEMAGICK_SOURCES: dict[str, str] = {}
 _RUBY_SOURCES: dict[str, str] = {}
 _FFMPEG_SOURCES: dict[str, str] = {}
 _OPENLITESPEED_SOURCES: dict[str, str] = {}
+_OPENLITESPEED_PREBUILTS: dict[str, str] = {}
 _NGINX_SOURCES: dict[str, str] = {}
 _APACHE_SOURCES: dict[str, str] = {}
 _STALWART_SOURCES: dict[str, str] = {}
@@ -137,6 +140,52 @@ def _refresh_python_versions(definition: ServiceDefinition):
 
 def python_asset_for(version: str) -> str | None:
     return _PYTHON_ASSETS.get(version)
+
+
+def _refresh_python_source_versions(definition: ServiceDefinition):
+    """Fetch one official CPython source archive for each supported minor line."""
+    cached_at = _VERSION_REFRESHED_AT.get("python-source", 0)
+    if _PYTHON_SOURCES and cached_at and time.monotonic() - cached_at < 300:
+        return len(_PYTHON_SOURCES)
+    request = urllib.request.Request(
+        "https://www.python.org/ftp/python/",
+        headers={"User-Agent": "Server-Engine-Control-Panel"},
+    )
+    with urllib.request.urlopen(request, timeout=20) as response:
+        html = response.read().decode("utf-8", "replace")
+    releases = sorted(
+        set(re.findall(r'href="(3\.\d+\.\d+)/"', html)),
+        key=lambda item: tuple(int(part) for part in item.split(".")),
+        reverse=True,
+    )
+    selected = []
+    seen_minor = set()
+    for release in releases:
+        minor = ".".join(release.split(".")[:2])
+        if minor in seen_minor:
+            continue
+        seen_minor.add(minor)
+        selected.append(release)
+        if len(selected) == 20:
+            break
+    if not selected:
+        return None
+    _PYTHON_SOURCES.clear()
+    _PYTHON_SOURCES.update({
+        release: f"https://www.python.org/ftp/python/{release}/Python-{release}.tgz"
+        for release in selected
+    })
+    _VERSION_REFRESHED_AT["python-source"] = time.monotonic()
+    latest_minor = selected[0].rsplit(".", 1)[0]
+    definition.versions = [
+        v(release, "stable" if release.rsplit(".", 1)[0] == latest_minor else "security")
+        for release in selected
+    ]
+    return len(selected)
+
+
+def python_source_for(version: str) -> str | None:
+    return _PYTHON_SOURCES.get(version)
 
 
 def _refresh_php_versions(definition: ServiceDefinition):
@@ -709,6 +758,85 @@ def mariadb_source_for(version: str) -> str | None:
     return _MARIADB_SOURCES.get(version)
 
 
+def _refresh_mariadb_prebuilt_versions(definition: ServiceDefinition):
+    """Discover exact MariaDB packages from MariaDB's repository for this host."""
+    cached_at = _VERSION_REFRESHED_AT.get("mariadb-prebuilt", 0)
+    if _MARIADB_PREBUILTS and time.monotonic() - cached_at < 300:
+        definition.versions = [
+            v(version, "stable" if index == 0 else "security")
+            for index, version in enumerate(_MARIADB_PREBUILTS)
+        ]
+        return len(_MARIADB_PREBUILTS)
+    os_release = {}
+    try:
+        for line in Path("/etc/os-release").read_text(errors="replace").splitlines():
+            key, _, value = line.partition("=")
+            os_release[key] = value.strip().strip('"')
+    except OSError:
+        return 0
+    distro = "ubuntu" if os_release.get("ID") in {"ubuntu", "linuxmint"} else "debian" if os_release.get("ID") == "debian" else None
+    codename = os_release.get("VERSION_CODENAME")
+    architecture = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}.get(platform.machine().lower())
+    if not distro or not codename or not architecture:
+        return 0
+    request = urllib.request.Request(
+        "https://downloads.mariadb.org/rest-api/mariadb/",
+        headers={"User-Agent": "Server-Engine-Control-Panel"},
+    )
+    with urllib.request.urlopen(request, timeout=20) as response:
+        payload = json.loads(response.read().decode("utf-8", "replace"))
+    release_lines = [
+        str(item.get("release_id"))
+        for item in payload.get("major_releases", [])
+        if item.get("release_id")
+        and str(item.get("release_status", "")).lower() not in {"preview", "rc", "alpha", "beta"}
+    ]
+    found = {}
+    for release in release_lines:
+        packages_url = (
+            f"https://mirror.mariadb.org/repo/{release}/{distro}/dists/"
+            f"{codename}/main/binary-{architecture}/Packages.gz"
+        )
+        try:
+            package_request = urllib.request.Request(
+                packages_url,
+                headers={"User-Agent": "Server-Engine-Control-Panel"},
+            )
+            with urllib.request.urlopen(package_request, timeout=12) as response:
+                package_data = gzip.decompress(response.read()).decode("utf-8", "replace")
+        except (urllib.error.HTTPError, urllib.error.URLError, OSError):
+            continue
+        package_name = None
+        for line in package_data.splitlines():
+            if line.startswith("Package: "):
+                package_name = line[9:].strip()
+            elif line.startswith("Version: ") and package_name == "mariadb-server":
+                full_version = line[9:].strip()
+                normalized = full_version.split(":", 1)[-1]
+                upstream = re.search(r"(\d+\.\d+\.\d+)", normalized)
+                if upstream:
+                    version = upstream.group(1)
+                    current = found.get(version.split(".", 2)[0] + "." + version.split(".", 2)[1])
+                    if current is None or tuple(int(part) for part in upstream.group(1).split(".")) > tuple(int(part) for part in re.search(r"(\d+\.\d+\.\d+)", current).group(1).split(".")):
+                        found[version.split(".", 2)[0] + "." + version.split(".", 2)[1]] = normalized
+                package_name = None
+    selected = sorted(
+        found.values(),
+        key=lambda item: tuple(int(part) for part in re.search(r"(\d+\.\d+\.\d+)", item).group(1).split(".")),
+        reverse=True,
+    )
+    if not selected:
+        return 0
+    _MARIADB_PREBUILTS.clear()
+    _MARIADB_PREBUILTS.extend(selected)
+    _VERSION_REFRESHED_AT["mariadb-prebuilt"] = time.monotonic()
+    definition.versions = [
+        v(version, "stable" if index == 0 else "security")
+        for index, version in enumerate(selected)
+    ]
+    return len(selected)
+
+
 def _refresh_haproxy_versions(definition: ServiceDefinition):
     cached_at = _VERSION_REFRESHED_AT.get("haproxy", 0)
     if _HAPROXY_SOURCES and time.monotonic() - cached_at < 300:
@@ -1036,6 +1164,36 @@ def _refresh_openlitespeed_versions(definition: ServiceDefinition):
 
 def openlitespeed_source_for(version: str) -> str | None:
     return _OPENLITESPEED_SOURCES.get(version)
+
+
+def _refresh_openlitespeed_prebuilt_versions(definition: ServiceDefinition):
+    """Fetch the official OpenLiteSpeed binary archives for this architecture."""
+    cached_at = _VERSION_REFRESHED_AT.get("openlitespeed-prebuilt", 0)
+    if _OPENLITESPEED_PREBUILTS and time.monotonic() - cached_at < 300:
+        definition.versions = [v(version, "stable" if index == 0 else "security") for index, version in enumerate(_OPENLITESPEED_PREBUILTS)]
+        return len(_OPENLITESPEED_PREBUILTS)
+    architecture = {"x86_64": "x86_64", "amd64": "x86_64", "aarch64": "aarch64", "arm64": "aarch64"}.get(platform.machine().lower())
+    if not architecture:
+        return 0
+    request = urllib.request.Request("https://openlitespeed.org/downloads/", headers={"User-Agent": "Server-Engine-Control-Panel"})
+    with urllib.request.urlopen(request, timeout=20) as response:
+        html = response.read().decode("utf-8", "replace")
+    pattern = re.compile(r"(https?://(?:www\.)?openlitespeed\.org/packages/openlitespeed-(\d+\.\d+\.\d+)-" + re.escape(architecture) + r"-linux\.tgz)")
+    found = {}
+    for url, version in pattern.findall(html):
+        found.setdefault(version, url)
+    if not found:
+        return 0
+    selected = sorted(found, key=lambda item: tuple(int(part) for part in item.split(".")), reverse=True)
+    _OPENLITESPEED_PREBUILTS.clear()
+    _OPENLITESPEED_PREBUILTS.update({version: found[version] for version in selected})
+    _VERSION_REFRESHED_AT["openlitespeed-prebuilt"] = time.monotonic()
+    definition.versions = [v(version, "stable" if index == 0 else "security") for index, version in enumerate(selected)]
+    return len(selected)
+
+
+def openlitespeed_prebuilt_for(version: str) -> str | None:
+    return _OPENLITESPEED_PREBUILTS.get(version)
 
 
 def _refresh_nginx_versions(definition: ServiceDefinition):
@@ -1495,12 +1653,12 @@ CATALOG.extend([
     ServiceDefinition(id="pm2", name="PM2", category="Process managers", description="Production Node.js process management, clustering, startup, and log handling.", vendor="PM2", license="AGPL-3.0", versions=[], mode="service", installable=True, management_path="/services", management_label="Open process managers"),
     ServiceDefinition(id="postfix", name="Postfix", category="Mail services", description="Outbound and inbound SMTP transport for managed domains and application mail.", vendor="Postfix", license="IPL-1.0", versions=[], mode="service", installable=True, management_path="/email", management_label="Open mail controls"),
     ServiceDefinition(id="dovecot", name="Dovecot", category="Mail services", description="IMAP, POP3, LMTP, mailbox storage, and secure mail delivery sessions.", vendor="Dovecot", license="MIT/LGPL-2.1", versions=[], mode="service", installable=True, management_path="/email", management_label="Open mail controls"),
-    ServiceDefinition(id="rspamd", name="Rspamd", category="Mail services", description="Spam filtering, DKIM signing, reputation checks, and mail policy automation.", vendor="Rspamd", license="Apache-2.0", versions=[], mode="service", installable=True, management_path="/email", management_label="Open mail controls"),
+    ServiceDefinition(id="rspamd", name="Rspamd", category="Mail services", description="Spam filtering, DKIM signing, reputation checks, and mail policy automation.", requirements="Requires Postfix for mail transport; pair with Dovecot for mailbox delivery and filtering.", vendor="Rspamd", license="Apache-2.0", versions=[], mode="service", installable=True, management_path="/email", management_label="Open mail controls"),
     ServiceDefinition(id="stalwart", name="Stalwart Mail Server", category="Mail services", description="Modern all-in-one mail and collaboration server with SMTP, IMAP, JMAP, spam filtering, calendars, contacts, and API-managed domains.", vendor="Stalwart Labs", license="AGPL-3.0 / Enterprise", default_port=25, versions=[], mode="service", installable=True, management_path="/email", management_label="Open mail controls"),
     ServiceDefinition(id="powerdns", name="PowerDNS Authoritative", category="DNS services", description="Authoritative DNS for hosted zones with API-managed records, DNSSEC, nameserver templates, and automation.", vendor="PowerDNS", license="GPL-2.0", default_port=53, versions=[], mode="service", installable=True),
     ServiceDefinition(id="bind9", name="BIND 9", category="DNS services", description="Authoritative and recursive DNS service for self-hosted zones.", vendor="ISC", license="MPL-2.0", versions=[], mode="service", installable=True, management_path="/domains", management_label="Open DNS controls"),
     ServiceDefinition(id="unbound", name="Unbound", category="DNS services", description="Validating recursive DNS resolver with caching and DNSSEC support.", vendor="NLnet Labs", license="BSD-3-Clause", versions=[], mode="service", installable=True, management_path="/domains", management_label="Open DNS controls"),
-    ServiceDefinition(id="clamav", name="ClamAV", category="Security & operations", description="Scheduled malware scanning for website files, uploads, mail, and backups.", vendor="ClamAV", license="GPL-2.0", versions=[], mode="service", installable=True, management_path="/health", management_label="Open security scans"),
+    ServiceDefinition(id="clamav", name="ClamAV", category="Security & operations", description="Scheduled malware scanning for website files, uploads, mail, and backups.", requirements="Optional scanner: website and backup scans work standalone; mail scanning requires Postfix and Rspamd integration.", vendor="ClamAV", license="GPL-2.0", versions=[], mode="service", installable=True, management_path="/health", management_label="Open security scans"),
     ServiceDefinition(id="auditd", name="Linux audit", category="Security & operations", description="Kernel audit event collection for privileged actions, file changes, and authentication review.", vendor="Linux Audit", license="GPL-2.0", versions=[], mode="service", installable=True, management_path="/logs", management_label="Open audit logs"),
     ServiceDefinition(id="lynis", name="Lynis hardening audit", category="Security & operations", description="Security audit and hardening recommendations for the host and its services.", vendor="CISOfy", license="GPL-3.0", versions=[], mode="service", installable=True, management_path="/health", management_label="Open health checks"),
     ServiceDefinition(id="logrotate", name="Logrotate", category="Monitoring & operations", description="Host log retention, compression, and rotation policies.", vendor="Linux", license="GPL-2.0", versions=[], mode="service", installable=True, management_path="/logs", management_label="Open log controls"),
@@ -1525,12 +1683,16 @@ for _service in CATALOG:
         _service.install_methods = ["prebuilt"]
     elif _service.id in _PREBUILT_PACKAGES or _service.id == "mongodb":
         _service.install_methods = ["prebuilt", "source"]
-    elif _service.id in {"nodejs", "python", "composer", "pm2", "sqlserver"}:
+    elif _service.id in {"nodejs", "composer", "pm2", "sqlserver"}:
         # These adapters use versioned portable archives or package-manager
         # artifacts extracted under Server Engine; they do not expose a
         # generic source-build implementation.
         _service.install_methods = ["prebuilt"]
     elif _service.id == "php":
+        _service.install_methods = ["prebuilt", "source"]
+    elif _service.id == "python":
+        _service.install_methods = ["prebuilt", "source"]
+    elif _service.id == "openlitespeed":
         _service.install_methods = ["prebuilt", "source"]
 
 
@@ -1552,6 +1714,9 @@ def refresh_service_versions(service_id: str, force: bool = False, install_metho
         _VERSION_REFRESHED_AT.pop(service_id, None)
         if service_id == "php":
             _VERSION_REFRESHED_AT.pop("php-source", None)
+        if service_id == "python":
+            _VERSION_REFRESHED_AT.pop("python-source", None)
+            _PYTHON_SOURCES.clear()
         packages = _PREBUILT_PACKAGE_CHOICES.get(
             service_id,
             [_PREBUILT_PACKAGES[service_id]] if service_id in _PREBUILT_PACKAGES else [],
@@ -1559,7 +1724,19 @@ def refresh_service_versions(service_id: str, force: bool = False, install_metho
         for package in packages:
             _APT_VERSION_REFRESHED_AT.pop(package, None)
         _SELECTED_PREBUILT_PACKAGES.pop(service_id, None)
+        if service_id == "openlitespeed":
+            _VERSION_REFRESHED_AT.pop("openlitespeed-prebuilt", None)
+            _OPENLITESPEED_PREBUILTS.clear()
+        if service_id == "mariadb":
+            _VERSION_REFRESHED_AT.pop("mariadb-prebuilt", None)
+            _MARIADB_PREBUILTS.clear()
         definition.versions = []
+    if install_method == "prebuilt" and service_id == "mariadb":
+        count = _refresh_apt_versions(definition, "mariadb-server")
+        if count:
+            _SELECTED_PREBUILT_PACKAGES[service_id] = "mariadb-server"
+            return definition, "apt", f"Fetched {count} MariaDB packages from the operating system repository."
+        return definition, "apt", "No compatible MariaDB packages were found for this OS and architecture."
     if install_method == "prebuilt" and service_id in _PREBUILT_PACKAGES:
         packages = _PREBUILT_PACKAGE_CHOICES.get(service_id, [_PREBUILT_PACKAGES[service_id]])
         for package in packages:
@@ -1625,12 +1802,17 @@ def refresh_service_versions(service_id: str, force: bool = False, install_metho
 
     if service_id == "python":
         try:
-            count = _refresh_python_versions(definition)
+            count = (
+                _refresh_python_source_versions(definition)
+                if install_method == "source"
+                else _refresh_python_versions(definition)
+            )
             if count:
-                return definition, "python-build-standalone", f"Fetched {count} portable CPython releases for this host architecture."
+                provider = "python.org" if install_method == "source" else "python-build-standalone"
+                return definition, provider, f"Fetched {count} CPython releases compatible with this host architecture."
         except Exception:
             pass
-        return definition, "catalog", "The Python release catalog could not be reached. The saved compatibility list is still available."
+        return definition, "catalog", "The Python release catalog could not be reached. Refresh compatible versions and try again."
 
     if service_id == "nodejs":
         try:
@@ -1706,6 +1888,14 @@ def refresh_service_versions(service_id: str, force: bool = False, install_metho
         return definition, "catalog", "The FFmpeg release catalog could not be reached. Refresh compatible versions and try again."
 
     if service_id == "openlitespeed":
+        if install_method == "prebuilt":
+            try:
+                count = _refresh_openlitespeed_prebuilt_versions(definition)
+                if count:
+                    return definition, "openlitespeed-downloads", f"Fetched {count} OpenLiteSpeed binaries compatible with this OS and architecture."
+            except Exception:
+                pass
+            return definition, "openlitespeed-downloads", "No compatible prebuilt OpenLiteSpeed binaries were found for this OS and architecture. Choose source build instead."
         try:
             count = _refresh_openlitespeed_versions(definition)
             if count:

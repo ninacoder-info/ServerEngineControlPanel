@@ -30,6 +30,7 @@ import ActivityPage from "../activity/ActivityPage";
 import CronJobsPage from "../cron/CronJobsPage";
 import SupervisorWorkspace from "../services/SupervisorWorkspace";
 import WebProtectionPage from "../waf/WebProtectionPage";
+import MalwareScannerPage from "../malware/MalwareScannerPage";
 import DockerPage from "../docker/DockerPage";
 import PlansPage from "../plans/PlansPage";
 import { useTranslation } from "../../lib/i18n";
@@ -109,8 +110,10 @@ export default function DashboardPage({ user, onLogout }) {
                                 ? "Accounts"
                                 : location.pathname === "/plans"
                                   ? "Hosting plans"
-                    : location.pathname === "/firewall"
+                                  : location.pathname === "/firewall"
                                   ? "Firewall"
+                                  : location.pathname === "/malware-scanner"
+                                    ? "Malware Scanner"
                                   : location.pathname === "/application-shield"
                                     ? "Application Shield"
                                   : location.pathname === "/backups"
@@ -156,6 +159,8 @@ export default function DashboardPage({ user, onLogout }) {
     <PlansPage />
   ) : location.pathname === "/firewall" ? (
     <FirewallPage />
+  ) : location.pathname === "/malware-scanner" ? (
+    <MalwareScannerPage />
   ) : location.pathname === "/application-shield" ? (
     <WebProtectionPage />
   ) : location.pathname === "/backups" ? (

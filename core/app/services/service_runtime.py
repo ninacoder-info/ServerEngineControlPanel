@@ -2,10 +2,93 @@ import os
 import pwd
 import re
 import subprocess
+import tempfile
+import json
 from pathlib import Path
 
-SERVICE_PACKAGES = {"nginx": "nginx", "apache": "apache2", "caddy": "caddy", "haproxy": "haproxy", "php": "php-fpm", "nodejs": "nodejs", "python": "python3", "mariadb": "mariadb-server", "mysql": "mysql-server", "postgresql": "postgresql", "redis": "redis-server", "valkey": "valkey-server", "memcached": "memcached", "certbot": "certbot", "vsftpd": "vsftpd", "fail2ban": "fail2ban", "powerdns": "pdns-server", "rabbitmq": "rabbitmq-server", "mongodb": "mongodb-org", "docker": "docker.io", "postfix": "postfix", "dovecot": "dovecot-imapd", "rspamd": "rspamd", "bind9": "bind9", "unbound": "unbound", "clamav": "clamav", "auditd": "auditd", "logrotate": "logrotate", "node-exporter": "prometheus-node-exporter", "modsecurity": "libmodsecurity3", "git": "git", "imagemagick": "imagemagick", "ffmpeg": "ffmpeg", "ruby": "ruby", "supervisor": "supervisor", "lynis": "lynis"}
+SERVICE_PACKAGES = {
+    "nginx": "nginx",
+    "apache": "apache2",
+    "openlitespeed": "openlitespeed",
+    "caddy": "caddy",
+    "haproxy": "haproxy",
+    "php": "php-fpm",
+    "nodejs": "nodejs",
+    "python": "python3",
+    "mariadb": "mariadb-server",
+    "mysql": "mysql-server",
+    "postgresql": "postgresql",
+    "redis": "redis-server",
+    "valkey": "valkey-server",
+    "memcached": "memcached",
+    "certbot": "certbot",
+    "vsftpd": "vsftpd",
+    "fail2ban": "fail2ban",
+    "powerdns": "pdns-server",
+    "rabbitmq": "rabbitmq-server",
+    "mongodb": "mongodb-org",
+    "pm2": "pm2",
+    "docker": "docker.io",
+    "postfix": "postfix",
+    "dovecot": "dovecot-imapd",
+    "rspamd": "rspamd",
+    "bind9": "bind9",
+    "unbound": "unbound",
+    "clamav": "clamav",
+    "auditd": "auditd",
+    "logrotate": "logrotate",
+    "node-exporter": "prometheus-node-exporter",
+    "modsecurity": "libmodsecurity3",
+    "git": "git",
+    "imagemagick": "imagemagick",
+    "ffmpeg": "ffmpeg",
+    "ruby": "ruby",
+    "supervisor": "supervisor",
+    "lynis": "lynis",
+}
+
 SERVICE_BINARIES = {"nginx": "usr/sbin/nginx", "apache": "usr/sbin/apache2", "openlitespeed": "usr/local/lsws/bin/lshttpd", "caddy": "usr/bin/caddy", "haproxy": "usr/sbin/haproxy", "php": "usr/sbin/php-fpm8.2", "nodejs": "usr/bin/node", "python": "usr/bin/python3", "ruby": "usr/bin/ruby", "mariadb": "usr/sbin/mariadbd", "mysql": "bin/mysqld", "postgresql": "usr/lib/postgresql/15/bin/postgres", "redis": "usr/bin/redis-server", "valkey": "usr/bin/valkey-server", "memcached": "usr/bin/memcached", "certbot": "usr/bin/certbot", "vsftpd": "usr/sbin/vsftpd", "fail2ban": "usr/bin/fail2ban-server", "powerdns": "usr/sbin/pdns_server", "rabbitmq": "sbin/rabbitmq-server", "stalwart": "bin/stalwart", "mongodb": "bin/mongod", "opensearch": "bin/opensearch", "wp-cli": "bin/wp", "postfix": "bin/postfix", "dovecot": "sbin/dovecot", "rspamd": "bin/rspamd", "bind9": "sbin/named", "unbound": "sbin/unbound", "clamav": "bin/clamscan", "supervisor": "venv/bin/supervisord", "lynis": "bin/lynis"}
+
+STARTUP_DEFAULT_SERVICES = {"nginx", "mysql", "php"}
+
+
+def _startup_policy_path() -> Path:
+    return Path(os.getenv("SE_STATE_DIR", "/var/lib/server-engine")) / "service-startup.json"
+
+
+def _startup_policy_key(service_id: str, version: str | None = None) -> str:
+    return f"{service_id}:{version}" if service_id == "php" and version else service_id
+
+
+def default_startup_enabled(service_id: str) -> bool:
+    return service_id in STARTUP_DEFAULT_SERVICES
+
+
+def read_startup_policy() -> dict[str, bool]:
+    try:
+        value = json.loads(_startup_policy_path().read_text())
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def startup_enabled(service_id: str, version: str | None = None) -> bool:
+    values = read_startup_policy()
+    key = _startup_policy_key(service_id, version)
+    return bool(values[key]) if key in values else default_startup_enabled(service_id)
+
+
+def set_startup_enabled(service_id: str, enabled: bool, version: str | None = None) -> bool:
+    path = _startup_policy_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    values = read_startup_policy()
+    values[_startup_policy_key(service_id, version)] = bool(enabled)
+    with tempfile.NamedTemporaryFile("w", dir=path.parent, prefix=f".{path.name}.", delete=False) as handle:
+        json.dump(values, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+        temporary = Path(handle.name)
+    os.replace(temporary, path)
+    return bool(enabled)
 
 
 def version_sort_key(value: str) -> tuple:
@@ -55,8 +138,10 @@ def binary_path(service_id: str, version: str | None = None) -> Path:
         candidates = [
             root / "bin/python",
             root / "bin/python3",
+            *sorted(root.glob("bin/python3.*"), reverse=True),
             root / "usr/bin/python",
             root / "usr/bin/python3",
+            *sorted(root.glob("usr/bin/python3.*"), reverse=True),
             root / "python/bin/python",
             root / "python/bin/python3",
         ]
@@ -159,9 +244,9 @@ def ensure_node_runtime(root: Path) -> None:
     real_node = root / "bin/node.bin"
     if not node.exists() or node.is_symlink():
         return
-    if not real_node.exists():
+    if not real_node.exists() and node.is_file():
         node.rename(real_node)
-    library_paths = [root / "lib", root / "usr/lib", root / "lib/aarch64-linux-gnu", root / "usr/lib/aarch64-linux-gnu", root / "lib/x86_64-linux-gnu", root / "usr/lib/x86_64-linux-gnu"]
+    library_paths = [root / "lib", root / "usr/lib", root / ".runtime-libraries/lib", root / ".runtime-libraries/usr/lib", root / ".runtime-libraries/usr/lib/aarch64-linux-gnu", root / ".runtime-libraries/usr/lib/x86_64-linux-gnu", root / "lib/aarch64-linux-gnu", root / "usr/lib/aarch64-linux-gnu", root / "lib/x86_64-linux-gnu", root / "usr/lib/x86_64-linux-gnu"]
     paths = ":".join(str(item) for item in library_paths if item.exists())
     node.write_text(f"#!/bin/sh\nexport LD_LIBRARY_PATH=\"{paths}:$LD_LIBRARY_PATH\"\nexec \"{real_node}\" \"$@\"\n")
     node.chmod(0o755)

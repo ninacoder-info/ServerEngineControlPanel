@@ -20,6 +20,7 @@ export default function ServiceCard({
 }) {
   const active = installed?.status === "running";
   const capability = service.mode !== "service" && !installed;
+  const supportsMultipleVersions = service.id === "pm2";
   return (
     <article className={`service-card ${pinned ? "service-card-pinned" : ""}`}>
       <div className="service-card-top">
@@ -104,12 +105,18 @@ export default function ServiceCard({
             <button
               className="inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
               onClick={() =>
-                installed
+                installed && !supportsMultipleVersions
                   ? onManage(service, installedVersions)
                   : onInstall(service)
               }
             >
-              {installed ? "Configure service" : <><Download size={14} />Install</>}
+              {installed && supportsMultipleVersions ? (
+                "Install another version"
+              ) : installed ? (
+                "Configure service"
+              ) : (
+                <><Download size={14} />Install</>
+              )}
             </button>
           )}
           <a href="#" onClick={(event) => event.preventDefault()}>

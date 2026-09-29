@@ -16,7 +16,8 @@ services:
       - core-dev-services:/opt/server-engine/services
     command: >-
       bash -lc "apt-get update &&
-      apt-get install -y --no-install-recommends python3 python3-pip python3-venv openssh-client ca-certificates &&
+      apt-get install -y --no-install-recommends python3 python3-pip python3-venv openssh-client ca-certificates passwd &&
+      id -u serverengine >/dev/null 2>&1 || useradd --system --user-group --home-dir /var/lib/server-engine --shell /usr/sbin/nologin serverengine &&
       python3 -m venv /opt/server-engine-venv &&
       /opt/server-engine-venv/bin/pip install -e . &&
       /opt/server-engine-venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"

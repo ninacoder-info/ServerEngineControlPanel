@@ -6,6 +6,7 @@ import {
   Cloud,
   Code2,
   Database,
+  FileText,
   FolderCog,
   Globe2,
   KeyRound,
@@ -138,6 +139,8 @@ const maintenanceSchema = z.object({
   job_retention_days: z.coerce.number().int().min(1, "Job retention must be at least 1 day."),
   log_retention_days: z.coerce.number().int().min(1, "Log retention must be at least 1 day."),
   maintenance_stale_job_hours: z.coerce.number().int().min(1, "Stale job threshold must be at least 1 hour."),
+  log_rotation_max_size_mb: z.coerce.number().int().min(1, "Maximum log size must be at least 1 MB."),
+  log_rotation_retention_count: z.coerce.number().int().min(1, "Retention count must be at least 1."),
 });
 const validationErrors = (schema, values) => {
   const result = schema.safeParse(values);
@@ -248,6 +251,12 @@ const maintenanceSettingsValues = (values) => ({
   maintenance_verify_backups: values.maintenance_verify_backups !== false,
   maintenance_notify_failed_jobs: values.maintenance_notify_failed_jobs !== false,
   maintenance_stale_job_hours: values.maintenance_stale_job_hours ?? 24,
+  log_rotation_enabled: values.log_rotation_enabled !== false,
+  log_rotation_max_size_mb: values.log_rotation_max_size_mb ?? 50,
+  log_rotation_schedule: values.log_rotation_schedule || "daily",
+  log_rotation_compression: values.log_rotation_compression || "gzip",
+  log_rotation_retention_count: values.log_rotation_retention_count ?? 14,
+  log_rotation_service_policies: values.log_rotation_service_policies || {},
 });
 const appearanceAccentColors = [
   { name: "Blue", value: "blue", color: "#007bff", className: "bg-[#007bff]" },
@@ -1865,9 +1874,21 @@ function CertificatesTab({ values, onChange, onSave, onReset, saving, dirty, mes
   );
 }
 
-function MaintenanceTab({ values, onChange, onSave, onReset, saving, dirty, message, errors = {} }) {
+function MaintenanceTab({ values, onChange, onSave, onReset, saving, dirty, message, errors = {}, onRun, rotationRunning }) {
   const o = maintenanceSettingsValues(values);
   const set = (key, value) => onChange(key, value);
+  const [policyService, setPolicyService] = React.useState("nginx");
+  const policyServices = ["nginx", "apache", "php", "mysql", "mariadb", "postgresql", "redis", "valkey", "memcached", "mongodb", "rabbitmq", "postfix", "dovecot", "rspamd", "vsftpd", "powerdns", "haproxy", "caddy", "fail2ban", "supervisor", "ffmpeg", "imagemagick", "git"];
+  const policy = o.log_rotation_service_policies[policyService] || {};
+  const setPolicy = (key, value) => set("log_rotation_service_policies", {
+    ...o.log_rotation_service_policies,
+    [policyService]: { ...policy, [key]: value },
+  });
+  const clearPolicy = () => {
+    const next = { ...o.log_rotation_service_policies };
+    delete next[policyService];
+    set("log_rotation_service_policies", next);
+  };
   return (
     <div className="space-y-6">
       <Section
@@ -1914,6 +1935,47 @@ function MaintenanceTab({ values, onChange, onSave, onReset, saving, dirty, mess
           checked={o.maintenance_auto_cleanup}
           onChange={(v) => set("maintenance_auto_cleanup", v)}
         />
+      </Section>
+      <Section
+        icon={FileText}
+        title="Log retention"
+        description="Rotate logs inside Server Engine automatically. No host logrotate package or cron setup is required."
+        badge="Automatic"
+      >
+        <Toggle
+          label="Enable automatic log rotation"
+          description="The panel checks managed service log directories in the background and rotates them without interrupting running services."
+          checked={o.log_rotation_enabled}
+          onChange={(v) => set("log_rotation_enabled", v)}
+        />
+        <div className="grid gap-4 md:grid-cols-2">
+          <Control label="Maximum log size" description="Size threshold used for size-only rotation and active-log protection." error={errors.log_rotation_max_size_mb}>
+            <div className="flex items-center gap-2"><input className={input} type="number" min="1" max="100000" value={o.log_rotation_max_size_mb} onChange={(e) => set("log_rotation_max_size_mb", Number(e.target.value))} /><span className="shrink-0 text-sm text-slate-500">MB</span></div>
+          </Control>
+          <SelectControl label="Rotation schedule" description="Daily and weekly rotation run during the maintenance window." value={o.log_rotation_schedule} onChange={(v) => set("log_rotation_schedule", v)}>
+            <option value="size-only">When size limit is reached</option><option value="daily">Daily and when size limit is reached</option><option value="weekly">Weekly and when size limit is reached</option>
+          </SelectControl>
+          <SelectControl label="Compression" description="Compressed archives use gzip while the active log remains available." value={o.log_rotation_compression} onChange={(v) => set("log_rotation_compression", v)}>
+            <option value="gzip">gzip</option><option value="none">Do not compress</option>
+          </SelectControl>
+          <Control label="Retention count" description="Rotated archives kept for each log file." error={errors.log_rotation_retention_count}>
+            <input className={input} type="number" min="1" max="100000" value={o.log_rotation_retention_count} onChange={(e) => set("log_rotation_retention_count", Number(e.target.value))} />
+          </Control>
+        </div>
+        <div className="border-t border-slate-200 pt-5 dark:border-slate-800">
+          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+            <SelectControl label="Per-service override" description="Override the global policy for one managed service." value={policyService} onChange={setPolicyService}>
+              {policyServices.map((service) => <option key={service} value={service}>{service}</option>)}
+            </SelectControl>
+            <div className="flex items-end justify-end gap-3 pb-1"><button type="button" className="cursor-pointer text-sm font-semibold text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white" onClick={clearPolicy}>Use global defaults</button><button type="button" className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800" onClick={onRun} disabled={rotationRunning}>{rotationRunning ? "Rotating…" : "Run now"}</button></div>
+          </div>
+          <div className="mt-4 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <Control label="Service max size"><input className={input} type="number" min="1" value={policy.max_size_mb ?? o.log_rotation_max_size_mb} onChange={(e) => setPolicy("max_size_mb", Number(e.target.value))} /></Control>
+            <SelectControl label="Service schedule" value={policy.schedule ?? o.log_rotation_schedule} onChange={(v) => setPolicy("schedule", v)}><option value="size-only">Size only</option><option value="daily">Daily</option><option value="weekly">Weekly</option></SelectControl>
+            <SelectControl label="Service compression" value={policy.compression ?? o.log_rotation_compression} onChange={(v) => setPolicy("compression", v)}><option value="gzip">gzip</option><option value="none">None</option></SelectControl>
+            <Control label="Service archives"><input className={input} type="number" min="1" value={policy.retention_count ?? o.log_rotation_retention_count} onChange={(e) => setPolicy("retention_count", Number(e.target.value))} /></Control>
+          </div>
+        </div>
       </Section>
       <Section
         icon={LayoutDashboard}
@@ -2119,6 +2181,7 @@ export default function SettingsPage() {
   const [notificationSaving, setNotificationSaving] = React.useState(false);
   const [certificateSaving, setCertificateSaving] = React.useState(false);
   const [maintenanceSaving, setMaintenanceSaving] = React.useState(false);
+  const [rotationRunning, setRotationRunning] = React.useState(false);
   const [panelMessage, setPanelMessage] = React.useState("");
   const [storageMessage, setStorageMessage] = React.useState("");
   const [securityMessage, setSecurityMessage] = React.useState("");
@@ -2500,6 +2563,18 @@ export default function SettingsPage() {
         setMaintenanceSaving(false);
       },
     });
+  const runLogRotation = async () => {
+    setRotationRunning(true);
+    const response = await apiRequest("/api/v1/settings/maintenance/log-rotation/run", { method: "POST" });
+    if (response.ok) {
+      const body = await response.json();
+      setMaintenanceMessage(`${body.rotated || 0} log file${body.rotated === 1 ? "" : "s"} rotated.`);
+      setSettingsToast("Log rotation completed.");
+    } else {
+      setMaintenanceMessage(await readApiError(response, "Log rotation failed."));
+    }
+    setRotationRunning(false);
+  };
   const visible = groups.filter(
     ([id, label, , description]) =>
       !query ||
@@ -2659,6 +2734,8 @@ export default function SettingsPage() {
                     dirty: maintenanceDirty,
                     message: maintenanceMessage,
                     errors: maintenanceErrors,
+                    onRun: runLogRotation,
+                    rotationRunning,
                   }}
                   onChange={update}
                 />

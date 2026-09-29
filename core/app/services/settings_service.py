@@ -103,6 +103,12 @@ DEFAULT_SETTINGS = {
     "maintenance_verify_backups": True,
     "maintenance_notify_failed_jobs": True,
     "maintenance_stale_job_hours": 24,
+    "log_rotation_enabled": True,
+    "log_rotation_max_size_mb": 50,
+    "log_rotation_schedule": "daily",
+    "log_rotation_compression": "gzip",
+    "log_rotation_retention_count": 14,
+    "log_rotation_service_policies": {},
 }
 
 PANEL_SETTINGS_KEYS = {
@@ -223,6 +229,12 @@ MAINTENANCE_SETTINGS_KEYS = {
     "maintenance_verify_backups",
     "maintenance_notify_failed_jobs",
     "maintenance_stale_job_hours",
+    "log_rotation_enabled",
+    "log_rotation_max_size_mb",
+    "log_rotation_schedule",
+    "log_rotation_compression",
+    "log_rotation_retention_count",
+    "log_rotation_service_policies",
 }
 
 
@@ -519,6 +531,17 @@ class SettingsService:
                 raise HTTPException(status_code=400, detail=f"{key} must be boolean")
         if not isinstance(values["maintenance_stale_job_hours"], int) or values["maintenance_stale_job_hours"] < 1:
             raise HTTPException(status_code=400, detail="maintenance_stale_job_hours must be positive")
+        if not isinstance(values["log_rotation_enabled"], bool):
+            raise HTTPException(status_code=400, detail="log_rotation_enabled must be boolean")
+        for key in ("log_rotation_max_size_mb", "log_rotation_retention_count"):
+            if not isinstance(values[key], int) or values[key] < 1 or values[key] > 100000:
+                raise HTTPException(status_code=400, detail=f"{key} must be between 1 and 100000")
+        if values["log_rotation_schedule"] not in {"size-only", "daily", "weekly"}:
+            raise HTTPException(status_code=400, detail="log_rotation_schedule is invalid")
+        if values["log_rotation_compression"] not in {"none", "gzip"}:
+            raise HTTPException(status_code=400, detail="log_rotation_compression is invalid")
+        if not isinstance(values["log_rotation_service_policies"], dict):
+            raise HTTPException(status_code=400, detail="log_rotation_service_policies must be an object")
         for key in ("default_site_root", "default_backup_root", "certbot_config_dir"):
             value = values[key]
             if not isinstance(value, str) or not value.startswith("/") or "\x00" in value:

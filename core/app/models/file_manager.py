@@ -8,6 +8,11 @@ class FileOperationRequest(BaseModel):
     name: str | None = Field(default=None, max_length=255)
 
 
+class FilePermissionRequest(BaseModel):
+    path: str = Field(default="", max_length=4096)
+    mode: str = Field(min_length=3, max_length=4)
+
+
 class FileBulkRequest(BaseModel):
     paths: list[str] = Field(min_length=1, max_length=100)
     destination: str = ""
@@ -31,6 +36,7 @@ class FileEntry(BaseModel):
     modified_at: float
     owner: str
     group: str
+    permissions: str
 
 
 class FileTreeNode(BaseModel):

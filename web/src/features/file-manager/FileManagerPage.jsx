@@ -3,13 +3,25 @@ import {
   Archive,
   ArchiveRestore,
   ArrowUp,
+  ChevronDown,
+  ChevronRight,
   Copy,
   Download,
   Edit3,
   File,
+  FileArchive,
+  FileCode2,
+  FileJson,
+  FileText,
   Folder,
   FolderOpen,
   FolderPlus,
+  FilePlus,
+  Image,
+  LockKeyhole,
+  Maximize2,
+  Minimize2,
+  MoreHorizontal,
   MoreVertical,
   Pencil,
   RefreshCw,
@@ -19,6 +31,7 @@ import {
 } from "lucide-react";
 import { Tree } from "react-arborist";
 import ActionDialog from "../../components/ActionDialog";
+import Toast from "../../components/Toast";
 import ConfigEditor from "../services/ConfigEditor";
 import { apiRequest, readApiError } from "../../lib/api";
 
@@ -27,30 +40,82 @@ const formatBytes = (value) => {
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 };
+
+const EDITABLE_EXTENSIONS = new Set([
+  "bash", "c", "cjs", "conf", "cpp", "css", "env", "go", "h", "hpp",
+  "htaccess", "htm", "html", "ini", "java", "js", "json", "jsx", "less",
+  "lock", "log", "mjs", "md", "php", "phtml", "properties", "py", "rb",
+  "rs", "scss", "sh", "sql", "svg", "toml", "ts", "tsx", "txt", "vue",
+  "xml", "yaml", "yml", "zsh",
+]);
+const EDITABLE_FILENAMES = new Set([
+  ".env", ".env.local", ".env.production", ".env.example", ".gitignore",
+  ".htaccess", "Dockerfile", "Makefile", "README", "README.md",
+]);
+function isEditableFile(name = "") {
+  const lowerName = name.toLowerCase();
+  const extension = lowerName.includes(".")
+    ? lowerName.split(".").pop()
+    : lowerName;
+  return EDITABLE_FILENAMES.has(name) || EDITABLE_EXTENSIONS.has(extension);
+}
+
+function fileIcon(name) {
+  const extension = name.split(".").pop()?.toLowerCase();
+  if (["js", "jsx", "ts", "tsx", "php", "py", "rb", "go", "rs", "css", "html"].includes(extension)) return FileCode2;
+  if (["json", "yaml", "yml", "toml", "xml"].includes(extension)) return FileJson;
+  if (["zip", "tar", "gz", "bz2", "7z", "rar"].includes(extension)) return FileArchive;
+  if (["png", "jpg", "jpeg", "gif", "svg", "webp", "ico"].includes(extension)) return Image;
+  return FileText;
+}
+
 function TreeNode({ node, style }) {
   const folder = node.data.kind === "folder";
+  const depth = Number(node.level || 0);
+  const Icon = folder
+    ? node.isOpen
+      ? FolderOpen
+      : Folder
+    : fileIcon(node.data.name);
   return (
     <div
-      className={`file-tree-node ${node.isSelected ? "file-tree-node-selected" : ""}`}
+      className={`group flex min-h-10 w-full cursor-pointer items-center rounded-md pr-2 text-sm transition-colors ${node.isSelected ? "bg-blue-500/15 text-blue-600 dark:bg-white/10 dark:text-blue-300" : "text-slate-600 dark:text-slate-300"}`}
       style={style}
       onClick={() => {
-        if (folder) node.toggle();
         node.select();
       }}
     >
-      <span className="file-tree-chevron">
-        {folder && (node.isOpen ? "▾" : "▸")}
-      </span>
-      {folder ? (
-        node.isOpen ? (
-          <FolderOpen size={16} />
-        ) : (
-          <Folder size={16} />
-        )
-      ) : (
-        <File size={16} />
-      )}
-      <span>{node.data.name}</span>
+      <div className="flex min-w-0 flex-1 items-center gap-1.5" style={{ paddingLeft: `${depth * 16 + 8}px` }}>
+        {Array.from({ length: depth }).map((_, index) => (
+          <span key={index} className="-ml-2 h-10 w-px shrink-0 bg-slate-200 dark:bg-slate-700" aria-hidden="true" />
+        ))}
+        <button
+          type="button"
+          className="grid h-6 w-5 shrink-0 cursor-pointer place-items-center rounded text-slate-400 dark:text-slate-500"
+          aria-label={folder ? `${node.isOpen ? "Collapse" : "Expand"} ${node.data.name}` : undefined}
+          tabIndex={folder ? 0 : -1}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (folder) node.toggle();
+          }}
+        >
+          {folder ? (node.isOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />) : null}
+        </button>
+        <Icon size={16} className={folder ? "text-blue-500 dark:text-blue-300" : "text-slate-400 dark:text-slate-500"} />
+        <span className="min-w-0 truncate font-medium">{node.data.name}</span>
+      </div>
+      <button
+        type="button"
+        title={`More actions for ${node.data.name}`}
+        aria-label={`More actions for ${node.data.name}`}
+        className="ml-2 inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-slate-400 opacity-0 transition-opacity hover:bg-slate-200 hover:text-slate-700 group-hover:opacity-100 dark:hover:bg-white/10 dark:hover:text-slate-200"
+        onClick={(event) => {
+          event.stopPropagation();
+          node.select();
+        }}
+      >
+        <MoreHorizontal size={17} />
+      </button>
     </div>
   );
 }
@@ -60,12 +125,14 @@ export default function FileManagerPage() {
   const [entries, setEntries] = React.useState([]);
   const [currentPath, setCurrentPath] = React.useState("/server-engine/www");
   const [rootPath, setRootPath] = React.useState("/");
+  const [treeRootPath, setTreeRootPath] = React.useState("/server-engine/www");
   const [pathInput, setPathInput] = React.useState("/server-engine/www");
   const [selectedPaths, setSelectedPaths] = React.useState([]);
   const [clipboard, setClipboard] = React.useState([]);
-  const [message, setMessage] = React.useState("");
+  const [toast, setToast] = React.useState(null);
   const [contextMenu, setContextMenu] = React.useState(null);
   const [editor, setEditor] = React.useState(null);
+  const [editorExpanded, setEditorExpanded] = React.useState(false);
   const [uploadProgress, setUploadProgress] = React.useState(null);
   const [dialog, setDialog] = React.useState(null);
   const uploadInput = React.useRef(null);
@@ -74,6 +141,29 @@ export default function FileManagerPage() {
     selectedPaths.includes(entry.path),
   );
   const selected = selectedEntries[0];
+  const notify = (message, type = "success") => setToast({ message, type });
+  const editorDirty = Boolean(
+    editor && editor.content !== editor.originalContent,
+  );
+  function requestCloseEditor() {
+    if (!editorDirty) {
+      setEditor(null);
+      setEditorExpanded(false);
+      return;
+    }
+    setDialog({
+      kind: "confirm",
+      tone: "danger",
+      title: "Discard unsaved changes?",
+      message: "This file has changed. Close the editor and discard those changes?",
+      submitLabel: "Discard changes",
+      onSubmit: () => {
+        setDialog(null);
+        setEditor(null);
+        setEditorExpanded(false);
+      },
+    });
+  }
   const loadTree = React.useCallback(
     (path = "/") =>
       apiRequest(
@@ -82,8 +172,8 @@ export default function FileManagerPage() {
     [],
   );
   const loadTreeRoot = React.useCallback(
-    () =>
-      loadTree("/")
+    (path = "/server-engine/www") =>
+      loadTree(path)
         .then(setTree)
         .catch(() => {}),
     [loadTree],
@@ -133,18 +223,22 @@ export default function FileManagerPage() {
       .then((value) => {
         const defaultPath = value?.default_path || "/server-engine/www";
         setRootPath(value?.root_path || "/");
+        setTreeRootPath(defaultPath);
         setPathInput(defaultPath);
         loadEntries(defaultPath);
+        loadTreeRoot(defaultPath);
       })
-      .catch(() => loadEntries("/server-engine/www"));
-    loadTreeRoot();
+      .catch(() => {
+        loadEntries("/server-engine/www");
+        loadTreeRoot("/server-engine/www");
+      });
   }, [loadTreeRoot, loadEntries]);
   React.useEffect(() => {
     const close = () => setContextMenu(null);
     window.addEventListener("click", close);
     return () => window.removeEventListener("click", close);
   }, []);
-  const refresh = () => Promise.all([loadTreeRoot(), loadEntries(currentPath)]);
+  const refresh = () => Promise.all([loadTreeRoot(treeRootPath), loadEntries(currentPath)]);
   const openPath = (event) => {
     event.preventDefault();
     loadEntries(pathInput.trim() || "/");
@@ -181,11 +275,36 @@ export default function FileManagerPage() {
           method: "POST",
           body: JSON.stringify({ path: currentPath, name }),
         });
-        setMessage(
+        notify(
           response.ok ? "Folder created." : await readApiError(response),
+          response.ok ? "success" : "error",
         );
         await refresh();
       },
+    );
+  }
+  function createFile() {
+    askForm(
+      "Create file",
+      "File name",
+      "",
+      "Create file",
+      async (name) => {
+        const response = await apiRequest("/api/v1/file-manager/files", {
+          method: "POST",
+          body: JSON.stringify({ path: currentPath, name }),
+        });
+        if (response.ok) {
+          const created = await response.json();
+          notify("File created.");
+          await refresh();
+          setSelectedPaths([created.path]);
+        } else {
+          notify(await readApiError(response), "error");
+          await refresh();
+        }
+      },
+      "Create any file name or extension, such as .php, .js, .env, or .txt.",
     );
   }
   function renameItem() {
@@ -200,10 +319,40 @@ export default function FileManagerPage() {
           method: "POST",
           body: JSON.stringify({ path: selected.path, name }),
         });
-        setMessage(response.ok ? "Renamed." : await readApiError(response));
+        notify(
+          response.ok ? "Renamed." : await readApiError(response),
+          response.ok ? "success" : "error",
+        );
         await refresh();
       },
     );
+  }
+  function changePermissions() {
+    if (!selected) return;
+    const state = {
+      kind: "permissions",
+      title: "Change permissions",
+      mode: selected.permissions || "0644",
+      submitLabel: "Save permissions",
+      hint: "Choose access for the owner, group, and other users.",
+    };
+    state.onModeChange = (mode) => {
+      state.mode = mode;
+      setDialog({ ...state });
+    };
+    state.onSubmit = async () => {
+      setDialog(null);
+      const response = await apiRequest("/api/v1/file-manager/permissions", {
+        method: "POST",
+        body: JSON.stringify({ path: selected.path, mode: state.mode }),
+      });
+      notify(
+        response.ok ? "Permissions updated." : await readApiError(response),
+        response.ok ? "success" : "error",
+      );
+      await refresh();
+    };
+    setDialog(state);
   }
   function deleteItems() {
     if (!selectedPaths.length) return;
@@ -219,14 +368,14 @@ export default function FileManagerPage() {
             method: "DELETE",
             body: JSON.stringify({ path }),
           });
-        setMessage("Deleted.");
+        notify("Deleted.");
         await refresh();
       },
     });
   }
   function copyItems() {
     setClipboard(selectedPaths);
-    setMessage(
+    notify(
       `${selectedPaths.length} item(s) copied. Choose Paste in another folder.`,
     );
     setContextMenu(null);
@@ -236,7 +385,10 @@ export default function FileManagerPage() {
       method: "POST",
       body: JSON.stringify({ paths: clipboard, destination: currentPath }),
     });
-    setMessage(response.ok ? "Pasted." : await readApiError(response));
+    notify(
+      response.ok ? "Pasted." : await readApiError(response),
+      response.ok ? "success" : "error",
+    );
     await refresh();
   }
   function makeArchive() {
@@ -255,8 +407,9 @@ export default function FileManagerPage() {
             name,
           }),
         });
-        setMessage(
+        notify(
           response.ok ? "ZIP archive created." : await readApiError(response),
+          response.ok ? "success" : "error",
         );
         await refresh();
       },
@@ -274,13 +427,17 @@ export default function FileManagerPage() {
       method: "POST",
       body: JSON.stringify({ path: selected.path }),
     });
-    setMessage(
+    notify(
       response.ok ? "Archive extracted." : await readApiError(response),
+      response.ok ? "success" : "error",
     );
     await refresh();
   }
   async function editFile(entry = selected) {
-    if (!entry || entry.kind !== "file") return;
+    if (!entry || entry.kind !== "file" || !isEditableFile(entry.name)) {
+      notify("This file type cannot be opened in the editor.", "warning");
+      return;
+    }
     const response = await apiRequest(
       `/api/v1/file-manager/content?path=${encodeURIComponent(entry.path)}`,
     );
@@ -293,17 +450,24 @@ export default function FileManagerPage() {
       return;
     }
     const value = await response.json();
-    setEditor({ path: entry.path, name: entry.name, content: value.content });
+    setEditor({
+      path: entry.path,
+      name: entry.name,
+      content: value.content,
+      originalContent: value.content,
+    });
+    setEditorExpanded(false);
   }
   async function saveFile() {
     const response = await apiRequest(
       `/api/v1/file-manager/content?path=${encodeURIComponent(editor.path)}`,
       { method: "PUT", body: JSON.stringify({ content: editor.content }) },
     );
-    setMessage(
+    notify(
       response.ok
         ? "File saved. A backup was created."
         : await readApiError(response),
+      response.ok ? "success" : "error",
     );
     if (response.ok) setEditor(null);
     await loadEntries(currentPath);
@@ -321,8 +485,9 @@ export default function FileManagerPage() {
           method: "POST",
           body: JSON.stringify({ path: editor.path }),
         });
-        setMessage(
+        notify(
           response.ok ? "Backup restored." : await readApiError(response),
+          response.ok ? "success" : "error",
         );
         if (response.ok) {
           setEditor(null);
@@ -401,7 +566,7 @@ export default function FileManagerPage() {
       });
     }
     setUploadProgress(null);
-    setMessage(`${files.length} item(s) uploaded.`);
+    notify(`${files.length} item(s) uploaded.`);
     await refresh();
   }
   const breadcrumbs = currentPath.split("/").filter(Boolean);
@@ -413,6 +578,12 @@ export default function FileManagerPage() {
     selected?.kind === "file"
       ? `/api/v1/file-manager/download?path=${encodeURIComponent(selected.path)}`
       : "";
+  const treeData = tree
+    ? tree.path === "/"
+      ? tree.children || []
+      : [tree]
+    : [];
+  const treeInitialOpenState = tree && tree.path !== "/" ? { [tree.path]: true } : {};
   return (
     <div
       className="file-manager-page space-y-7"
@@ -442,10 +613,17 @@ export default function FileManagerPage() {
         </div>
         <div className="file-manager-actions">
           <button
-            className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+            className="inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-md border border-slate-300 px-2 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+            onClick={createFile}
+          >
+            <FilePlus size={14} />
+            New file
+          </button>
+          <button
+            className="inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-md border border-slate-300 px-2 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
             onClick={createFolder}
           >
-            <FolderPlus size={15} />
+            <FolderPlus size={14} />
             New folder
           </button>
           <button
@@ -489,23 +667,44 @@ export default function FileManagerPage() {
         <aside className="file-tree-pane">
           <div className="file-pane-title">
             <strong>Filesystem</strong>
-            <button
-              className="icon-button"
-              onClick={loadTreeRoot}
-              title="Refresh folders"
-            >
-              <RefreshCw size={15} />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                className="icon-button"
+                disabled={treeRootPath === "/"}
+                onClick={() => {
+                  const parent = treeRootPath.split("/").slice(0, -1).join("/") || "/";
+                  setTreeRootPath(parent);
+                  loadTreeRoot(parent);
+                  loadEntries(parent);
+                }}
+                title="Go up one level"
+                aria-label="Go up one level"
+              >
+                <ArrowUp size={15} />
+              </button>
+              <button
+                type="button"
+                className="icon-button"
+                onClick={() => loadTreeRoot(treeRootPath)}
+                title="Refresh folders"
+                aria-label="Refresh folders"
+              >
+                <RefreshCw size={15} />
+              </button>
+            </div>
           </div>
           <div className="file-tree">
             <Tree
-              data={tree ? [tree] : []}
+              key={treeRootPath}
+              data={treeData}
               width="100%"
               height={560}
               rowHeight={34}
               indent={18}
-              openByDefault
-              onToggle={(id, open) => open && expandTree(id)}
+              openByDefault={false}
+              initialOpenState={treeInitialOpenState}
+              onToggle={(id) => expandTree(id)}
               onSelect={(nodes) => nodes[0] && loadEntries(nodes[0].data.path)}
             >
               {TreeNode}
@@ -541,9 +740,13 @@ export default function FileManagerPage() {
               </button>
               <button
                 className="icon-button"
-                disabled={!selected}
+                disabled={!selected || !isEditableFile(selected.name)}
                 onClick={() => editFile()}
-                title="Edit"
+                title={
+                  selected && !isEditableFile(selected.name)
+                    ? "This file type cannot be edited"
+                    : "Edit"
+                }
               >
                 <Edit3 size={15} />
               </button>
@@ -603,13 +806,13 @@ export default function FileManagerPage() {
               </button>
             </div>
           </div>
-          {message && <div className="file-manager-message">{message}</div>}
           <div className="file-list-header">
             <span />
             <span>Name</span>
             <span>Type</span>
             <span>Owner</span>
             <span>Size</span>
+            <span>Permissions</span>
             <span>Modified</span>
             <span />
           </div>
@@ -628,7 +831,9 @@ export default function FileManagerPage() {
                   onDoubleClick={() =>
                     entry.kind === "folder"
                       ? loadEntries(entry.path)
-                      : editFile(entry)
+                      : isEditableFile(entry.name)
+                        ? editFile(entry)
+                        : notify("This file type cannot be opened in the editor.", "warning")
                   }
                   onContextMenu={(event) => {
                     event.preventDefault();
@@ -659,6 +864,7 @@ export default function FileManagerPage() {
                   <span>
                     {entry.kind === "folder" ? "—" : formatBytes(entry.size)}
                   </span>
+                  <code className="file-permissions">{entry.permissions}</code>
                   <span>
                     {new Date(entry.modified_at * 1000).toLocaleString()}
                   </span>
@@ -675,36 +881,46 @@ export default function FileManagerPage() {
               style={{ left: contextMenu.x, top: contextMenu.y }}
               onClick={(event) => event.stopPropagation()}
             >
-              <button onClick={copyItems}>
-                <Copy size={14} />
-                Copy
-              </button>
-              <button
-                onClick={() => editFile()}
-                disabled={!selected || selected.kind !== "file"}
-              >
-                <Edit3 size={14} />
-                Edit
-              </button>
-              <button onClick={renameItem}>
-                <Pencil size={14} />
-                Rename
-              </button>
-              <button onClick={makeArchive}>
-                <Archive size={14} />
-                Create ZIP
-              </button>
-              <button
-                onClick={extractArchive}
-                disabled={!selected?.name.toLowerCase().endsWith(".zip")}
-              >
-                <ArchiveRestore size={14} />
-                Extract ZIP
-              </button>
-              <button onClick={deleteItems}>
-                <Trash2 size={14} />
-                Delete
-              </button>
+              {selectedPaths.length > 0 && (
+                <button onClick={copyItems}>
+                  <Copy size={14} />
+                  Copy
+                </button>
+              )}
+              {selected?.kind === "file" && isEditableFile(selected.name) && (
+                <button onClick={() => editFile()}>
+                  <Edit3 size={14} />
+                  Edit
+                </button>
+              )}
+              {selected && (
+                <>
+                  <button onClick={renameItem}>
+                    <Pencil size={14} />
+                    Rename
+                  </button>
+                  <button onClick={changePermissions}>
+                    <LockKeyhole size={14} />
+                    Permissions
+                  </button>
+                  <button onClick={deleteItems}>
+                    <Trash2 size={14} />
+                    Delete
+                  </button>
+                </>
+              )}
+              {selectedPaths.length > 0 && (
+                <button onClick={makeArchive}>
+                  <Archive size={14} />
+                  Create ZIP
+                </button>
+              )}
+              {selected?.kind === "file" && selected.name.toLowerCase().endsWith(".zip") && (
+                <button onClick={extractArchive}>
+                  <ArchiveRestore size={14} />
+                  Extract ZIP
+                </button>
+              )}
             </div>
           )}
         </main>
@@ -713,23 +929,42 @@ export default function FileManagerPage() {
         <div
           className="modal-backdrop"
           onMouseDown={(event) =>
-            event.target === event.currentTarget && setEditor(null)
+            event.target === event.currentTarget && requestCloseEditor()
           }
         >
-          <section className="modal-card file-editor-modal">
+          <section
+            className={`modal-card file-editor-modal ${editorExpanded ? "file-editor-modal-expanded" : ""}`}
+          >
             <div className="modal-header">
               <div>
                 <p className="eyebrow">FILE EDITOR</p>
                 <h2>{editor.name}</h2>
                 <code>{editor.path}</code>
               </div>
-              <button className="icon-button" onClick={() => setEditor(null)}>
-                <X size={18} />
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  className="icon-button"
+                  title={editorExpanded ? "Exit full view" : "Full view"}
+                  aria-label={editorExpanded ? "Exit full view" : "Full view"}
+                  onClick={() => setEditorExpanded((expanded) => !expanded)}
+                >
+                  {editorExpanded ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+                </button>
+                <button
+                  type="button"
+                  className="icon-button"
+                  title="Close editor"
+                  onClick={requestCloseEditor}
+                >
+                  <X size={18} />
+                </button>
+              </div>
             </div>
             <ConfigEditor
               path={editor.path}
               value={editor.content}
+              height={editorExpanded ? "calc(100vh - 12rem)" : "24rem"}
               onChange={(value) =>
                 setEditor((current) => ({ ...current, content: value }))
               }
@@ -737,7 +972,7 @@ export default function FileManagerPage() {
             <div className="config-actions">
               <button
                 className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-                onClick={() => setEditor(null)}
+                onClick={requestCloseEditor}
               >
                 Cancel
               </button>
@@ -761,6 +996,11 @@ export default function FileManagerPage() {
         dialog={dialog}
         onClose={() => setDialog(null)}
         onSubmit={() => dialog?.onSubmit?.()}
+      />
+      <Toast
+        message={toast?.message}
+        type={toast?.type}
+        onClose={() => setToast(null)}
       />
     </div>
   );

@@ -4,6 +4,7 @@ import { apiRequest, readApiError } from "../../lib/api";
 import InstallServiceModal from "./InstallServiceModal";
 import PhpOverviewCard from "./PhpOverviewCard";
 import NodeOverviewCard from "./NodeOverviewCard";
+import Pm2OverviewCard from "./Pm2OverviewCard";
 import ServiceCard from "./ServiceCard";
 import ServiceManagerModal from "./ServiceManagerModal";
 import ApacheConfigModal from "./ApacheConfigModal";
@@ -12,14 +13,22 @@ import ComposerConfigModal from "./ComposerConfigModal";
 import { VsftpdConfigModal } from "../ftp/FTPPage";
 import PowerDnsConfigModal from "./PowerDnsConfigModal";
 import Pm2Workspace from "./Pm2Workspace";
-import RabbitMqWorkspace from "./RabbitMqWorkspace";
+import RabbitMqConfigModal from "./RabbitMqConfigModal";
 import OpenSearchWorkspace from "./OpenSearchWorkspace";
 import DockerWorkspace from "./DockerWorkspace";
-import GitWorkspace from "./GitWorkspace";
+import GitConfigModal from "./GitConfigModal";
+import PostfixConfigModal from "./PostfixConfigModal";
 import WpCliWorkspace from "./WpCliWorkspace";
-import ImageMagickWorkspace from "./ImageMagickWorkspace";
-import FfmpegWorkspace from "./FfmpegWorkspace";
+import ImageMagickConfigModal from "./ImageMagickConfigModal";
+import FfmpegConfigModal from "./FfmpegConfigModal";
 import NodeRuntimesPage from "./NodeRuntimesPage";
+
+const HIDDEN_SERVICE_IDS = new Set([
+  "opensearch",
+  "logrotate",
+  "bind9",
+  "unbound",
+]);
 
 export default function ServicesPage() {
   const [catalog, setCatalog] = React.useState([]);
@@ -91,6 +100,7 @@ export default function ServicesPage() {
   const visible = catalog
     .filter(
       (service) =>
+        !HIDDEN_SERVICE_IDS.has(service.id) &&
         (category === "All" || category === service.category) &&
         `${service.name} ${service.description}`
           .toLowerCase()
@@ -145,13 +155,9 @@ export default function ServicesPage() {
         </select>
       </div>
       {window.location.hash === "#pm2" && <Pm2Workspace />}
-      {window.location.hash === "#rabbitmq" && <RabbitMqWorkspace />}
       {window.location.hash === "#opensearch" && <OpenSearchWorkspace />}
       {window.location.hash === "#docker" && <DockerWorkspace />}
-      {window.location.hash === "#git" && <GitWorkspace />}
       {window.location.hash === "#wp-cli" && <WpCliWorkspace />}
-      {window.location.hash === "#imagemagick" && <ImageMagickWorkspace />}
-      {window.location.hash === "#ffmpeg" && <FfmpegWorkspace />}
       <div className="service-grid">
         {visible.map((service) => {
           const matches = matchesFor(service);
@@ -176,6 +182,20 @@ export default function ServicesPage() {
                 onTogglePin={togglePin}
                 onInstall={(item) => setSelected({ service: item })}
                 onOpenRuntimes={() => setNodeRuntimesOpen(true)}
+              />
+            );
+          if (service.id === "pm2")
+            return (
+              <Pm2OverviewCard
+                key={service.id}
+                service={service}
+                installed={matches}
+                pinned={pinned.includes(service.id)}
+                onTogglePin={togglePin}
+                onInstall={(item) => setSelected({ service: item })}
+                onOpenWorkspace={() => {
+                  window.location.hash = "pm2";
+                }}
               />
             );
           return (
@@ -268,6 +288,36 @@ export default function ServicesPage() {
           />
         ) : manage.service.id === "powerdns" ? (
           <PowerDnsConfigModal
+            service={manage.service}
+            installed={manage.versions}
+            onClose={() => setManage(null)}
+          />
+        ) : manage.service.id === "imagemagick" ? (
+          <ImageMagickConfigModal
+            service={manage.service}
+            installed={manage.versions}
+            onClose={() => setManage(null)}
+          />
+        ) : manage.service.id === "ffmpeg" ? (
+          <FfmpegConfigModal
+            service={manage.service}
+            installed={manage.versions}
+            onClose={() => setManage(null)}
+          />
+        ) : manage.service.id === "git" ? (
+          <GitConfigModal
+            service={manage.service}
+            installed={manage.versions}
+            onClose={() => setManage(null)}
+          />
+        ) : manage.service.id === "postfix" ? (
+          <PostfixConfigModal
+            service={manage.service}
+            installed={manage.versions}
+            onClose={() => setManage(null)}
+          />
+        ) : manage.service.id === "rabbitmq" ? (
+          <RabbitMqConfigModal
             service={manage.service}
             installed={manage.versions}
             onClose={() => setManage(null)}

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, File, UploadFile
 from fastapi.responses import FileResponse
 
 from app.api.dependencies import require_user
-from app.models.file_manager import FileBulkRequest, FileContentRequest, FileOperationRequest, FileUploadCheckRequest
+from app.models.file_manager import FileBulkRequest, FileContentRequest, FileOperationRequest, FilePermissionRequest, FileUploadCheckRequest
 from app.services.file_manager_service import file_manager_service
 
 router = APIRouter(prefix="/api/v1/file-manager", tags=["file-manager"])
@@ -45,9 +45,19 @@ def create_folder(payload: FileOperationRequest, user=Depends(require_user)):
     return file_manager_service.create_folder(payload.path, payload.name or "").model_dump()
 
 
+@router.post("/files")
+def create_file(payload: FileOperationRequest, user=Depends(require_user)):
+    return file_manager_service.create_file(payload.path, payload.name or "").model_dump()
+
+
 @router.post("/rename")
 def rename(payload: FileOperationRequest, user=Depends(require_user)):
     return file_manager_service.rename(payload.path, payload.name or "").model_dump()
+
+
+@router.post("/permissions")
+def permissions(payload: FilePermissionRequest, user=Depends(require_user)):
+    return file_manager_service.change_permissions(payload.path, payload.mode).model_dump()
 
 
 @router.post("/copy")

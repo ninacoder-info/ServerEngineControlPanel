@@ -12,6 +12,7 @@ from app.api.routes import api_access, auth, databases, domains, file_manager, f
 from app.auth import AuthStore
 from app.services.auth_service import AuthService
 from app.services.job_service import enqueue_startup_services
+from app.services.log_rotation_service import log_rotation_service
 from app.version import APP_VERSION
 
 DB_PATH = os.getenv("SE_DB_PATH", "/var/lib/server-engine/control.db")
@@ -26,7 +27,9 @@ async def lifespan(application: FastAPI):
     if not os.getenv("SE_ADMIN_PASSWORD"):
         print(f"Server Engine bootstrap password for {BOOTSTRAP_USER}: {BOOTSTRAP_PASSWORD}", flush=True)
     enqueue_startup_services()
+    log_rotation_service.start()
     yield
+    log_rotation_service.stop()
 
 
 app = FastAPI(title="Server Engine Control Panel API", version=APP_VERSION, lifespan=lifespan)
