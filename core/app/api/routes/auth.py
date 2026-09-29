@@ -17,6 +17,34 @@ def login(payload: LoginRequest, request: Request, response: Response):
     return {"username": payload.username}
 
 
+@router.post("/mobile-login")
+def mobile_login(payload: LoginRequest, request: Request):
+    session_token = request.app.state.auth_service.login(payload.username, payload.password)
+    if session_token is None:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+
+    user = request.app.state.auth_service.store.user_for_session(session_token)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    platform = request.headers.get("x-server-engine-platform", "ios")
+    if platform not in {"ios", "android", "web"}:
+        platform = "ios"
+    device_name = request.headers.get("x-server-engine-device-name", "Mobile device")[:120]
+    token = request.app.state.auth_service.store.create_api_token(
+        user["id"],
+        f"Server Engine Mobile — {device_name}",
+        ["read:*", "write:websites", "write:services"],
+        90,
+        device_name=device_name,
+        platform=platform,
+        created_ip=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+    request.app.state.auth_service.logout(session_token)
+    return {**token, "username": user["username"]}
+
+
 @router.get("/me")
 def me(user=Depends(require_user)):
     return user

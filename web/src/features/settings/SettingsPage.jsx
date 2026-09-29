@@ -1238,6 +1238,7 @@ function ApiTab({ values, onChange, onSave, onReset, saving, dirty, message, err
             <thead className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-800">
               <tr>
                 <th className="py-3">Token</th>
+                <th className="py-3">Device</th>
                 <th className="py-3">Scope</th>
                 <th className="py-3">Expires</th>
                 <th className="py-3">Last used</th>
@@ -1251,13 +1252,15 @@ function ApiTab({ values, onChange, onSave, onReset, saving, dirty, message, err
                     <span>{token.name}</span>
                     <small className="ml-2 text-slate-400">{token.token_prefix}…</small>
                   </td>
+                  <td className="py-3 text-slate-500">
+                    <span className="block font-medium text-slate-700 dark:text-slate-300">{token.device_name || "Unknown device"}</span>
+                    <small>{token.platform || "web"} · {token.last_used_ip || token.created_ip || "Unknown IP"}</small>
+                  </td>
                   <td className="py-3 text-slate-500">{token.scopes?.join(", ")}</td>
                   <td className="py-3 text-slate-500">{token.expires_at ? new Date(token.expires_at).toLocaleDateString() : "Never"}</td>
                   <td className="py-3 text-slate-500">{token.last_used_at ? new Date(token.last_used_at).toLocaleString() : "Never used"}</td>
                   <td className="py-3 text-right">
-                    <button onClick={() => revokeToken(token.id)} className="cursor-pointer text-sm font-semibold text-red-600">
-                      Revoke
-                    </button>
+                    {token.status === "revoked" ? <span className="text-xs font-semibold text-slate-400">Revoked</span> : <button onClick={() => revokeToken(token.id)} className="cursor-pointer text-sm font-semibold text-red-600">Revoke</button>}
                   </td>
                 </tr>
               ))}

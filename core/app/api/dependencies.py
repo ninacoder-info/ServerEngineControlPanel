@@ -16,7 +16,7 @@ def require_user(request: Request):
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="External API access is disabled")
         if api_settings.get("api_auth_mode") == "session":
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Bearer token access is disabled")
-        user = request.app.state.auth_service.store.user_for_api_token(authorization[7:].strip())
+        user = request.app.state.auth_service.store.user_for_api_token(authorization[7:].strip(), request=request)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
     allowed = api_settings.get("security_authorized_ips", [])
