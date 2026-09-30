@@ -752,6 +752,8 @@ accesslog {root / "logs/access.log"} {{
     storage file-system {root / "data"}
 }}
 
+import {root / "conf/sites/*.caddy"}
+
 :80 {{
     root * {root / "www"}
     encode zstd gzip

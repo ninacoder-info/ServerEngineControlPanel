@@ -4,26 +4,40 @@ services:
     platform: linux/arm64
     working_dir: /app
     ports:
-      - "18000:8000"
+      - "${CORE_DEV_PORT:-18001}:8000"
     environment:
       SE_DB_PATH: /var/lib/server-engine/control.db
+      SE_STATE_DIR: /var/lib/server-engine
+      SE_SERVICE_ROOT: /opt/server-engine/services
+      SE_FILE_MANAGER_ROOT: /
+      SE_WEB_ROOT: /server-engine/www
+      SE_WEBAUTHN_RP_ID: localhost
+      SE_WEBAUTHN_ORIGIN: http://localhost:5173
       SE_ADMIN_USER: admin
       SE_ADMIN_PASSWORD: change-me-now
     volumes:
       - ./core:/app
       - core-dev-pip-cache:/root/.cache/pip
+      - core-dev-venv:/opt/server-engine-venv
       - core-dev-state:/var/lib/server-engine
       - core-dev-services:/opt/server-engine/services
+      - core-dev-web-root:/server-engine/www
     command: >-
       bash -lc "apt-get update &&
-      apt-get install -y --no-install-recommends python3 python3-pip python3-venv openssh-client ca-certificates passwd &&
+      apt-get install -y --no-install-recommends python3 python3-pip python3-venv openssh-client ca-certificates passwd git golang-go build-essential &&
       id -u serverengine >/dev/null 2>&1 || useradd --system --user-group --home-dir /var/lib/server-engine --shell /usr/sbin/nologin serverengine &&
-      python3 -m venv /opt/server-engine-venv &&
+      test -x /opt/server-engine-venv/bin/python || python3 -m venv /opt/server-engine-venv &&
       /opt/server-engine-venv/bin/pip install -e . &&
       /opt/server-engine-venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health')"]
+      start_period: 10s
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   web-dev:
-    image: ubuntu:24.04
+    image: node:22-bookworm
     platform: linux/arm64
     working_dir: /app
     volumes:
@@ -33,20 +47,18 @@ services:
     ports:
       - "5173:5173"
     environment:
-      VITE_API_URL: http://localhost:18000
+      VITE_API_URL: "${VITE_API_URL:-http://localhost:18001}"
     depends_on:
-      - core-dev
+      core-dev:
+        condition: service_healthy
     command: >-
-      bash -lc "apt-get update &&
-      apt-get install -y --no-install-recommends curl ca-certificates gnupg &&
-      curl -fsSL https://deb.nodesource.com/setup_22.x | bash - &&
-      apt-get install -y --no-install-recommends nodejs &&
-      npm install &&
-      npm run dev -- --host 0.0.0.0"
+      bash -lc "npm install && npm run dev -- --host 0.0.0.0"
 
 volumes:
   core-dev-pip-cache:
+  core-dev-venv:
   core-dev-state:
   core-dev-services:
+  core-dev-web-root:
   web-dev-node-modules:
   web-dev-npm-cache:

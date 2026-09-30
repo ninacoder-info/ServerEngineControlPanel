@@ -21,6 +21,8 @@ import {
   UserRound,
 } from "lucide-react";
 import { apiRequest, readApiError } from "../../lib/api";
+import ServiceNotInstalledState from "../../components/ServiceNotInstalledState";
+import { useServiceInstallationState } from "../../hooks/useServiceInstallationState";
 
 const field =
   "mt-2 block min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100";
@@ -705,6 +707,7 @@ function AccountModal({ account, onClose, onSaved }) {
 }
 
 export default function FTPPage() {
+  const vsftpdState = useServiceInstallationState("vsftpd");
   const [data, setData] = React.useState({
     service: {},
     settings: {},
@@ -713,17 +716,25 @@ export default function FTPPage() {
   const [modal, setModal] = React.useState(null);
   const [configOpen, setConfigOpen] = React.useState(false);
   const [notice, setNotice] = React.useState("");
-  const load = React.useCallback(
-    () =>
-      apiRequest("/api/v1/ftp")
-        .then((response) => response.json())
+  const [loading, setLoading] = React.useState(true);
+  const load = React.useCallback(() => {
+    setLoading(true);
+    return apiRequest("/api/v1/ftp")
+        .then((response) => {
+          if (!response.ok) throw new Error("Unable to load FTP configuration.");
+          return response.json();
+        })
         .then(setData)
-        .catch(() => setNotice("Unable to load FTP configuration.")),
-    [],
-  );
+        .catch(() => setNotice("Unable to load FTP configuration."))
+        .finally(() => setLoading(false));
+  }, []);
   React.useEffect(() => {
     load();
+    const refresh = () => load();
+    window.addEventListener("serverengine:jobs-updated", refresh);
+    return () => window.removeEventListener("serverengine:jobs-updated", refresh);
   }, [load]);
+
   const updateSettings = async (key, value) => {
     const next = { ...data.settings, [key]: value };
     setData({ ...data, settings: next });
@@ -784,7 +795,13 @@ export default function FTPPage() {
     else
       setNotice(await readApiError(response, "Unable to delete FTP account."));
   };
-  const installed = data.service.installed;
+  const installed = vsftpdState.installed && data.service.installed;
+  if (loading || vsftpdState.loading) {
+    return <ServiceNotInstalledState state={{ ...vsftpdState, loading: true }} eyebrow="FTP Accounts" title="Checking FTP status" description="Checking whether vsftpd is available on this server." installLabel="Install vsftpd" icon={Server} />;
+  }
+  if (!installed) {
+    return <ServiceNotInstalledState state={vsftpdState} icon={Server} eyebrow="FTP Accounts" title="vsftpd is not installed" description="Install vsftpd to create restricted FTP accounts, configure FTPS, and manage passive transfer ports." installLabel="Install vsftpd" />;
+  }
   return (
     <div className="space-y-7">
       <header className="flex flex-col justify-between gap-4 md:flex-row md:items-end">

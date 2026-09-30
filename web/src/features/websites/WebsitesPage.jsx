@@ -16,8 +16,12 @@ import { useLocation, useNavigate } from "react-router-dom";
 import ActionDialog from "../../components/ActionDialog";
 import Button from "../../components/Button";
 import Toast from "../../components/Toast";
+import ServiceNotInstalledState from "../../components/ServiceNotInstalledState";
+import { useServiceInstallationState } from "../../hooks/useServiceInstallationState";
 import { apiRequest, readApiError } from "../../lib/api";
 import WebsiteFormModal from "./WebsiteFormModal";
+
+const WEB_SERVER_IDS = ["nginx", "apache", "openlitespeed", "caddy"];
 
 function DetailRow({ label, children }) {
   return (
@@ -33,10 +37,12 @@ function DetailRow({ label, children }) {
 export default function WebsitesPage() {
   const navigate = useNavigate();
   const location = useLocation();
+  const webServerState = useServiceInstallationState(WEB_SERVER_IDS);
   const selectedId = location.pathname.split("/")[2];
   const [sites, setSites] = React.useState([]);
   const [root, setRoot] = React.useState("/server-engine/www");
   const [php, setPhp] = React.useState([]);
+  const [webServerOptions, setWebServerOptions] = React.useState([]);
   const [serverType, setServerType] = React.useState("nginx");
   const [query, setQuery] = React.useState("");
   const [loading, setLoading] = React.useState(true);
@@ -68,6 +74,10 @@ export default function WebsitesPage() {
             const services = servicesResponse.ok
               ? await servicesResponse.json()
               : [];
+            const installedWebServers = services.filter(
+              (item) => WEB_SERVER_IDS.includes(item.id) && item.status !== "not-installed",
+            );
+            setWebServerOptions(installedWebServers);
             setSites(await websites.json());
             setRoot(settings.values?.default_site_root || "/server-engine/www");
             setPhp(
@@ -75,12 +85,9 @@ export default function WebsitesPage() {
                 .filter((item) => item.installed)
                 .map((item) => item.version),
             );
-            const running = services.find(
-              (item) =>
-                ["nginx", "apache"].includes(item.id) &&
-                item.status === "running",
-            );
+            const running = installedWebServers.find((item) => item.status === "running");
             if (running) setServerType(running.id);
+            else if (installedWebServers[0]) setServerType(installedWebServers[0].id);
           },
         )
         .catch((reason) =>
@@ -136,6 +143,7 @@ export default function WebsitesPage() {
     defaultRoot: root,
     phpVersions: php,
     serverType,
+    webServerOptions,
     onClose: () => setModal(null),
     onSaved: (site) => {
       const editing = Boolean(modal?.id);
@@ -149,6 +157,19 @@ export default function WebsitesPage() {
       });
     },
   };
+
+  if (!loading && !webServerState.loading && !webServerState.installed) {
+    return (
+      <ServiceNotInstalledState
+        state={webServerState}
+        icon={Server}
+        eyebrow="Web hosting"
+        title="No web server is installed"
+        description="Install Nginx, Apache HTTP Server, OpenLiteSpeed, or Caddy before creating a website. Once installed, Server Engine will generate the matching website profile and configuration under the shared web root."
+        installLabel="Install Nginx"
+      />
+    );
+  }
 
   if (selectedId && selected)
     return (

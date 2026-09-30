@@ -11,6 +11,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Server,
   Settings2,
   ShieldCheck,
   Square,
@@ -20,6 +21,8 @@ import {
 import Toast from "../../components/Toast";
 import FormField, { formControlClass } from "../../components/FormField";
 import { apiRequest } from "../../lib/api";
+import ServiceNotInstalledState from "../../components/ServiceNotInstalledState";
+import { useServiceInstallationState } from "../../hooks/useServiceInstallationState";
 import { FolderPicker } from "../websites/WebsiteFormModal";
 
 function FolderPickerPortal(props) {
@@ -250,6 +253,7 @@ function ProgramForm({ program, onSave, onCancel }) {
 }
 
 export default function SupervisorWorkspace() {
+  const supervisorState = useServiceInstallationState("supervisor");
   const [programs, setPrograms] = React.useState(() => {
     try {
       return JSON.parse(localStorage.getItem("serverengine:supervisor-programs") || "null") || starterPrograms;
@@ -283,6 +287,19 @@ export default function SupervisorWorkspace() {
     (status === "all" || (status === "running" ? program.status === "running" : program.status !== "running")) &&
     `${program.name} ${program.command} ${program.user} ${program.group}`.toLowerCase().includes(query.toLowerCase()),
   );
+
+  if (supervisorState.loading || !supervisorState.installed) {
+    return (
+      <ServiceNotInstalledState
+        state={supervisorState}
+        icon={Server}
+        eyebrow="Process management"
+        title="Supervisor is not installed"
+        description="Install Supervisor to keep queue workers, schedulers, and long-running application processes alive with restart policies and logs."
+        installLabel="Install Supervisor"
+      />
+    );
+  }
 
   return (
     <div className="space-y-6">

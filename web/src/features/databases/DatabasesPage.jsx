@@ -17,6 +17,8 @@ import {
 } from "lucide-react";
 import { apiRequest, readApiError } from "../../lib/api";
 import Toast from "../../components/Toast";
+import ServiceNotInstalledState from "../../components/ServiceNotInstalledState";
+import { useServiceInstallationState } from "../../hooks/useServiceInstallationState";
 
 const engines = [
   {
@@ -298,6 +300,7 @@ export default function DatabasesPage() {
   const [actionMenu, setActionMenu] = React.useState(null);
   const [loading, setLoading] = React.useState(true);
   const [page, setPage] = React.useState(1);
+  const databaseServiceState = useServiceInstallationState(engine);
   const pageSize = 10;
   const defaultEngineSelected = React.useRef(false);
   React.useEffect(() => {
@@ -506,24 +509,15 @@ export default function DatabasesPage() {
           </div>
         </div>
         <div className="mt-5 overflow-x-auto">
-          {selectedEngine && !selectedEngine.installed ? (
-            <div className="grid place-items-center border-t border-slate-200 py-16 text-center dark:border-slate-800">
-              <Database size={30} className="text-slate-400" />
-              <h4 className="mt-4 text-base font-semibold text-slate-900 dark:text-slate-100">
-                {selectedEngine.name} is not installed
-              </h4>
-              <p className="mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">
-                Install {selectedEngine.name} from Services before managing
-                databases with this engine.
-              </p>
-              <a
-                href="/services"
-                className="mt-5 inline-flex cursor-pointer items-center gap-2 text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400"
-              >
-                Open Services
-                <ExternalLink size={15} />
-              </a>
-            </div>
+          {selectedEngine && !databaseServiceState.installed ? (
+            <ServiceNotInstalledState
+              state={databaseServiceState}
+              icon={Database}
+              eyebrow="Database management"
+              title={`${selectedEngine.name} is not installed`}
+              description={`Install ${selectedEngine.name} before managing databases with this engine.`}
+              installLabel={`Install ${selectedEngine.name}`}
+            />
           ) : loading ? (
             <div className="border-t border-slate-200 py-16 text-center text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400">
               Loading database inventory…
@@ -583,7 +577,7 @@ export default function DatabasesPage() {
               </tbody>
             </table>
           )}
-          {!selectedEngine?.installed && selectedEngine
+          {!databaseServiceState.installed && selectedEngine
             ? null
             : !loading &&
               visible.length === 0 && (

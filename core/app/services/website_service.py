@@ -28,47 +28,104 @@ class WebsiteService:
 
     def list(self) -> list[Website]:
         with self._lock:
-            return [Website.model_validate(item) for item in self._read()]
+            sites = [Website.model_validate(item) for item in self._read()]
+            # Repair records created by older releases that persisted the
+            # registry before generating the provider configuration.
+            for site in sites:
+                generated = self.configuration(site.id)
+                provider_path = Path(generated["config_path"])
+                if not provider_path.exists():
+                    provider_path.parent.mkdir(parents=True, exist_ok=True)
+                    provider_path.write_text(generated["content"])
+            return sites
 
     def get(self, website_id: str) -> Website | None:
         return next((site for site in self.list() if site.id == website_id), None)
 
-    def configuration(self, website_id: str) -> dict:
-        site = self.get(website_id)
-        if site is None:
-            raise HTTPException(404, "Website not found")
-        if site.server_type != "nginx":
-            return {"website_id": site.id, "server_type": site.server_type, "config_path": site.config_path, "content": "# Apache virtual-host configuration is managed by the Apache service."}
-        nginx_root = self.service_root / "nginx"
+    def configuration(self, website_id: str | Website) -> dict:
+        # Creation generates the provider file before the registry is committed,
+        # so it must be able to render from the in-memory site as well as from
+        # an already persisted ID used by the configuration API.
+        if isinstance(website_id, Website):
+            site = website_id
+        else:
+            site = next((Website.model_validate(item) for item in self._read() if item.get("id") == website_id), None)
+            if site is None:
+                raise HTTPException(404, "Website not found")
         config_id = self._configuration_id(site)
-        config_path = nginx_root / "conf" / "sites" / f"{config_id}.conf"
         names = " ".join([site.domain, *site.aliases])
         index = "index.php index.html index.htm default.php default.htm default.html"
-        lines = [
-            "server {",
-            "    listen 80;",
-            f"    server_name {names};",
-            f"    index {index};",
-            f"    root {site.document_root};",
-            f"    access_log {nginx_root}/logs/sites/{config_id}.access.log;",
-            f"    error_log {nginx_root}/logs/sites/{config_id}.error.log;",
-            f"    include {nginx_root}/conf/sites/{config_id}/*.conf;",
-            "",
-            "    location / {",
-            "        try_files $uri $uri/ /index.php?$query_string;",
-            "    }",
-        ]
-        if site.php_version:
-            socket = self.service_root / "php" / "versions" / site.php_version / "run" / "php-fpm.sock"
-            lines.extend([
+        root = site.document_root
+        socket = self.service_root / "php" / "versions" / site.php_version / "run" / "php-fpm.sock"
+        if site.server_type == "apache":
+            service_root = self.service_root / "apache"
+            config_path = service_root / "conf" / "sites" / f"{config_id}.conf"
+            lines = [
+                f"<VirtualHost *:80>",
+                f"    ServerName {site.domain}",
+                *[f"    ServerAlias {alias}" for alias in site.aliases],
+                f"    DocumentRoot \"{root}\"",
+                f"    DirectoryIndex {index}",
+                f"    ErrorLog \"{service_root}/logs/sites/{config_id}.error.log\"",
+                f"    CustomLog \"{service_root}/logs/sites/{config_id}.access.log\" combined",
+                f"    <Directory \"{root}\">",
+                "        AllowOverride All",
+                "        Require all granted",
+                "    </Directory>",
+            ]
+            if site.php_version:
+                lines.extend([
+                    "    <FilesMatch \\\"\\\\.php$\\\">",
+                    f"        SetHandler \"proxy:unix:{socket}|fcgi://localhost/\"",
+                    "    </FilesMatch>",
+                ])
+            lines.extend(["</VirtualHost>", ""])
+        elif site.server_type == "caddy":
+            service_root = self.service_root / "caddy"
+            config_path = service_root / "conf" / "sites" / f"{config_id}.caddy"
+            lines = [f"{names} {{", f"    root * {root}", "    encode zstd gzip", "    file_server"]
+            if site.php_version:
+                lines.append(f"    php_fastcgi unix/{socket}")
+            lines.extend(["    log {", f"        output file {service_root}/logs/sites/{config_id}.access.log", "    }", "}", ""])
+        elif site.server_type == "openlitespeed":
+            service_root = self.service_root / "openlitespeed"
+            config_path = service_root / "conf" / "vhosts" / config_id / "vhost.conf"
+            lines = [
+                f"docRoot                   {root}",
+                f"vhDomain                  {names}",
+                "enableGzip                1",
+                "index  {",
+                f"  indexFiles {index.replace(' ', ',')}",
+                "}",
+                "context / {",
+                "  type                    static",
+                f"  location                {root}",
+                "  allowBrowse             1",
+                "}",
+            ]
+            if site.php_version:
+                lines.extend(["scriptHandler {"])
+                lines.extend([f"  add                     lsapi:php-{site.php_version} php", "}"])
+            lines.append("")
+        else:
+            service_root = self.service_root / "nginx"
+            config_path = service_root / "conf" / "sites" / f"{config_id}.conf"
+            lines = [
+                "server {",
+                "    listen 80;",
+                f"    server_name {names};",
+                f"    index {index};",
+                f"    root {root};",
+                f"    access_log {service_root}/logs/sites/{config_id}.access.log;",
+                f"    error_log {service_root}/logs/sites/{config_id}.error.log;",
                 "",
-                "    location ~ \\.php$ {",
-                f"        fastcgi_pass unix:{socket};",
-                "        include fastcgi_params;",
-                "        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;",
+                "    location / {",
+                "        try_files $uri $uri/ /index.php?$query_string;",
                 "    }",
-            ])
-        lines.extend(["", "    location ~ /\\. {", "        deny all;", "    }", "}", ""])
+            ]
+            if site.php_version:
+                lines.extend(["", "    location ~ \\.php$ {", f"        fastcgi_pass unix:{socket};", "        include fastcgi_params;", "        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;", "    }"])
+            lines.extend(["", "    location ~ /\\. {", "        deny all;", "    }", "}", ""])
         return {"website_id": site.id, "server_type": site.server_type, "config_path": str(config_path), "content": "\n".join(lines)}
 
     def create(self, payload: WebsiteCreateRequest) -> Website:
@@ -76,10 +133,12 @@ class WebsiteService:
             sites = [Website.model_validate(item) for item in self._read()]
             domain, aliases = self._domains(payload.domain, payload.aliases)
             self._ensure_domains_free(sites, [domain, *aliases])
-            project = self._safe_project_path(payload.project_path)
+            requested_project_path = payload.project_path.strip() or str(self.web_root / domain)
+            project = self._safe_project_path(requested_project_path)
             web_root = self._normalize_web_root(payload.web_root)
             if payload.database_enabled and not payload.database_name.strip():
                 raise HTTPException(400, "Database name is required when database integration is enabled")
+            project_created = not project.exists()
             project.mkdir(parents=True, exist_ok=True)
             self._set_hosting_owner(project)
             now = self._now()
@@ -95,7 +154,15 @@ class WebsiteService:
                 database_user=payload.database_user.strip(), notes=payload.notes.strip(),
                 tags=self._tags(payload.tags), status="ready", enabled=True,
                 created_at=now, updated_at=now, config_path=str(config_path))
-            self._write_site(site, sites + [site])
+            try:
+                self._write_site(site, sites + [site])
+            except Exception:
+                if project_created:
+                    try:
+                        project.rmdir()
+                    except OSError:
+                        pass
+                raise
             return site
 
     def update(self, website_id: str, payload: WebsiteUpdateRequest) -> Website:
@@ -213,16 +280,41 @@ class WebsiteService:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.service_root.joinpath("websites").mkdir(parents=True, exist_ok=True)
         values = [item.model_dump(mode="json") for item in sites]
+        generated = self.configuration(site) if site is not None else None
+        target = Path(site.config_path) if site is not None else None
+        provider_path = Path(generated["config_path"]) if generated else None
+        previous_registry = self.path.read_bytes() if self.path.exists() else None
+        previous_target = target.read_bytes() if target and target.exists() else None
+        previous_provider = provider_path.read_bytes() if provider_path and provider_path.exists() else None
         fd, tmp = tempfile.mkstemp(prefix="websites.", suffix=".tmp", dir=self.path.parent)
         try:
+            if target:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(json.dumps(site.model_dump(mode="json"), indent=2) + "\n")
+            if provider_path:
+                provider_path.parent.mkdir(parents=True, exist_ok=True)
+                provider_path.write_text(generated["content"])
             with os.fdopen(fd, "w") as stream:
                 json.dump(values, stream, indent=2); stream.write("\n"); stream.flush(); os.fsync(stream.fileno())
             os.replace(tmp, self.path)
+        except Exception:
+            if previous_registry is None:
+                self.path.unlink(missing_ok=True)
+            else:
+                self.path.write_bytes(previous_registry)
+            if target:
+                if previous_target is None:
+                    target.unlink(missing_ok=True)
+                else:
+                    target.write_bytes(previous_target)
+            if provider_path:
+                if previous_provider is None:
+                    provider_path.unlink(missing_ok=True)
+                else:
+                    provider_path.write_bytes(previous_provider)
+            raise
         finally:
             if os.path.exists(tmp): os.unlink(tmp)
-        if site is not None:
-            target = Path(site.config_path); target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(json.dumps(site.model_dump(mode="json"), indent=2) + "\n")
 
     def _safe_project_path(self, raw: str) -> Path:
         path = Path(raw).expanduser()

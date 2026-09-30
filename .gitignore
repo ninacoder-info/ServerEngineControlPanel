@@ -53,6 +53,8 @@ current
 state/
 runtime/
 logs/
+!web/src/features/logs/
+!web/src/features/logs/LogsPage.jsx
 *.log
 *.pid
 *.sock

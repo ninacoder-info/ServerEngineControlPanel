@@ -134,6 +134,7 @@ export default function FileManagerPage() {
   const [editor, setEditor] = React.useState(null);
   const [editorExpanded, setEditorExpanded] = React.useState(false);
   const [uploadProgress, setUploadProgress] = React.useState(null);
+  const [uploadMenuOpen, setUploadMenuOpen] = React.useState(false);
   const [dialog, setDialog] = React.useState(null);
   const uploadInput = React.useRef(null);
   const folderInput = React.useRef(null);
@@ -587,7 +588,10 @@ export default function FileManagerPage() {
   return (
     <div
       className="file-manager-page space-y-7"
-      onClick={() => setContextMenu(null)}
+      onClick={() => {
+        setContextMenu(null);
+        setUploadMenuOpen(false);
+      }}
     >
       <div className="file-manager-heading">
         <div>
@@ -626,20 +630,45 @@ export default function FileManagerPage() {
             <FolderPlus size={14} />
             New folder
           </button>
-          <button
-            className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
-            onClick={() => uploadInput.current?.click()}
-          >
-            <Upload size={15} />
-            Upload files
-          </button>
-          <button
-            className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-            onClick={() => folderInput.current?.click()}
-          >
-            <FolderOpen size={15} />
-            Upload folder
-          </button>
+          <div className="relative">
+            <button
+              type="button"
+              className="inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-md bg-blue-600 px-2 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
+              onClick={(event) => {
+                event.stopPropagation();
+                setUploadMenuOpen((open) => !open);
+              }}
+            >
+              <Upload size={14} />
+              Upload
+            </button>
+            {uploadMenuOpen && (
+              <div className="absolute right-0 top-full z-20 mt-2 w-44 rounded-md border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                <button
+                  type="button"
+                  className="flex w-full cursor-pointer items-center gap-2 rounded px-2.5 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+                  onClick={() => {
+                    setUploadMenuOpen(false);
+                    uploadInput.current?.click();
+                  }}
+                >
+                  <Upload size={14} />
+                  Select files
+                </button>
+                <button
+                  type="button"
+                  className="flex w-full cursor-pointer items-center gap-2 rounded px-2.5 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+                  onClick={() => {
+                    setUploadMenuOpen(false);
+                    folderInput.current?.click();
+                  }}
+                >
+                  <FolderOpen size={14} />
+                  Select folder
+                </button>
+              </div>
+            )}
+          </div>
           <input
             ref={uploadInput}
             hidden

@@ -16,6 +16,7 @@ export default function NodeOverviewCard({
   onTogglePin,
   onInstall,
   onOpenRuntimes,
+  installing = false,
 }) {
   const running = installed.filter((item) => item.status === "running").length;
   return (
@@ -91,10 +92,11 @@ export default function NodeOverviewCard({
           <button
             className="inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
             type="button"
+            disabled={installing}
             onClick={() => onInstall(service)}
           >
             <Download size={14} />
-            Install
+            {installing ? "Installing…" : "Install"}
           </button>
           {installed.length > 0 && (
             <button

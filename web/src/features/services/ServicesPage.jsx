@@ -33,6 +33,7 @@ const HIDDEN_SERVICE_IDS = new Set([
 export default function ServicesPage() {
   const [catalog, setCatalog] = React.useState([]);
   const [installed, setInstalled] = React.useState([]);
+  const [jobs, setJobs] = React.useState([]);
   const [pinned, setPinned] = React.useState(() => {
     try {
       return JSON.parse(
@@ -66,11 +67,13 @@ export default function ServicesPage() {
       return Promise.all([
         apiRequest("/api/v1/services/catalog").then((r) => r.json()),
         apiRequest("/api/v1/services/installed").then((r) => r.json()),
+        apiRequest("/api/v1/jobs").then((r) => (r.ok ? r.json() : [])),
       ])
-        .then(([services, detected]) => {
+        .then(([services, detected, activeJobs]) => {
           if (alive) {
             setCatalog(services);
             setInstalled(detected);
+            setJobs(activeJobs);
           }
         })
         .catch(() => {})
@@ -130,6 +133,19 @@ export default function ServicesPage() {
     installed.filter(
       (item) => item.id === service.id || item.id.startsWith(`${service.id}@`),
     );
+  const installingFor = (service) => jobs.some((job) => {
+    const type = String(job.type || "").toLowerCase();
+    const matchesBundle = service.id === "modsecurity" && type.includes("install application shield bundle");
+    return (job.status === "queued" || job.status === "running") && (matchesBundle || type.includes(`install ${service.id.toLowerCase()}`));
+  });
+  const installApplicationShield = async () => {
+    const response = await apiRequest("/api/v1/application-shield/install", { method: "POST" });
+    if (response.ok) {
+      const result = await response.json();
+      setJobs((current) => [...current, { id: result.job_id, type: "Install Application Shield bundle", status: "queued", message: result.message, progress: 0 }]);
+      window.dispatchEvent(new CustomEvent("serverengine:jobs-updated"));
+    }
+  };
 
   return (
     <div className="space-y-7">
@@ -204,6 +220,7 @@ export default function ServicesPage() {
                 pinned={pinned.includes(service.id)}
                 onTogglePin={togglePin}
                 onInstall={(item) => setSelected({ service: item })}
+                installing={installingFor(service)}
               />
             );
           if (service.id === "nodejs")
@@ -216,6 +233,7 @@ export default function ServicesPage() {
                 onTogglePin={togglePin}
                 onInstall={(item) => setSelected({ service: item })}
                 onOpenRuntimes={() => setNodeRuntimesOpen(true)}
+                installing={installingFor(service)}
               />
             );
           if (service.id === "pm2")
@@ -230,6 +248,7 @@ export default function ServicesPage() {
                 onOpenWorkspace={() => {
                   window.location.hash = "pm2";
                 }}
+                installing={installingFor(service)}
               />
             );
           return (
@@ -240,10 +259,11 @@ export default function ServicesPage() {
               installedVersions={matches}
               pinned={pinned.includes(service.id)}
               onTogglePin={togglePin}
-              onInstall={(item) => setSelected({ service: item })}
-              onManage={(item, versions) =>
-                setManage({ service: item, versions })
-              }
+              onInstall={(item) => item.id === "modsecurity" ? installApplicationShield() : setSelected({ service: item })}
+              onManage={(item, versions) => item.id === "modsecurity"
+                ? window.location.assign("/application-shield")
+                : setManage({ service: item, versions })}
+              installing={installingFor(service)}
             />
           );
         })}
