@@ -32,6 +32,13 @@ function ToastCard({ id, message, type }) {
   );
 }
 
+export function showToast(message, type = "success") {
+  return sonnerToast.custom(
+    (toastId) => <ToastCard id={toastId} message={message} type={type} />,
+    { duration: 4500 },
+  );
+}
+
 export default function Toast({ message, type = "success", onClose }) {
   const lastToast = React.useRef("");
 
@@ -46,13 +53,8 @@ export default function Toast({ message, type = "success", onClose }) {
     lastToast.current = toastKey;
 
     const id = sonnerToast.custom(
-      (toastId) => (
-        <ToastCard id={toastId} message={message} type={type} />
-      ),
-      {
-        duration: 4500,
-        onDismiss: onClose,
-      },
+      (toastId) => <ToastCard id={toastId} message={message} type={type} />,
+      { duration: 4500, onDismiss: onClose },
     );
   }, [message, type]);
 

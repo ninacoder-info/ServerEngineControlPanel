@@ -2,12 +2,15 @@ import React from "react";
 import { ChevronRight, ExternalLink, Server, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { apiRequest } from "../../lib/api";
+import ServiceNotInstalledState from "../../components/ServiceNotInstalledState";
+import { useServiceInstallationState } from "../../hooks/useServiceInstallationState";
 import InstallServiceModal from "./InstallServiceModal";
 import PhpRuntimeTable from "./PhpRuntimeTable";
 import ServiceManagerModal from "./ServiceManagerModal";
 
 export default function PhpRuntimesPage({ modal = false, onClose }) {
   const navigate = useNavigate();
+  const phpState = useServiceInstallationState("php");
   const [service, setService] = React.useState(null);
   const [runtimes, setRuntimes] = React.useState([]);
   const [installed, setInstalled] = React.useState([]);
@@ -50,6 +53,18 @@ export default function PhpRuntimesPage({ modal = false, onClose }) {
       window.removeEventListener("serverengine:jobs-updated", refreshAfterJob);
     };
   }, []);
+  if (!loading && !phpState.loading && !phpState.installed) {
+    return (
+      <ServiceNotInstalledState
+        state={phpState}
+        icon={Server}
+        eyebrow="Application runtimes"
+        title="PHP-FPM is not installed"
+        description="Install PHP-FPM to run PHP websites. You can install and run multiple PHP versions side by side, each with its own configuration and extensions."
+        installLabel="Install PHP-FPM"
+      />
+    );
+  }
   return (
     <div
       className={
@@ -140,13 +155,22 @@ export default function PhpRuntimesPage({ modal = false, onClose }) {
           </div>
         </>
       )}
-      {loading ? (
+      {loading || phpState.loading ? (
         <div className="animate-pulse overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700" aria-label="Loading PHP runtimes" aria-busy="true">
           <div className="flex gap-4 border-b border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-950">
             {["w-32", "w-24", "w-24", "w-20"].map((width) => <div key={width} className={`h-3 ${width} rounded bg-slate-200 dark:bg-slate-800`} />)}
           </div>
           {[1, 2, 3].map((item) => <div key={item} className="flex items-center gap-4 border-b border-slate-200 px-4 py-5 last:border-0 dark:border-slate-700"><div className="h-4 w-32 rounded bg-slate-200 dark:bg-slate-800" /><div className="h-4 w-24 rounded bg-slate-200 dark:bg-slate-800" /><div className="h-4 w-28 rounded bg-slate-200 dark:bg-slate-800" /><div className="ml-auto h-8 w-20 rounded bg-slate-200 dark:bg-slate-800" /></div>)}
         </div>
+      ) : !phpState.installed ? (
+        <ServiceNotInstalledState
+          state={phpState}
+          icon={Server}
+          eyebrow="Application runtimes"
+          title="PHP-FPM is not installed"
+          description="Install PHP-FPM to run PHP websites. You can install and run multiple PHP versions side by side, each with its own configuration and extensions."
+          installLabel="Install PHP-FPM"
+        />
       ) : (
         <PhpRuntimeTable
           service={service}

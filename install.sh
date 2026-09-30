@@ -37,6 +37,7 @@ OS_VERSION=""
 OS_CODENAME=""
 ARCH=""
 PYTHON=""
+NODE=""
 
 usage() {
   cat <<'EOF'
@@ -51,7 +52,7 @@ Options:
   --api-port PORT         Loopback API port (default: 8000)
   --api-host HOST         API bind address (default: 127.0.0.1)
   --release-url URL       Prebuilt release bundle URL
-  --install-system-deps  Install missing OS packages using apt/dnf/yum
+  --install-system-deps  Install panel and provider build dependencies using apt/dnf/yum
   --no-service            Install and verify files without enabling systemd
   -y, --yes               Do not ask before replacing an existing release
   -h, --help              Show this help
@@ -180,8 +181,8 @@ download_release_bundle() {
 install_system_dependencies() {
   [ "$INSTALL_SYSTEM_DEPS" = true ] || return 0
   case "$PM" in
-    apt) run env DEBIAN_FRONTEND=noninteractive apt-get update; run env DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl tar gzip python3 python3-venv python3-pip;;
-    dnf|yum) run "$PM" install -y ca-certificates curl tar gzip python3 python3-pip;;
+    apt) run env DEBIAN_FRONTEND=noninteractive apt-get update; run env DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl tar gzip unzip git golang-go build-essential python3 python3-venv python3-pip nodejs npm;;
+    dnf|yum) run "$PM" install -y ca-certificates curl tar gzip unzip git golang gcc gcc-c++ make python3 python3-pip nodejs npm;;
   esac
 }
 
@@ -207,6 +208,12 @@ detect_runtimes() {
   pyv="$($PYTHON -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
   version_ge "$pyv" "3.10" || die "Python 3.10+ is required (found $pyv)"
   log "Runtime: Python $pyv"
+  has node || die "Node.js 20.19+ is required for the panel web runtime; install Node.js or rerun with --install-system-deps"
+  NODE="$(command -v node)"
+  local nodev
+  nodev="$($NODE --version | sed 's/^v//')"
+  version_ge "$nodev" "20.19.0" || die "Node.js 20.19+ is required for the panel web runtime (found $nodev)"
+  log "Runtime: Node.js $nodev"
 }
 
 check_existing_state() {
@@ -258,6 +265,14 @@ export SE_WEB_DIST="$RELEASE_DIR/web/dist"
 exec "$RELEASE_DIR/core/.venv/bin/uvicorn" app.main:app --host "$API_HOST" --port "$API_PORT"
 EOF
   chmod 0755 "$RELEASE_DIR/core/run.sh"
+cat > "$RELEASE_DIR/web/run.sh" <<EOF
+#!/usr/bin/env bash
+set -Eeuo pipefail
+export PORT="$WEB_PORT"
+export API_URL="http://127.0.0.1:$API_PORT"
+exec "$NODE" "$PREFIX/current/web/server.mjs"
+EOF
+  chmod 0755 "$RELEASE_DIR/web/run.sh"
   install -d -m 0755 "$RELEASE_DIR/bin"
   cp "$SOURCE_DIR/bin/serverengine" "$RELEASE_DIR/bin/serverengine"
   chmod 0755 "$RELEASE_DIR/bin/serverengine"
@@ -280,11 +295,13 @@ configure_services() {
   has systemctl || die "systemd is required unless --no-service is used"
   install -m 0644 "$SOURCE_DIR/deploy/server-engine-core.service" /etc/systemd/system/server-engine-core.service
   sed -i "s#^WorkingDirectory=.*#WorkingDirectory=$PREFIX/current/core#; s#^ExecStart=.*#ExecStart=$PREFIX/current/core/run.sh#" /etc/systemd/system/server-engine-core.service
-  systemctl disable --now server-engine-web.service >/dev/null 2>&1 || true
-  rm -f /etc/systemd/system/server-engine-web.service
+  install -m 0644 "$SOURCE_DIR/deploy/server-engine-web.service" /etc/systemd/system/server-engine-web.service
+  sed -i "s#^WorkingDirectory=.*#WorkingDirectory=$PREFIX/current/web#; s#^ExecStart=.*#ExecStart=$PREFIX/current/web/run.sh#" /etc/systemd/system/server-engine-web.service
   systemctl daemon-reload
   systemctl enable server-engine-core.service
+  systemctl enable server-engine-web.service
   systemctl restart server-engine-core.service
+  systemctl restart server-engine-web.service
 }
 
 verify_installation() {
@@ -292,6 +309,7 @@ verify_installation() {
   [ "$NO_SERVICE" = true ] && return 0
   sleep 2
   systemctl is-active --quiet server-engine-core.service || { systemctl status server-engine-core.service --no-pager; die "core service failed"; }
+  systemctl is-active --quiet server-engine-web.service || { systemctl status server-engine-web.service --no-pager; die "web service failed"; }
   has curl && curl --fail --silent --show-error "http://127.0.0.1:$API_PORT/api/v1/health" >/dev/null || die "API health check failed"
   has curl && curl --fail --silent --show-error "http://127.0.0.1:$API_PORT/" >/dev/null || die "web health check failed"
 }

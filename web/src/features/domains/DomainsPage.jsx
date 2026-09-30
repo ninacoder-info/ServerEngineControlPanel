@@ -7,12 +7,12 @@ import {
   MoreHorizontal,
   Plus,
   Search,
-  Server,
   ShieldCheck,
   X,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
 import { apiRequest, readApiError } from "../../lib/api";
+import ServiceNotInstalledState from "../../components/ServiceNotInstalledState";
+import { useServiceInstallationState } from "../../hooks/useServiceInstallationState";
 
 const initialDomains = [
   {
@@ -66,10 +66,9 @@ function Badge({ children, tone = "slate" }) {
   );
 }
 export default function DomainsPage() {
-  const navigate = useNavigate();
+  const dnsState = useServiceInstallationState("powerdns");
   const [tab, setTab] = React.useState(() => window.location.hash === "#cloudflare" ? "Cloudflare edge" : window.location.hash === "#bind" ? "BIND 9 DNS" : window.location.hash === "#unbound" ? "Unbound resolver" : "Domains");
   const [domains, setDomains] = React.useState([]);
-  const [dnsInstalled, setDnsInstalled] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
   const [message, setMessage] = React.useState("");
   const [query, setQuery] = React.useState("");
@@ -100,16 +99,9 @@ export default function DomainsPage() {
   });
   const loadDomains = React.useCallback(async () => {
     setLoading(true);
-    const [domainsResponse, servicesResponse] = await Promise.all([
-      apiRequest("/api/v1/domains"),
-      apiRequest("/api/v1/services/installed"),
-    ]);
+    const domainsResponse = await apiRequest("/api/v1/domains");
     if (domainsResponse.ok) setDomains(await domainsResponse.json());
     else setMessage(await readApiError(domainsResponse));
-    if (servicesResponse.ok) {
-      const services = await servicesResponse.json();
-      setDnsInstalled(services.some((item) => item.id === "powerdns" || item.id.startsWith("powerdns@")));
-    }
     setLoading(false);
   }, []);
   React.useEffect(() => { loadDomains(); }, [loadDomains]);
@@ -144,32 +136,8 @@ export default function DomainsPage() {
   };
   const activeTls = domains.filter((item) => item.tls === "Active").length;
   const aliases = domains.filter((item) => item.type === "Alias").length;
-  if (!loading && !dnsInstalled && !["#cloudflare", "#bind", "#unbound"].includes(window.location.hash)) {
-    return (
-      <div className="grid min-h-[55vh] place-items-center px-5 text-center">
-        <div className="max-w-md">
-          <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300">
-            <Server size={22} />
-          </div>
-          <p className="mt-5 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
-            DNS management
-          </p>
-          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
-            PowerDNS is not installed
-          </h1>
-          <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
-            Install PowerDNS to manage authoritative zones, records, and DNSSEC from this panel.
-          </p>
-          <button
-            type="button"
-            onClick={() => navigate("/services")}
-            className="mt-5 inline-flex cursor-pointer items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
-          >
-            Install PowerDNS in Services
-          </button>
-        </div>
-      </div>
-    );
+  if (!loading && !dnsState.loading && !dnsState.installed && !["#cloudflare", "#bind", "#unbound"].includes(window.location.hash)) {
+    return <ServiceNotInstalledState state={dnsState} icon={Globe2} eyebrow="DNS management" title="PowerDNS is not installed" description="Install PowerDNS to manage authoritative zones, records, and DNSSEC from this panel." installLabel="Install PowerDNS" />;
   }
   const updateCloudflare = (key, value) => setCloudflare((current) => ({ ...current, [key]: value }));
   const saveCloudflare = () => {

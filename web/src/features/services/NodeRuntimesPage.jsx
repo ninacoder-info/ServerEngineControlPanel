@@ -2,12 +2,15 @@ import React from "react";
 import { Check, CheckCircle2, ChevronRight, CircleStop, Copy, Download, MoreHorizontal, RefreshCw, Server, Trash2, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { apiRequest } from "../../lib/api";
+import ServiceNotInstalledState from "../../components/ServiceNotInstalledState";
+import { useServiceInstallationState } from "../../hooks/useServiceInstallationState";
 import InstallServiceModal from "./InstallServiceModal";
 
 const linkButton = "inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2 py-2 text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300";
 
 export default function NodeRuntimesPage({ modal = false, onClose }) {
   const navigate = useNavigate();
+  const nodeState = useServiceInstallationState("nodejs");
   const [service, setService] = React.useState(null);
   const [installed, setInstalled] = React.useState([]);
   const [selected, setSelected] = React.useState(null);
@@ -41,6 +44,19 @@ export default function NodeRuntimesPage({ modal = false, onClose }) {
     document.addEventListener("mousedown", closeMenu);
     return () => document.removeEventListener("mousedown", closeMenu);
   }, []);
+
+  if (!loading && !nodeState.loading && !nodeState.installed) {
+    return (
+      <ServiceNotInstalledState
+        state={nodeState}
+        icon={Server}
+        eyebrow="Application runtimes"
+        title="Node.js is not installed"
+        description="Install Node.js to run JavaScript applications. You can install and manage multiple Node.js versions side by side."
+        installLabel="Install Node.js"
+      />
+    );
+  }
 
   const installedVersions = installed
     .filter((item) => item.id === "nodejs" || item.id.startsWith("nodejs@"))
@@ -84,7 +100,7 @@ export default function NodeRuntimesPage({ modal = false, onClose }) {
             <div className="flex items-start justify-between gap-4"><div><p className="text-sm text-cyan-300">Application runtimes</p><h2 className="mt-1 flex items-center gap-2 text-3xl font-semibold tracking-tight"><Server size={25} />Node.js runtimes</h2><p className="mt-2 text-slate-400">Install and manage multiple Node.js versions side by side.</p></div><button type="button" disabled={!service || loading} className={`${linkButton} bg-blue-600 text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60`} onClick={() => setSelected({ service })}><Download size={14} />Install</button></div>
           </>
         )}
-        {loading ? <div className="animate-pulse overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700" aria-label="Loading Node.js runtimes" aria-busy="true"><div className="flex gap-4 bg-slate-50 px-4 py-3 dark:bg-slate-950">{["w-32", "w-24", "w-24", "w-20"].map((width) => <div key={width} className={`h-3 ${width} rounded bg-slate-200 dark:bg-slate-800`} />)}</div>{[1, 2, 3].map((item) => <div key={item} className="flex items-center gap-4 border-t border-slate-200 px-4 py-5 dark:border-slate-700"><div className="h-4 w-32 rounded bg-slate-200 dark:bg-slate-800" /><div className="h-4 w-24 rounded bg-slate-200 dark:bg-slate-800" /><div className="h-5 w-20 rounded-full bg-slate-200 dark:bg-slate-800" /><div className="ml-auto h-8 w-20 rounded bg-slate-200 dark:bg-slate-800" /></div>)}</div> : <section className="overflow-visible rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900"><div className="overflow-visible"><table className="w-full min-w-[760px] border-collapse text-left text-sm"><thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-950 dark:text-slate-400"><tr><th className="px-4 py-3 font-semibold">Version</th><th className="px-4 py-3 font-semibold">Channel</th><th className="px-4 py-3 font-semibold">Status</th><th className="px-4 py-3 text-right font-semibold" /></tr></thead><tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+        {loading || nodeState.loading ? <div className="animate-pulse overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700" aria-label="Loading Node.js runtimes" aria-busy="true"><div className="flex gap-4 bg-slate-50 px-4 py-3 dark:bg-slate-950">{["w-32", "w-24", "w-24", "w-20"].map((width) => <div key={width} className={`h-3 ${width} rounded bg-slate-200 dark:bg-slate-800`} />)}</div>{[1, 2, 3].map((item) => <div key={item} className="flex items-center gap-4 border-t border-slate-200 px-4 py-5 dark:border-slate-700"><div className="h-4 w-32 rounded bg-slate-200 dark:bg-slate-800" /><div className="h-4 w-24 rounded bg-slate-200 dark:bg-slate-800" /><div className="h-5 w-20 rounded-full bg-slate-200 dark:bg-slate-800" /><div className="ml-auto h-8 w-20 rounded bg-slate-200 dark:bg-slate-800" /></div>)}</div> : !nodeState.installed ? <ServiceNotInstalledState state={nodeState} icon={Server} eyebrow="Application runtimes" title="Node.js is not installed" description="Install Node.js to run JavaScript applications. You can install and manage multiple Node.js versions side by side." installLabel="Install Node.js" /> : <section className="overflow-visible rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900"><div className="overflow-visible"><table className="w-full min-w-[760px] border-collapse text-left text-sm"><thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-950 dark:text-slate-400"><tr><th className="px-4 py-3 font-semibold">Version</th><th className="px-4 py-3 font-semibold">Channel</th><th className="px-4 py-3 font-semibold">Status</th><th className="px-4 py-3 text-right font-semibold" /></tr></thead><tbody className="divide-y divide-slate-200 dark:divide-slate-700">
           {!rows.length && (
             <tr>
               <td colSpan="4" className="px-4 py-10 text-center text-sm text-slate-500 dark:text-slate-400">

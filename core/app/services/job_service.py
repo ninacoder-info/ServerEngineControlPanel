@@ -19,8 +19,9 @@ from threading import Event, Thread
 from threading import Lock
 
 from app.models.job import JobSummary
+from app.models.application_shield import ApplicationShieldPolicyUpdate
 from app.services.service_catalog import apache_source_for, bind9_source_for, certbot_source_for, caddy_source_for, clamav_source_for, dovecot_source_for, ffmpeg_source_for, git_source_for, haproxy_source_for, imagemagick_source_for, lynis_source_for, mariadb_source_for, memcached_source_for, mongodb_prebuilt_for, mongodb_source_for, mysql_release_for, nginx_source_for, opensearch_source_for, openlitespeed_prebuilt_for, openlitespeed_source_for, php_source_for, postfix_source_for, powerdns_source_for, postgresql_source_for, prebuilt_package_for, python_asset_for, python_source_for, rabbitmq_source_for, redis_source_for, refresh_service_versions, rspamd_source_for, ruby_source_for, stalwart_source_for, supervisor_source_for, unbound_source_for, valkey_source_for, vsftpd_source_for, wpcli_source_for
-from app.services.service_runtime import PHP_BASELINE_MODULES, PHP_REQUIRED_EXTENSIONS, SERVICE_PACKAGES, binary_path, enable_php_baseline_extensions, ensure_composer_cache, ensure_nginx_layout, ensure_node_runtime, ensure_php_fpm_layout, ensure_php_runtime_configuration, ensure_php_runtime_launcher, nginx_paths, normalize_php_runtime_layout, package_for, php_cli_path, php_fpm_paths, php_runtime_library_path, prepare_mysql_runtime, service_root, startup_enabled, version_sort_key
+from app.services.service_runtime import PHP_BASELINE_MODULES, PHP_REQUIRED_EXTENSIONS, SERVICE_PACKAGES, binary_path, enable_php_baseline_extensions, ensure_composer_cache, ensure_nginx_layout, ensure_node_runtime, ensure_php_fpm_layout, ensure_php_runtime_configuration, ensure_php_runtime_launcher, managed_library_environment, nginx_paths, normalize_php_runtime_layout, package_for, php_cli_path, php_fpm_paths, php_runtime_library_path, prepare_mysql_runtime, service_root, startup_enabled, version_sort_key
 
 
 class InstallCancelled(Exception):
@@ -113,6 +114,12 @@ class JobStore:
         Thread(target=self._run_serialized, args=(self._run_extension_install, job_id, version, extension), daemon=True).start()
         return job
 
+    def enqueue_application_shield(self, job_id: str) -> JobSummary:
+        """Install the managed WAF engine and CRS as one serialized operation."""
+        job = self.create(job_id, "Install Application Shield bundle")
+        Thread(target=self._run_serialized, args=(self._run_application_shield, job_id), daemon=True).start()
+        return job
+
     def _run_serialized(self, runner, job_id: str, *args):
         """Run exactly one privileged job at a time.
 
@@ -171,6 +178,185 @@ class JobStore:
         if line not in content:
             ini.write_text(content.rstrip() + "\n" + line)
         self._update(job_id, status="succeeded", message=f"PHP {version} extension {extension} installed and enabled in php.ini. Restart PHP-FPM {version} to load it.")
+
+    def _run_application_shield(self, job_id: str):
+        """Stage ModSecurity and CRS without changing the host package database."""
+        providers = ("nginx", "apache", "openlitespeed", "caddy")
+        installed = [provider for provider in providers if binary_path(provider).exists() or (service_root(provider) / ".serverengine-version").exists()]
+        if not installed:
+            raise RuntimeError("Install a web server before installing Application Shield.")
+        self._update(job_id, status="running", progress=3, message="Preparing Application Shield for the installed web server(s)…", log=[f"Providers detected: {', '.join(installed)}"])
+        self._raise_if_cancelled(job_id)
+
+        # Reuse the same isolated Debian extraction path as the normal service
+        # installer. It never calls dpkg -i or registers a host service.
+        self._run_debian_prebuilt(job_id, "modsecurity", "system")
+        with self._lock:
+            current = self._jobs.get(job_id)
+        if not current or current.status != "succeeded":
+            return
+        self._update(job_id, status="running", progress=72, message="Installing OWASP Core Rule Set into the managed shield root…")
+        self._install_application_shield_crs(job_id)
+        self._raise_if_cancelled(job_id)
+        # Geo controls are optional. A DB-IP outage, DNS failure, or changed
+        # download page must never make the WAF bundle fail after CRS is ready.
+        self._update(job_id, status="running", progress=84, message="Preparing optional country database for Geo controls…")
+        from app.services.geoip_service import geoip_service
+        geoip_result = geoip_service.install_latest_country_database()
+        if geoip_result.get("installed"):
+            self._update(job_id, progress=86, message="Optional DB-IP country database is ready.", log=[str(geoip_result.get("url", ""))])
+        else:
+            self._update(job_id, progress=86, message="GeoIP database unavailable; continuing without Geo controls.", log=[f"Warning: optional GeoIP setup skipped: {geoip_result.get('message', 'unknown error')}"])
+        root = service_root("modsecurity")
+        from app.services.application_shield_service import application_shield_service
+        application_shield_service.ensure_engine_config()
+        if "nginx" in installed:
+            self._install_application_shield_nginx_connector(job_id)
+        if "apache" in installed:
+            self._install_application_shield_apache_connector(job_id)
+        if "caddy" in installed and application_shield_service._connector_module("caddy", service_root("caddy")) is None:
+            caddy_marker = service_root("caddy") / ".serverengine-version"
+            caddy_version = caddy_marker.read_text(errors="replace").strip() if caddy_marker.exists() else "2.9.1"
+            self._run_caddy_binary(job_id, caddy_version)
+            with self._lock:
+                caddy_job = self._jobs.get(job_id)
+            if not caddy_job or caddy_job.status != "succeeded":
+                return
+        policy_dir = root / "conf"
+        policy_dir.mkdir(parents=True, exist_ok=True)
+        # These files are intentionally disabled until a compatible native
+        # provider connector is validated. This makes the one-click bundle
+        # safe on custom Nginx/Apache builds and gives the UI a real config.
+        for provider in installed:
+            provider_root = service_root(provider)
+            config = provider_root / ("conf/application-shield.caddy" if provider == "caddy" else "conf/modsecurity.conf")
+            config.parent.mkdir(parents=True, exist_ok=True)
+            config.write_text("# Managed by Server Engine Application Shield\n# Connector staged; activation is disabled until provider compatibility is validated.\n")
+            (provider_root / ".serverengine-application-shield-ready").write_text("disabled\n")
+        (root / ".serverengine-bundle-version").write_text("modsecurity3+owasp-crs\n")
+        attached = []
+        for provider in installed:
+            try:
+                application_shield_service.attach(provider)
+                attached.append(provider)
+            except (RuntimeError, ValueError):
+                # A missing or incompatible native module must not make the
+                # engine/CRS installation fail. The UI will show the provider
+                # as ready and explain the remaining connector step.
+                continue
+        if attached:
+            application_shield_service.update_policy(ApplicationShieldPolicyUpdate(enabled=True, mode="detection", crs_enabled=True))
+            message = f"Application Shield installed and safely enabled in Detection mode for {', '.join(attached)}. Review audit logs before switching to Blocking."
+        else:
+            message = f"Application Shield engine and CRS installed for {', '.join(installed)}. A compatible provider connector is still required before protection can be enabled."
+        self._update(job_id, status="succeeded", progress=100, message=message)
+
+    def _install_application_shield_nginx_connector(self, job_id: str):
+        apt = shutil.which("apt")
+        dpkg_deb = shutil.which("dpkg-deb")
+        if not apt or not dpkg_deb:
+            raise RuntimeError("The isolated package tools are unavailable; cannot install the Nginx Application Shield connector.")
+        provider_root = service_root("nginx")
+        staging = provider_root.parent / f".nginx-modsecurity-{job_id}"
+        try:
+            packages = staging / "packages"
+            extracted = staging / "root"
+            packages.mkdir(parents=True, exist_ok=True)
+            extracted.mkdir(parents=True, exist_ok=True)
+            self._update(job_id, progress=94, message="Installing the managed Nginx Application Shield connector…", log=["$ apt download libnginx-mod-http-modsecurity"])
+            result = subprocess.run([apt, "download", "libnginx-mod-http-modsecurity"], cwd=packages, capture_output=True, text=True, check=False, timeout=180)
+            archives = sorted(packages.glob("*.deb"))
+            if result.returncode or not archives:
+                raise RuntimeError((result.stderr or result.stdout).strip() or "The Nginx ModSecurity connector is not available for this host.")
+            for archive in archives:
+                unpacked = subprocess.run([dpkg_deb, "-x", str(archive), str(extracted)], capture_output=True, text=True, check=False)
+                if unpacked.returncode:
+                    raise RuntimeError((unpacked.stderr or unpacked.stdout).strip() or "Nginx ModSecurity connector extraction failed")
+            for item in extracted.iterdir():
+                target = provider_root / item.name
+                if item.is_symlink():
+                    target.unlink(missing_ok=True)
+                    target.symlink_to(os.readlink(item), target_is_directory=item.is_dir())
+                elif item.is_dir():
+                    shutil.copytree(item, target, dirs_exist_ok=True, symlinks=True)
+                else:
+                    shutil.copy2(item, target)
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+
+    def _install_application_shield_apache_connector(self, job_id: str):
+        """Stage Apache's managed ModSecurity module without touching host dpkg."""
+        apt = shutil.which("apt")
+        dpkg_deb = shutil.which("dpkg-deb")
+        if not apt or not dpkg_deb:
+            raise RuntimeError("The isolated package tools are unavailable; cannot install the Apache Application Shield connector.")
+        provider_root = service_root("apache")
+        staging = provider_root.parent / f".apache-modsecurity-{job_id}"
+        try:
+            packages = staging / "packages"
+            extracted = staging / "root"
+            packages.mkdir(parents=True, exist_ok=True)
+            extracted.mkdir(parents=True, exist_ok=True)
+            self._update(job_id, progress=96, message="Installing the managed Apache Application Shield connector…", log=["$ apt download libapache2-mod-security2"])
+            result = subprocess.run([apt, "download", "libapache2-mod-security2"], cwd=packages, capture_output=True, text=True, check=False, timeout=180)
+            archives = sorted(packages.glob("*.deb"))
+            if result.returncode or not archives:
+                raise RuntimeError((result.stderr or result.stdout).strip() or "The Apache ModSecurity connector is not available for this host.")
+            for archive in archives:
+                unpacked = subprocess.run([dpkg_deb, "-x", str(archive), str(extracted)], capture_output=True, text=True, check=False)
+                if unpacked.returncode:
+                    raise RuntimeError((unpacked.stderr or unpacked.stdout).strip() or "Apache ModSecurity connector extraction failed")
+            for item in extracted.iterdir():
+                target = provider_root / item.name
+                if item.is_symlink():
+                    target.unlink(missing_ok=True)
+                    target.symlink_to(os.readlink(item), target_is_directory=item.is_dir())
+                elif item.is_dir():
+                    shutil.copytree(item, target, dirs_exist_ok=True, symlinks=True)
+                else:
+                    shutil.copy2(item, target)
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+
+    def _install_application_shield_crs(self, job_id: str):
+        apt = shutil.which("apt")
+        dpkg_deb = shutil.which("dpkg-deb")
+        if not apt or not dpkg_deb:
+            raise RuntimeError("The isolated package tools are unavailable; cannot install OWASP CRS.")
+        root = service_root("modsecurity")
+        staging = root.parent / f".modsecurity-crs-{job_id}"
+        try:
+            packages = staging / "packages"
+            extracted = staging / "root"
+            packages.mkdir(parents=True, exist_ok=True)
+            extracted.mkdir(parents=True, exist_ok=True)
+            self._update(job_id, progress=76, message="Downloading OWASP CRS package…", log=["$ apt download modsecurity-crs"])
+            result = subprocess.run([apt, "download", "modsecurity-crs"], cwd=packages, capture_output=True, text=True, check=False, timeout=180)
+            if result.returncode != 0:
+                raise RuntimeError((result.stderr or result.stdout).strip() or "OWASP CRS package is not available for this host")
+            archives = sorted(packages.glob("*.deb"))
+            if not archives:
+                raise RuntimeError("The OWASP CRS package provider returned no archive")
+            for archive in archives:
+                unpacked = subprocess.run([dpkg_deb, "-x", str(archive), str(extracted)], capture_output=True, text=True, check=False)
+                if unpacked.returncode:
+                    raise RuntimeError((unpacked.stderr or unpacked.stdout).strip() or "OWASP CRS extraction failed")
+            source = extracted / "usr/share/modsecurity-crs"
+            target = root / "crs"
+            if target.exists():
+                shutil.rmtree(target)
+            if source.exists():
+                shutil.copytree(source, target, symlinks=True)
+            else:
+                target.mkdir(parents=True, exist_ok=True)
+                for item in extracted.rglob("*"):
+                    if item.is_file():
+                        destination = target / item.name
+                        shutil.copy2(item, destination)
+            (target / ".serverengine-version").write_text("installed\n")
+            self._update(job_id, progress=92, message="OWASP CRS is ready in the managed shield root.", log=[f"CRS root: {target}"])
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
 
     def _run_action(self, job_id: str, service_id: str, action: str, version: str | None = None):
         if service_id in {"mysql", "mariadb"}:
@@ -250,7 +436,13 @@ class JobStore:
                 return
             if service_id == "nginx" and action in {"start", "restart"}:
                 ensure_nginx_layout()
-                check = subprocess.run([str(nginx["binary"]), "-p", str(nginx["root"]), "-c", str(nginx["config"]), "-t"], capture_output=True, text=True, check=False)
+                # Migrate any older Application Shield rules file before the
+                # provider parses it (older versions emitted Apache-only
+                # IncludeOptional directives).
+                from app.services.application_shield_service import application_shield_service
+                application_shield_service.ensure_engine_config()
+                runtime_env = managed_library_environment(nginx["root"], service_root("modsecurity"))
+                check = subprocess.run([str(nginx["binary"]), "-p", str(nginx["root"]), "-c", str(nginx["config"]), "-t"], capture_output=True, text=True, check=False, env=runtime_env)
                 check_output = (check.stdout + check.stderr).strip().splitlines()[-80:]
                 self._update(job_id, log=check_output)
                 if check.returncode != 0:
@@ -278,7 +470,8 @@ class JobStore:
                     raise RuntimeError(f"PHP-FPM did not create its socket at {php['socket']}; inspect {php['error_log']}")
                 self._update(job_id, status="succeeded", message=f"PHP-FPM {version} {action} completed. Socket: {php['socket']}")
                 return
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            runtime_env = managed_library_environment(service_root(service_id), service_root("modsecurity"))
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=runtime_env)
             output = []
             for line in process.stdout or []:
                 if line.strip():
@@ -1144,8 +1337,17 @@ class JobStore:
             if len(parts) < 2 or not parts[1]:
                 continue
             full_version = parts[1]
+            if requested_version in {"", "system", "latest"}:
+                return full_version
             if full_version == requested_version or full_version.split(":", 1)[-1] == requested_version:
                 return full_version
+        if requested_version in {"", "system", "latest"}:
+            policy = subprocess.run([apt_cache, "policy", package], capture_output=True, text=True, check=False, timeout=8)
+            for line in policy.stdout.splitlines():
+                if line.strip().startswith("Candidate:"):
+                    candidate = line.split(":", 1)[1].strip()
+                    if candidate and candidate != "(none)":
+                        return candidate
         return requested_version
 
     def _run_debian_prebuilt(self, job_id: str, service_id: str, requested_version: str):
@@ -1156,6 +1358,18 @@ class JobStore:
         if not package or not apt or not dpkg_deb:
             self._update(job_id, status="failed", message=f"No compatible prebuilt {service_id} package provider is available on this host. Choose source build instead.")
             return
+        # Ubuntu 24.04 renamed the runtime package because of the time_t
+        # transition. Keep Debian-family installs portable by selecting the
+        # package name that actually has a candidate on this architecture.
+        if service_id == "modsecurity":
+            apt_cache = shutil.which("apt-cache")
+            candidates = [package, "libmodsecurity3t64", "libmodsecurity3"]
+            if apt_cache:
+                for candidate in candidates:
+                    policy = subprocess.run([apt_cache, "policy", candidate], capture_output=True, text=True, check=False, timeout=8)
+                    if any(line.strip().startswith("Candidate:") and line.split(":", 1)[1].strip() not in {"", "(none)"} for line in policy.stdout.splitlines()):
+                        package = candidate
+                        break
         root = service_root(service_id)
         staging = root.parent / f".{service_id}-{job_id}-prebuilt"
         package_dir = staging / "packages"
@@ -1188,8 +1402,14 @@ class JobStore:
                         + (metadata_log[-1] if metadata_log else "apt update failed")
                     )
             exact_version = self._resolve_apt_version(package, requested_version)
-            self._update(job_id, status="running", progress=5, message=f"Downloading prebuilt {service_id} {requested_version}…", log=[f"$ apt-get download {package}={exact_version}"])
-            packages = [f"{package}={exact_version}"]
+            # Labels such as "system" are UI selectors, never valid APT
+            # versions. If the repository cannot expose a concrete version,
+            # let APT choose its compatible candidate rather than generating
+            # the invalid package expression package=system.
+            versioned_package = exact_version if exact_version not in {"", "system", "latest"} else None
+            package_request = f"{package}={versioned_package}" if versioned_package else package
+            self._update(job_id, status="running", progress=5, message=f"Downloading prebuilt {service_id} {requested_version}…", log=[f"$ apt download {package_request}"])
+            packages = [package_request]
             apt_cache = shutil.which("apt-cache")
             if apt_cache:
                 pending = [package]
@@ -1825,6 +2045,7 @@ class JobStore:
                 if not config.exists():
                     config.write_text(
                         f"{{\n    email admin@example.com\n    admin 127.0.0.1:2019\n    storage file-system {root / 'data'}\n}}\n\n"
+                        f"import {root / 'conf/sites/*.caddy'}\n\n"
                         f":80 {{\n    root * {root / 'www'}\n    encode zstd gzip\n    file_server\n    log {{ output file {root / 'logs/access.log'} }}\n}}\n"
                     )
             if service_id == "haproxy":
@@ -3053,8 +3274,12 @@ class JobStore:
             source = next((item for item in staging.iterdir() if item.is_dir()), staging)
             root.mkdir(parents=True, exist_ok=True)
             (root / "bin").mkdir(parents=True, exist_ok=True)
-            command = [go, "build", "-trimpath", "-ldflags", f"-X github.com/caddyserver/caddy/v2.CustomVersion=v{requested_version}", "-o", str(root / "bin/caddy"), "./cmd/caddy"]
-            self._update(job_id, progress=35, message=f"Building Caddy {requested_version} from source…", log=[f"$ {' '.join(command)}"])
+            xcaddy = shutil.which("xcaddy")
+            if xcaddy:
+                command = [xcaddy, "build", requested_version, "--with", "github.com/corazawaf/coraza-caddy/v2", "--output", str(root / "bin/caddy")]
+            else:
+                command = [go, "run", "github.com/caddyserver/xcaddy/cmd/xcaddy@latest", "build", requested_version, "--with", "github.com/corazawaf/coraza-caddy/v2", "--output", str(root / "bin/caddy")]
+            self._update(job_id, progress=35, message=f"Building Caddy {requested_version} with the Coraza Application Shield adapter…", log=[f"$ {' '.join(command)}"])
             build = subprocess.Popen(command, cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
             output = []
             for line in build.stdout or []:

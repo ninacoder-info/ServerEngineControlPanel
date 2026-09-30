@@ -17,6 +17,7 @@ export default function ServiceCard({
   onManage,
   pinned = false,
   onTogglePin,
+  installing = false,
 }) {
   const active = installed?.status === "running";
   const hostDependency = service.id === "docker";
@@ -96,22 +97,25 @@ export default function ServiceCard({
         <div className="service-actions">
           {hostDependency && installed ? null : capability ? (
             <a
-              href={service.id === "modsecurity" ? "/firewall#waf" : service.id === "ddos-protection" ? "/firewall#ddos" : service.id === "cloudflare" ? "/domains#cloudflare" : service.id === "malware-scanner" ? "/health#malware" : service.id === "clamav" ? "/health#clamav" : service.id === "lynis" ? "/health#lynis" : service.id === "node-exporter" ? "/health#node-exporter" : service.id === "logrotate" ? "/logs#logrotate" : service.id === "rabbitmq" ? "/services#rabbitmq" : service.id === "mongodb" ? "/databases#mongodb" : service.id === "sqlserver" ? "/databases#sqlserver" : service.id === "opensearch" ? "/services#opensearch" : service.id === "docker" ? "/services#docker" : service.id === "git" ? "/services#git" : service.id === "wp-cli" ? "/services#wp-cli" : service.id === "imagemagick" ? "/services#imagemagick" : service.id === "ffmpeg" ? "/services#ffmpeg" : service.id === "supervisor" ? "/services#supervisor" : service.id === "pm2" ? "/services#pm2" : service.id === "postfix" ? "/email#postfix" : service.id === "dovecot" ? "/email#dovecot" : service.id === "rspamd" ? "/email#rspamd" : service.id === "stalwart" ? "/email#stalwart" : service.id === "bind9" ? "/domains#bind" : service.id === "unbound" ? "/domains#unbound" : service.id === "auditd" ? "/logs#auditd" : service.management_path || "/settings"}
+              href={service.id === "modsecurity" ? "/application-shield" : service.id === "ddos-protection" ? "/firewall#ddos" : service.id === "cloudflare" ? "/domains#cloudflare" : service.id === "malware-scanner" ? "/health#malware" : service.id === "clamav" ? "/health#clamav" : service.id === "lynis" ? "/health#lynis" : service.id === "node-exporter" ? "/health#node-exporter" : service.id === "logrotate" ? "/logs#logrotate" : service.id === "rabbitmq" ? "/services#rabbitmq" : service.id === "mongodb" ? "/databases#mongodb" : service.id === "sqlserver" ? "/databases#sqlserver" : service.id === "opensearch" ? "/services#opensearch" : service.id === "docker" ? "/services#docker" : service.id === "git" ? "/services#git" : service.id === "wp-cli" ? "/services#wp-cli" : service.id === "imagemagick" ? "/services#imagemagick" : service.id === "ffmpeg" ? "/services#ffmpeg" : service.id === "supervisor" ? "/services#supervisor" : service.id === "pm2" ? "/services#pm2" : service.id === "postfix" ? "/email#postfix" : service.id === "dovecot" ? "/email#dovecot" : service.id === "rspamd" ? "/email#rspamd" : service.id === "stalwart" ? "/email#stalwart" : service.id === "bind9" ? "/domains#bind" : service.id === "unbound" ? "/domains#unbound" : service.id === "auditd" ? "/logs#auditd" : service.management_path || "/settings"}
               className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 py-2 text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
             >
-              {service.management_label || "Open controls"}
+              {service.id === "modsecurity" ? "Open Application Shield" : service.management_label || "Open controls"}
               <ExternalLink size={14} />
             </a>
           ) : (
             <button
               className="inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
+              disabled={installing}
               onClick={() =>
                 installed && !supportsMultipleVersions
                   ? onManage(service, installedVersions)
                   : onInstall(service)
               }
             >
-              {installed && supportsMultipleVersions ? (
+              {installing ? (
+                "Installing…"
+              ) : installed && supportsMultipleVersions ? (
                 "Install another version"
               ) : installed ? (
                 "Configure service"

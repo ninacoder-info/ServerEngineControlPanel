@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 
 WebsiteStatus = Literal["ready", "disabled", "error"]
-ServerType = Literal["nginx", "apache"]
+ServerType = Literal["nginx", "apache", "openlitespeed", "caddy"]
 FrameworkType = Literal["generic_php", "laravel", "wordpress", "symfony", "codeigniter", "custom"]
 
 
@@ -38,7 +38,7 @@ class WebsiteCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     domain: str = Field(min_length=3, max_length=253)
     aliases: list[str] = Field(default_factory=list, max_length=50)
-    project_path: str = Field(min_length=1, max_length=1024)
+    project_path: str = Field(default="", max_length=1024)
     web_root: str = Field(default=".", max_length=255)
     php_version: str = Field(default="", max_length=32)
     framework: FrameworkType = "generic_php"

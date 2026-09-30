@@ -270,6 +270,25 @@ def binary_path(service_id: str, version: str | None = None) -> Path:
     return root / SERVICE_BINARIES.get(service_id, f"usr/bin/{service_id}")
 
 
+def managed_library_environment(*roots: Path) -> dict[str, str]:
+    """Expose shared libraries from managed service roots only."""
+    directories: set[str] = set()
+    for root in roots:
+        if not root.exists():
+            continue
+        for candidate in root.rglob("*"):
+            if candidate.is_dir() and any(item.is_file() for item in candidate.glob("*.so*")):
+                directories.add(str(candidate))
+    environment = os.environ.copy()
+    existing = environment.get("LD_LIBRARY_PATH", "")
+    paths = sorted(directories)
+    if existing:
+        paths.append(existing)
+    if paths:
+        environment["LD_LIBRARY_PATH"] = ":".join(paths)
+    return environment
+
+
 def ensure_node_runtime(root: Path) -> None:
     node = root / "bin/node"
     real_node = root / "bin/node.bin"
