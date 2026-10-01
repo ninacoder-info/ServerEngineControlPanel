@@ -1,24 +1,32 @@
 import React from "react";
+import { z } from "zod";
 import {
   Archive,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   CirclePlus,
+  Copy,
   Database,
+  Download,
   ExternalLink,
+  Eye,
+  EyeOff,
   HardDrive,
   MoreHorizontal,
   RefreshCw,
   Search,
   ShieldCheck,
+  Trash2,
+  Upload,
   Users,
   X,
 } from "lucide-react";
 import { apiRequest, readApiError } from "../../lib/api";
+import ActionDialog from "../../components/ActionDialog";
 import Toast from "../../components/Toast";
 import ServiceNotInstalledState from "../../components/ServiceNotInstalledState";
 import { useServiceInstallationState } from "../../hooks/useServiceInstallationState";
+import ServiceManagerModal from "../services/ServiceManagerModal";
 
 const engines = [
   {
@@ -62,6 +70,22 @@ const field =
   "mt-2 block min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100";
 const card =
   "rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900";
+
+const databaseSchema = z.object({
+  name: z.string().trim().min(1, "Database name is required.").max(64, "Database name is too long.").regex(/^[A-Za-z0-9_$-]+$/, "Use only letters, numbers, underscore, hyphen, or dollar sign."),
+  engine: z.string().min(1, "Choose a database engine."),
+  charset: z.enum(["utf8mb4", "utf8", "latin1", "ascii"]),
+  username: z.string().trim().min(1, "Owner username is required.").max(32, "Owner username is too long.").regex(/^[A-Za-z0-9_$-]+$/, "Use only letters, numbers, underscore, hyphen, or dollar sign."),
+  password: z.string().min(12, "Use at least 12 characters for the owner password.").max(128, "Owner password is too long."),
+  backup: z.enum(["daily", "weekly", "manual"]),
+});
+
+function generateDatabasePassword() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*-_=+";
+  const values = new Uint32Array(16);
+  crypto.getRandomValues(values);
+  return Array.from(values, (value) => alphabet[value % alphabet.length]).join("");
+}
 
 function MongoWorkspace() {
   const initial = {
@@ -142,9 +166,6 @@ function EngineCard({ engine, selected, onSelect }) {
         <strong className="block text-sm font-semibold text-slate-900 dark:text-slate-100">
           {engine.name}
         </strong>
-        <small className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">
-          {engine.description}
-        </small>
         <small
           className={`mt-2 block text-xs font-semibold ${engine.installed ? "text-emerald-600 dark:text-emerald-400" : "text-slate-400 dark:text-slate-500"}`}
         >
@@ -159,16 +180,35 @@ function EngineCard({ engine, selected, onSelect }) {
   );
 }
 
-function CreateDatabase({ onClose, onCreate }) {
+function CreateDatabase({ engine = "mysql", onClose, onCreate }) {
+  const engineName = engines.find((item) => item.id === engine)?.name || engine;
   const [form, setForm] = React.useState({
     name: "",
-    engine: "mysql",
+    charset: "utf8mb4",
     username: "",
     password: "",
-    backup: "daily",
+    backup: "manual",
   });
+  const [errors, setErrors] = React.useState({});
+  const [submitting, setSubmitting] = React.useState(false);
+  const usernameEdited = React.useRef(false);
   const change = (key, value) =>
     setForm((current) => ({ ...current, [key]: value }));
+  const inputClass = (key) => errors[key]
+    ? `${field} border-rose-500 focus:border-rose-500 focus:ring-rose-500/20 dark:border-rose-500`
+    : field;
+  const submit = async () => {
+    const result = databaseSchema.safeParse({ ...form, engine });
+    if (!result.success) {
+      setErrors(Object.fromEntries(result.error.issues.map((issue) => [issue.path[0], issue.message])));
+      return;
+    }
+    setErrors({});
+    setSubmitting(true);
+    const created = await onCreate({ ...result.data, id: crypto.randomUUID(), status: "Ready" });
+    setSubmitting(false);
+    if (created !== false) onClose();
+  };
   return (
     <div
       className="fixed inset-0 z-50 grid place-items-center bg-slate-950/60 p-4"
@@ -178,8 +218,7 @@ function CreateDatabase({ onClose, onCreate }) {
         className="w-full max-w-2xl rounded-xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900"
         onSubmit={(event) => {
           event.preventDefault();
-          onCreate({ ...form, id: crypto.randomUUID(), status: "Ready" });
-          onClose();
+          submit();
         }}
       >
         <div className="flex items-start justify-between gap-4">
@@ -188,11 +227,10 @@ function CreateDatabase({ onClose, onCreate }) {
               Database provisioning
             </p>
             <h2 className="mt-1 text-2xl font-semibold text-slate-900 dark:text-slate-100">
-              Create database
+              Create {engineName} database
             </h2>
             <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-              Define the engine, owner credentials, and backup policy for a new
-              database.
+              Define the owner credentials and backup policy for a new database.
             </p>
           </div>
           <button
@@ -207,65 +245,88 @@ function CreateDatabase({ onClose, onCreate }) {
           <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
             Database name
             <input
-              className={field}
-              required
+              className={inputClass("name")}
               value={form.name}
               onChange={(event) => change("name", event.target.value)}
+              onBlur={() => {
+                if (!usernameEdited.current && form.name.trim()) {
+                  change("username", form.name.trim());
+                }
+              }}
               placeholder="production_app"
             />
+            {errors.name && <span className="mt-1 block text-xs font-medium text-rose-600 dark:text-rose-400">{errors.name}</span>}
           </label>
-          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-            Database engine
-            <select
-              className={field}
-              value={form.engine}
-              onChange={(event) => change("engine", event.target.value)}
-            >
-              {engines.map((engine) => (
-                <option key={engine.id} value={engine.id}>
-                  {engine.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          {engine !== "mongodb" && (
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+              Character set
+              <select
+                className={inputClass("charset")}
+                value={form.charset}
+                onChange={(event) => change("charset", event.target.value)}
+              >
+                <option value="utf8mb4">utf8mb4 · recommended</option>
+                <option value="utf8">utf8 · compatibility</option>
+                <option value="latin1">latin1 · legacy</option>
+                <option value="ascii">ascii · basic text</option>
+              </select>
+            </label>
+          )}
           <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
             Owner username
             <input
-              className={field}
-              required
+              className={inputClass("username")}
               value={form.username}
-              onChange={(event) => change("username", event.target.value)}
+              onChange={(event) => {
+                usernameEdited.current = true;
+                change("username", event.target.value);
+              }}
               placeholder="app_user"
             />
+            {errors.username && <span className="mt-1 block text-xs font-medium text-rose-600 dark:text-rose-400">{errors.username}</span>}
           </label>
           <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
             Owner password
-            <input
-              className={field}
-              required
-              type="password"
-              value={form.password}
-              onChange={(event) => change("password", event.target.value)}
-              placeholder="Generate a secure password"
-            />
+            <div className="group relative mt-2">
+              <input
+                className={`${inputClass("password")} mt-0 pr-12`}
+                type="text"
+                value={form.password}
+                onChange={(event) => change("password", event.target.value)}
+                placeholder="Generate a secure password"
+              />
+              <button type="button" aria-label="Generate secure password" className="absolute right-1 top-1/2 inline-flex h-9 w-9 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-blue-600 dark:hover:bg-slate-800 dark:hover:text-blue-400" onClick={() => change("password", generateDatabasePassword())}><RefreshCw size={15} /></button>
+              <span className="pointer-events-none absolute right-0 top-full z-10 mt-1 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-xs text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100 dark:bg-white dark:text-slate-900">Generate secure password</span>
+            </div>
+            {errors.password && <span className="mt-1 block text-xs font-medium text-rose-600 dark:text-rose-400">{errors.password}</span>}
           </label>
-          <label className="text-sm font-medium text-slate-700 dark:text-slate-300 md:col-span-2">
-            Backup schedule
-            <select
-              className={field}
-              value={form.backup}
-              onChange={(event) => change("backup", event.target.value)}
-            >
-              <option value="daily">Daily · retain 7 copies</option>
-              <option value="weekly">Weekly · retain 4 copies</option>
-              <option value="manual">Manual backups only</option>
-            </select>
-          </label>
+          <div className="text-sm text-slate-700 dark:text-slate-300 md:col-span-2">
+            <label className="flex cursor-pointer items-center gap-2 font-medium">
+              <input
+                type="checkbox"
+                checked={form.backup !== "manual"}
+                onChange={(event) => change("backup", event.target.checked ? "daily" : "manual")}
+                className="h-4 w-4 cursor-pointer accent-blue-600"
+              />
+              Enable backup schedule
+            </label>
+            {form.backup !== "manual" && (
+              <select
+                className={inputClass("backup")}
+                value={form.backup}
+                onChange={(event) => change("backup", event.target.value)}
+              >
+                <option value="daily">Daily · retain 7 copies</option>
+                <option value="weekly">Weekly · retain 4 copies</option>
+              </select>
+            )}
+            {errors.backup && <span className="mt-1 block text-xs font-medium text-rose-600 dark:text-rose-400">{errors.backup}</span>}
+          </div>
         </div>
         <div className="mt-6 flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400">
           <ShieldCheck size={18} className="mt-0.5 shrink-0 text-blue-500" />
           <span>
-            Credentials are shown once in the UI and should be stored in your
+            {engineName} credentials are shown once in the UI and should be stored in your
             application secret manager.
           </span>
         </div>
@@ -274,14 +335,198 @@ function CreateDatabase({ onClose, onCreate }) {
             type="button"
             className="rounded-md border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
             onClick={onClose}
+            disabled={submitting}
           >
             Cancel
           </button>
-          <button className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700">
-            <CirclePlus size={16} />
-            Create database
+          <button type="submit" disabled={submitting} className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-70">
+            {submitting ? <RefreshCw size={16} className="animate-spin" /> : <CirclePlus size={16} />}
+            {submitting ? "Creating…" : "Create database"}
           </button>
         </div>
+      </form>
+    </div>
+  );
+}
+
+function DatabaseBackupsModal({ database, archives, creating, onClose, onCreate, onDelete }) {
+  if (!database) return null;
+
+  const formatBytes = (bytes) => {
+    if (!bytes) return "—";
+    const units = ["B", "KB", "MB", "GB"];
+    const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+    return `${(bytes / 1024 ** index).toFixed(index ? 1 : 0)} ${units[index]}`;
+  };
+
+  const formatDate = (value) => {
+    if (!value) return "Waiting to run";
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+  };
+
+  const statusClass = (status) => {
+    if (status === "Verified") return "text-emerald-600 dark:text-emerald-400";
+    if (status === "Failed") return "text-rose-600 dark:text-rose-400";
+    return "text-amber-600 dark:text-amber-400";
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[80] flex items-start justify-center overflow-y-auto bg-slate-950/60 p-4 sm:p-8"
+      onMouseDown={(event) => event.target === event.currentTarget && !creating && onClose()}
+    >
+      <section className="w-full max-w-3xl overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+        <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400">
+              <Archive size={18} />
+            </span>
+            <div className="min-w-0">
+              <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">
+                Database backups
+              </p>
+              <h2 className="mt-1 truncate text-xl font-semibold text-slate-900 dark:text-slate-100">
+                {database.name}
+              </h2>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                Archives created for this database.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={creating}
+            aria-label="Close database backups"
+            className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+          >
+            <X size={17} />
+          </button>
+        </header>
+
+        <div className="p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/40">
+            <div>
+              <span className="text-xs text-slate-500 dark:text-slate-400">Stored archives</span>
+              <strong className="mt-0.5 block text-lg text-slate-900 dark:text-slate-100">{archives.length}</strong>
+            </div>
+            <button
+              type="button"
+              onClick={onCreate}
+              disabled={creating}
+              className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-70"
+            >
+              {creating ? <RefreshCw size={15} className="animate-spin" /> : <CirclePlus size={15} />}
+              {creating ? "Creating…" : "Create backup"}
+            </button>
+          </div>
+
+          {archives.length === 0 ? (
+            <div className="grid place-items-center py-12 text-center">
+              <Archive size={28} className="text-slate-300 dark:text-slate-600" />
+              <h3 className="mt-3 text-sm font-semibold text-slate-900 dark:text-slate-100">No backups yet</h3>
+              <p className="mt-1 max-w-sm text-sm text-slate-500 dark:text-slate-400">
+                Create a backup to archive this database in the Server Engine backup folder.
+              </p>
+            </div>
+          ) : (
+            <div className="mt-5 divide-y divide-slate-200 overflow-hidden rounded-lg border border-slate-200 dark:divide-slate-800 dark:border-slate-800">
+              {archives.map((archive) => (
+                <div key={archive.id} className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+                      {archive.name || archive.archive_name || `Database backup ${archive.id}`}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      {formatDate(archive.completed || archive.created)} · {formatBytes(archive.size)}
+                    </p>
+                    {archive.error && <p className="mt-1 truncate text-xs text-rose-600 dark:text-rose-400">{archive.error}</p>}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-3">
+                    <span className={`text-xs font-semibold ${statusClass(archive.status)}`}>
+                      {archive.status || "Queued"}
+                    </span>
+                    {archive.status === "Verified" && archive.verified && (
+                      <a
+                        href={`/api/v1/backups/${encodeURIComponent(archive.id)}/download`}
+                        download
+                        className="inline-flex cursor-pointer items-center gap-1.5 text-xs font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400"
+                      >
+                        <Download size={14} />
+                        Download
+                      </a>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => onDelete(archive)}
+                      className="inline-flex cursor-pointer items-center gap-1.5 text-xs font-semibold text-rose-600 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300"
+                    >
+                      <Trash2 size={14} />
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function DatabaseImportModal({ engine, targetDatabase: initialTargetDatabase, submitting, onClose, onSubmit }) {
+  const [file, setFile] = React.useState(null);
+  const [targetDatabase] = React.useState(initialTargetDatabase || "");
+  const inputRef = React.useRef(null);
+  const accepted = ".sql,.gz,.zip,.tar,.tgz";
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-slate-950/60 p-4 sm:p-8">
+      <form
+        className="w-full max-w-xl rounded-xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (file) onSubmit({ file, targetDatabase });
+        }}
+      >
+        <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Database inventory</p>
+            <h2 className="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">Import {engine} database</h2>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Queue an import using a file compatible with the selected engine.</p>
+          </div>
+          <button type="button" onClick={onClose} disabled={submitting} aria-label="Close import dialog" className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-slate-800 dark:hover:text-slate-200">
+            <X size={17} />
+          </button>
+        </header>
+        <div className="space-y-5 p-5">
+          <div>
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Backup file</label>
+            <div className={`mt-2 flex items-center gap-3 rounded-lg border border-dashed px-4 py-4 ${file ? "border-blue-300 bg-blue-50/50 dark:border-blue-700 dark:bg-blue-950/20" : "border-slate-300 dark:border-slate-700"}`}>
+              <Upload size={19} className="shrink-0 text-slate-400" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-slate-800 dark:text-slate-200">{file?.name || "Choose a database export"}</p>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">MySQL accepts SQL, gzip, ZIP, TAR, TAR.GZ, and TGZ files.</p>
+              </div>
+              <button type="button" onClick={() => inputRef.current?.click()} className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">Browse</button>
+              <input ref={inputRef} type="file" accept={accepted} className="hidden" onChange={(event) => setFile(event.target.files?.[0] || null)} />
+            </div>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/40">
+            <span className="block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Import into database</span>
+            <code className="mt-1.5 block text-sm font-semibold text-slate-900 dark:text-slate-100">{targetDatabase}</code>
+            <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">This target was selected from the database row.</span>
+          </div>
+        </div>
+        <footer className="flex justify-end gap-3 border-t border-slate-200 px-5 py-4 dark:border-slate-800">
+          <button type="button" onClick={onClose} disabled={submitting} className="cursor-pointer rounded-md px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed dark:text-slate-300 dark:hover:bg-slate-800">Cancel</button>
+          <button type="submit" disabled={!file || submitting} className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
+            {submitting ? <RefreshCw size={15} className="animate-spin" /> : <Upload size={15} />}
+            {submitting ? "Uploading…" : "Import database"}
+          </button>
+        </footer>
       </form>
     </div>
   );
@@ -295,56 +540,93 @@ export default function DatabasesPage() {
   const [engine, setEngine] = React.useState("mysql");
   const [query, setQuery] = React.useState("");
   const [modal, setModal] = React.useState(false);
+  const [backupModal, setBackupModal] = React.useState(null);
+  const [backupArchives, setBackupArchives] = React.useState([]);
+  const [backupCreating, setBackupCreating] = React.useState(false);
+  const [confirmDialog, setConfirmDialog] = React.useState(null);
+  const [importModal, setImportModal] = React.useState(null);
+  const [importSubmitting, setImportSubmitting] = React.useState(false);
+  const [serviceConfig, setServiceConfig] = React.useState(null);
+  const [serviceConfigLoading, setServiceConfigLoading] = React.useState(false);
   const [notice, setNotice] = React.useState("");
   const [toast, setToast] = React.useState(null);
   const [actionMenu, setActionMenu] = React.useState(null);
+  const [revealedCredentials, setRevealedCredentials] = React.useState({});
+  const credentialCache = React.useRef({});
   const [loading, setLoading] = React.useState(true);
   const [page, setPage] = React.useState(1);
   const databaseServiceState = useServiceInstallationState(engine);
   const pageSize = 10;
   const defaultEngineSelected = React.useRef(false);
-  React.useEffect(() => {
-    let alive = true;
-    const load = () => {
-      setLoading(true);
-      Promise.all([
-        apiRequest("/api/v1/databases/engines").then((response) =>
-          response.json(),
-        ),
-        apiRequest(
-          `/api/v1/databases?engine=${encodeURIComponent(engine)}`,
-        ).then((response) => response.json()),
-      ])
-        .then(([catalog, inventory]) => {
-          if (!alive) return;
-          setEngineCatalog(
-            catalog.map((item) => ({
-              ...engines.find((candidate) => candidate.id === item.id),
-              ...item,
-            })),
-          );
-          if (!defaultEngineSelected.current) {
-            const preferred =
-              catalog.find((item) => item.id === "mysql" && item.installed) ||
-              catalog.find((item) => item.installed) ||
-              catalog[0];
-            if (preferred && preferred.id !== engine) setEngine(preferred.id);
-            defaultEngineSelected.current = true;
-          }
-          setDatabases(inventory.databases || []);
-          setNotice("");
-          if (inventory.error) setToast({ type: "error", message: inventory.error });
-        })
-        .catch(() => alive && setToast({ type: "error", message: "Unable to load database inventory." }))
-        .finally(() => alive && setLoading(false));
-    };
-    load();
-    const timer = window.setInterval(load, 10000);
-    return () => {
-      alive = false;
-      window.clearInterval(timer);
-    };
+  const loadingRequest = React.useRef(false);
+  const refreshPending = React.useRef(false);
+  const load = React.useCallback(async () => {
+    if (loadingRequest.current) {
+      refreshPending.current = true;
+      return;
+    }
+    loadingRequest.current = true;
+    setLoading(true);
+    try {
+      const [catalogResponse, inventoryResponse, backupsResponse] = await Promise.all([
+        apiRequest("/api/v1/databases/engines"),
+        apiRequest(`/api/v1/databases?engine=${encodeURIComponent(engine)}`),
+        apiRequest("/api/v1/backups"),
+      ]);
+      const [catalog, inventory, backups] = await Promise.all([
+        catalogResponse.json(),
+        inventoryResponse.json(),
+        backupsResponse.ok ? backupsResponse.json() : Promise.resolve([]),
+      ]);
+      setEngineCatalog(
+        catalog.map((item) => ({
+          ...engines.find((candidate) => candidate.id === item.id),
+          ...item,
+        })),
+      );
+      if (!defaultEngineSelected.current) {
+        const preferred =
+          catalog.find((item) => item.id === "mysql" && item.installed) ||
+          catalog.find((item) => item.installed) ||
+          catalog[0];
+        if (preferred && preferred.id !== engine) setEngine(preferred.id);
+        defaultEngineSelected.current = true;
+      }
+      setDatabases(inventory.databases || []);
+      setBackupArchives(Array.isArray(backups) ? backups : []);
+      setNotice("");
+      if (inventory.error) setToast({ type: "error", message: inventory.error });
+    } catch {
+      setToast({ type: "error", message: "Unable to load database inventory." });
+    } finally {
+      loadingRequest.current = false;
+      setLoading(false);
+      if (refreshPending.current) {
+        refreshPending.current = false;
+        window.setTimeout(load, 0);
+      }
+    }
   }, [engine]);
+  React.useEffect(() => {
+    load();
+    const updateServiceStatus = (event) => {
+      const detail = event.detail || {};
+      if (!detail.serviceId || !ENGINE_SERVICES.some((item) => item.id === detail.serviceId)) return;
+      if (detail.status !== "succeeded") return;
+      setEngineCatalog((current) => current.map((item) => {
+        if (item.id !== detail.serviceId) return item;
+        if (detail.action === "install") return { ...item, installed: true, running: false, status: "stopped" };
+        if (detail.action === "uninstall") return { ...item, installed: false, running: false, status: "not-installed" };
+        if (["start", "restart", "stop"].includes(detail.action)) {
+          const running = detail.action !== "stop";
+          return { ...item, running, status: running ? "running" : "stopped" };
+        }
+        return item;
+      }));
+    };
+    window.addEventListener("serverengine:service-status", updateServiceStatus);
+    return () => window.removeEventListener("serverengine:service-status", updateServiceStatus);
+  }, [load]);
   React.useEffect(() => setPage(1), [engine, query]);
   const visible = databases.filter(
     (item) =>
@@ -354,12 +636,149 @@ export default function DatabasesPage() {
         .includes(query.toLowerCase()),
   );
   const selectedEngine = engineCatalog.find((item) => item.id === engine);
+  const isRedis = engine === "redis";
+  const canCreateDatabase = Boolean(
+    selectedEngine?.installed && selectedEngine.running && !databaseServiceState.loading,
+  );
+  const engineStopped = Boolean(
+    !loading && selectedEngine && databaseServiceState.installed && !selectedEngine.running,
+  );
   const pageCount = Math.max(1, Math.ceil(visible.length / pageSize));
   const pageRows = visible.slice((page - 1) * pageSize, page * pageSize);
   const createBackupJob = async (database) => {
     setActionMenu(null);
     const response = await apiRequest(`/api/v1/databases/${database.engine}/${encodeURIComponent(database.name)}/backup-job`, { method: "POST" });
     setNotice(response.ok ? `Daily backup job created for ${database.name}.` : await readApiError(response, "Unable to create backup job."));
+  };
+  const databaseBackups = (database) => backupArchives.filter(
+    (archive) =>
+      archive.status !== "Failed" &&
+      archive.scope === "database" &&
+      (archive.database_name === database.name ||
+        archive.target_id === database.name ||
+        archive.target_name === database.name),
+  );
+  const createDatabaseBackup = async (database) => {
+    setBackupCreating(true);
+    try {
+      const response = await apiRequest("/api/v1/backups", {
+        method: "POST",
+        body: JSON.stringify({
+          scope: "database",
+          destination: "local",
+          compression: "balanced",
+          target_type: "database",
+          target_id: database.name,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await readApiError(response, "Unable to create database backup."));
+      }
+      const entry = await response.json();
+      setBackupArchives((current) => [entry, ...current.filter((item) => item.id !== entry.id)]);
+      setToast({ type: "success", message: `Backup for ${database.name} queued.` });
+      window.setTimeout(load, 500);
+    } catch (error) {
+      setToast({ type: "error", message: error.message || "Unable to create database backup." });
+    } finally {
+      setBackupCreating(false);
+    }
+  };
+  const deleteDatabaseBackup = async (archive) => {
+    setConfirmDialog(null);
+    try {
+      const response = await apiRequest(`/api/v1/backups/${encodeURIComponent(archive.id)}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) {
+        throw new Error(await readApiError(response, "Unable to delete backup archive."));
+      }
+      setBackupArchives((current) => current.filter((item) => item.id !== archive.id));
+      setToast({ type: "success", message: "Backup archive deleted." });
+    } catch (error) {
+      setToast({ type: "error", message: error.message || "Unable to delete backup archive." });
+    }
+  };
+  const importDatabase = async ({ file, targetDatabase }) => {
+    setImportSubmitting(true);
+    try {
+      const payload = new FormData();
+      payload.append("file", file);
+      if (targetDatabase) payload.append("target_database", targetDatabase);
+      const response = await apiRequest(`/api/v1/databases/${encodeURIComponent(importModal.engine)}/import`, {
+        method: "POST",
+        body: payload,
+      });
+      if (!response.ok) throw new Error(await readApiError(response, "Unable to queue database import."));
+      setImportModal(null);
+      setToast({ type: "success", message: `Database import for ${file.name} queued.` });
+      window.dispatchEvent(new CustomEvent("serverengine:jobs-updated"));
+    } catch (error) {
+      setToast({ type: "error", message: error.message || "Unable to queue database import." });
+    } finally {
+      setImportSubmitting(false);
+    }
+  };
+  const openServiceConfig = async () => {
+    setServiceConfigLoading(true);
+    try {
+      const [catalogResponse, installedResponse] = await Promise.all([
+        apiRequest("/api/v1/services/catalog"),
+        apiRequest("/api/v1/services/installed"),
+      ]);
+      if (!catalogResponse.ok || !installedResponse.ok) {
+        throw new Error("Unable to load the service configuration.");
+      }
+      const [catalog, installed] = await Promise.all([
+        catalogResponse.json(),
+        installedResponse.json(),
+      ]);
+      const service = catalog.find((item) => item.id === engine);
+      if (!service) throw new Error(`${selectedEngine?.name || engine} configuration is unavailable.`);
+      const versions = installed.filter(
+        (item) => item.id === engine || item.id.startsWith(`${engine}@`),
+      );
+      setServiceConfig({ service, versions });
+    } catch (error) {
+      setToast({ type: "error", message: error.message || "Unable to load the service configuration." });
+    } finally {
+      setServiceConfigLoading(false);
+    }
+  };
+  const loadDatabaseCredentials = async (database) => {
+    if (credentialCache.current[database.id]) return credentialCache.current[database.id];
+    const response = await apiRequest(`/api/v1/databases/${database.engine}/${encodeURIComponent(database.name)}/credentials`);
+    if (!response.ok) throw new Error(await readApiError(response, "Unable to load database credentials."));
+    const credentials = await response.json();
+    credentialCache.current[database.id] = credentials;
+    return credentials;
+  };
+  const copyDatabaseCredential = async (database, credentialKey) => {
+    setActionMenu(null);
+    try {
+      const credentials = await loadDatabaseCredentials(database);
+      const value = credentials[credentialKey];
+      if (!value) throw new Error("That credential is not available.");
+      await navigator.clipboard.writeText(value);
+      setToast({
+        type: "success",
+        message: `${credentialKey === "username" ? "Username" : "Password"} copied.`,
+      });
+    } catch (error) {
+      setToast({ type: "error", message: error.message || "Unable to copy database credentials." });
+    }
+  };
+  const toggleDatabasePassword = async (database) => {
+    if (revealedCredentials[database.id]) {
+      setRevealedCredentials((current) => ({ ...current, [database.id]: false }));
+      return;
+    }
+    try {
+      await loadDatabaseCredentials(database);
+      setRevealedCredentials((current) => ({ ...current, [database.id]: true }));
+    } catch (error) {
+      setToast({ type: "error", message: error.message || "Unable to load database credentials." });
+    }
   };
   const storage = databases.reduce(
     (total, item) => total + (item.size || 0),
@@ -391,17 +810,61 @@ export default function DatabasesPage() {
             connections from one workspace.
           </p>
         </div>
-        <button
-          className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
-          onClick={() => setModal(true)}
-        >
-          <CirclePlus size={16} />
-          Create database
-        </button>
       </div>
       <section className="order-2 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <div className={card}>
-          <div className="flex items-center gap-3">
+        {isRedis ? (
+          <>
+            <div className={card}>
+              <div className="flex items-center gap-3">
+                <Database className="text-red-500" size={20} />
+                <span>
+                  <small className="block text-xs text-slate-500 dark:text-slate-400">Logical databases</small>
+                  <strong className="mt-1 block text-xl text-slate-900 dark:text-slate-100">—</strong>
+                </span>
+              </div>
+            </div>
+            <div className={card}>
+              <div className="flex items-center gap-3">
+                <Database className="text-violet-500" size={20} />
+                <span>
+                  <small className="block text-xs text-slate-500 dark:text-slate-400">Keys</small>
+                  <strong className="mt-1 block text-xl text-slate-900 dark:text-slate-100">—</strong>
+                </span>
+              </div>
+            </div>
+            <div className={card}>
+              <div className="flex items-center gap-3">
+                <HardDrive className="text-amber-500" size={20} />
+                <span>
+                  <small className="block text-xs text-slate-500 dark:text-slate-400">Memory used</small>
+                  <strong className="mt-1 block text-xl text-slate-900 dark:text-slate-100">—</strong>
+                </span>
+              </div>
+            </div>
+            <div className={card}>
+              <div className="flex items-center gap-3">
+                <Archive className="text-emerald-500" size={20} />
+                <span>
+                  <small className="block text-xs text-slate-500 dark:text-slate-400">Managed snapshots</small>
+                  <strong className="mt-1 block text-xl text-slate-900 dark:text-slate-100">0</strong>
+                </span>
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+        <div className={`${card} relative`}>
+          <button
+            type="button"
+            title={`Create ${selectedEngine?.name || "database"}`}
+            aria-label={`Create ${selectedEngine?.name || "database"}`}
+            onClick={() => setModal(true)}
+            disabled={!canCreateDatabase}
+            className={`absolute right-4 top-4 inline-flex h-8 w-8 items-center justify-center rounded-full ${canCreateDatabase ? "cursor-pointer text-blue-600 hover:bg-blue-50 hover:text-blue-700 dark:text-blue-400 dark:hover:bg-blue-950/40 dark:hover:text-blue-300" : "cursor-not-allowed text-slate-300 dark:text-slate-600"}`}
+          >
+            <CirclePlus size={18} />
+          </button>
+          <div className="flex items-center gap-3 pr-8">
             <Database className="text-blue-500" size={20} />
             <span>
               <small className="block text-xs text-slate-500 dark:text-slate-400">
@@ -452,6 +915,8 @@ export default function DatabasesPage() {
             </span>
           </div>
         </div>
+          </>
+        )}
       </section>
       <section className={`${card} order-1`}>
         <div className="flex items-start justify-between gap-4">
@@ -484,10 +949,14 @@ export default function DatabasesPage() {
         <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
           <div>
             <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
-              Database inventory
+              {isRedis ? "Redis runtime" : "Database inventory"}
             </h3>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-              {visible.length === 0
+              {isRedis && !engineStopped
+                ? "Redis uses logical databases and keys rather than SQL databases and users."
+                : engineStopped
+                ? `${selectedEngine.name} must be running to inspect databases`
+                : visible.length === 0
                 ? "No database records"
                 : `Showing ${(page - 1) * pageSize + 1}-${Math.min(page * pageSize, visible.length)} of ${visible.length} database records`}
             </p>
@@ -499,17 +968,13 @@ export default function DatabasesPage() {
                 className="w-full bg-transparent text-sm text-slate-900 outline-none dark:text-slate-100"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search databases or users"
+                placeholder={isRedis ? "Search Redis keys (when metrics are connected)" : "Search databases or users"}
               />
             </label>
-            <button className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-300 px-3 py-2.5 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-300">
-              <ChevronDown size={15} />
-              More filters
-            </button>
           </div>
         </div>
-        <div className="mt-5 overflow-x-auto">
-          {selectedEngine && !databaseServiceState.installed ? (
+        <div className="relative mt-5 overflow-visible">
+          {selectedEngine && !databaseServiceState.loading && !databaseServiceState.installed ? (
             <ServiceNotInstalledState
               state={databaseServiceState}
               icon={Database}
@@ -517,10 +982,50 @@ export default function DatabasesPage() {
               title={`${selectedEngine.name} is not installed`}
               description={`Install ${selectedEngine.name} before managing databases with this engine.`}
               installLabel={`Install ${selectedEngine.name}`}
+              compact
             />
+          ) : engineStopped ? (
+            <div className="flex min-h-64 items-center justify-center border-t border-slate-200 px-5 py-12 dark:border-slate-800">
+              <div className="max-w-lg text-center">
+                <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-amber-50 text-amber-600 dark:bg-amber-950/30 dark:text-amber-400">
+                  <Database size={23} />
+                </div>
+                <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400">
+                  Database service stopped
+                </p>
+                <h4 className="mt-2 text-lg font-semibold text-slate-900 dark:text-slate-100">
+                  {selectedEngine.name} is not running
+                </h4>
+                <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                  Start {selectedEngine.name} before opening its database inventory. No database records are shown while the service is offline.
+                </p>
+                <div className="mt-5 flex flex-wrap justify-center gap-3">
+                  <button type="button" onClick={openServiceConfig} disabled={serviceConfigLoading} className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-70">
+                    {serviceConfigLoading && <RefreshCw size={15} className="animate-spin" />}
+                    {serviceConfigLoading ? "Loading configuration…" : "Open service configuration"}
+                  </button>
+                  <button type="button" onClick={load} className="inline-flex cursor-pointer items-center gap-2 rounded-md px-3.5 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800">
+                    <RefreshCw size={15} />
+                    Check again
+                  </button>
+                </div>
+              </div>
+            </div>
           ) : loading ? (
             <div className="border-t border-slate-200 py-16 text-center text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400">
               Loading database inventory…
+            </div>
+          ) : isRedis ? (
+            <div className="flex min-h-64 items-center justify-center border-t border-slate-200 px-5 py-12 dark:border-slate-800">
+              <div className="max-w-lg text-center">
+                <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400">
+                  <Database size={23} />
+                </div>
+                <h4 className="mt-4 text-lg font-semibold text-slate-900 dark:text-slate-100">Redis logical databases</h4>
+                <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                  Redis does not create SQL database records or database users. Use the Redis configuration and runtime views to manage logical databases, keys, memory, and persistence.
+                </p>
+              </div>
             </div>
           ) : (
             <table className="w-full min-w-[760px] border-collapse text-left">
@@ -528,7 +1033,7 @@ export default function DatabasesPage() {
                 <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:text-slate-400">
                   <th className="px-3 py-3 font-semibold">Database</th>
                   <th className="px-3 py-3 font-semibold">Engine</th>
-                  <th className="px-3 py-3 font-semibold">Owner</th>
+                  <th className="px-3 py-3 font-semibold">Credentials</th>
                   <th className="px-3 py-3 font-semibold">Backup</th>
                   <th className="px-3 py-3 font-semibold">Status</th>
                   <th className="px-3 py-3 text-right font-semibold">
@@ -549,10 +1054,38 @@ export default function DatabasesPage() {
                       {item.engine}
                     </td>
                     <td className="px-3 py-4 text-slate-600 dark:text-slate-400">
-                      {item.username}
+                      {item.credentials_saved ? (
+                        <div className="min-w-56 space-y-1">
+                          <div className="flex items-center gap-1.5 truncate text-xs">
+                            <span className="font-medium text-slate-500 dark:text-slate-400">User:</span>
+                            <span className="truncate">{item.username}</span>
+                            <button type="button" title="Copy username" aria-label={`Copy username for ${item.name}`} onClick={() => copyDatabaseCredential(item, "username")} className="inline-flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200">
+                              <Copy size={14} />
+                            </button>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-xs">
+                            <span className="font-medium text-slate-500 dark:text-slate-400">Pass:</span>
+                            <code className="max-w-36 truncate">{revealedCredentials[item.id] ? credentialCache.current[item.id]?.password : "••••••••••••"}</code>
+                            <button type="button" title={revealedCredentials[item.id] ? "Hide password" : "Show password"} aria-label={revealedCredentials[item.id] ? `Hide password for ${item.name}` : `Show password for ${item.name}`} onClick={() => toggleDatabasePassword(item)} className="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200">
+                              {revealedCredentials[item.id] ? <EyeOff size={14} /> : <Eye size={14} />}
+                            </button>
+                            <button type="button" title="Copy password" aria-label={`Copy password for ${item.name}`} onClick={() => copyDatabaseCredential(item, "password")} className="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200">
+                              <Copy size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      ) : "—"}
                     </td>
-                    <td className="px-3 py-4 text-slate-600 dark:text-slate-400">
-                      {item.backup}
+                    <td className="px-3 py-4">
+                      <button
+                        type="button"
+                        onClick={() => setBackupModal(item)}
+                        title={`View backups for ${item.name}`}
+                        className="inline-flex cursor-pointer items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                      >
+                        <Archive size={14} />
+                        {databaseBackups(item).length}
+                      </button>
                     </td>
                     <td className="px-3 py-4">
                       <span className="inline-flex items-center gap-2 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
@@ -561,23 +1094,42 @@ export default function DatabasesPage() {
                       </span>
                     </td>
                     <td className="px-3 py-4 text-right">
-                      <button type="button" onClick={() => setActionMenu(actionMenu === item.id ? null : item.id)} className="rounded-md p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">
-                        <MoreHorizontal size={17} />
-                      </button>
-                      {actionMenu === item.id && (
-                        <div className="relative z-10 ml-auto w-48 rounded-md border border-slate-200 bg-white py-1 text-left shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                      <div className="relative inline-flex" data-database-actions>
+                        <button
+                          type="button"
+                          aria-label={`More actions for ${item.name}`}
+                          aria-expanded={actionMenu === item.id}
+                          onClick={() => setActionMenu(actionMenu === item.id ? null : item.id)}
+                          className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                        >
+                          <MoreHorizontal size={17} />
+                        </button>
+                        {actionMenu === item.id && (
+                        <div className="absolute bottom-11 right-0 z-50 w-56 rounded-lg border border-slate-200 bg-white p-1 text-left shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                          {item.credentials_saved && (
+                            <button type="button" onClick={() => copyDatabaseCredential(item, "password")} className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800">
+                              <Copy size={15} /> Copy password
+                            </button>
+                          )}
                           <button type="button" onClick={() => createBackupJob(item)} className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800">
                             <Archive size={15} /> Create daily backup job
                           </button>
+                          <button type="button" onClick={() => { setActionMenu(null); setImportModal({ engine: item.engine, targetDatabase: item.name }); }} className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800">
+                            <Upload size={15} /> Import backup file
+                          </button>
+                          <button type="button" onClick={() => { setActionMenu(null); setBackupModal(item); }} className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800">
+                            <HardDrive size={15} /> View backup archives
+                          </button>
                         </div>
-                      )}
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
-          {!databaseServiceState.installed && selectedEngine
+          {isRedis || (!databaseServiceState.loading && !databaseServiceState.installed || engineStopped) && selectedEngine
             ? null
             : !loading &&
               visible.length === 0 && (
@@ -642,6 +1194,7 @@ export default function DatabasesPage() {
       />
       {modal && (
         <CreateDatabase
+          engine={engine}
           onClose={() => setModal(false)}
           onCreate={async (database) => {
             const response = await apiRequest("/api/v1/databases", {
@@ -652,13 +1205,56 @@ export default function DatabasesPage() {
               setNotice(
                 await readApiError(response, "Unable to create database."),
               );
-              return;
+              return false;
             }
-            setNotice("Database created successfully.");
-            setEngine("mysql");
+            const result = await response.json();
+            setNotice(result.backup_job
+              ? `Database created. ${database.backup === "weekly" ? "Weekly" : "Daily"} backup cron created.`
+              : "Database created successfully.");
+            setEngine(database.engine);
+            await load();
+            return true;
           }}
         />
       )}
+      {backupModal && (
+        <DatabaseBackupsModal
+          database={backupModal}
+          archives={databaseBackups(backupModal)}
+          creating={backupCreating}
+          onClose={() => setBackupModal(null)}
+          onCreate={() => createDatabaseBackup(backupModal)}
+          onDelete={(archive) => setConfirmDialog({
+            kind: "confirm",
+            tone: "danger",
+            title: "Delete backup archive?",
+            message: `Delete ${archive.name || "this backup archive"}? This cannot be undone.`,
+            submitLabel: "Delete archive",
+            onSubmit: () => deleteDatabaseBackup(archive),
+          })}
+        />
+      )}
+      {importModal && (
+        <DatabaseImportModal
+          engine={importModal.engine}
+          targetDatabase={importModal.targetDatabase}
+          submitting={importSubmitting}
+          onClose={() => setImportModal(null)}
+          onSubmit={importDatabase}
+        />
+      )}
+      {serviceConfig && (
+        <ServiceManagerModal
+          service={serviceConfig.service}
+          installed={serviceConfig.versions}
+          onClose={() => setServiceConfig(null)}
+        />
+      )}
+      <ActionDialog
+        dialog={confirmDialog}
+        onClose={() => setConfirmDialog(null)}
+        onSubmit={() => confirmDialog?.onSubmit?.()}
+      />
     </div>
   );
 }

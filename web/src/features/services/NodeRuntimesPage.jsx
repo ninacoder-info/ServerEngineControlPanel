@@ -1,6 +1,5 @@
 import React from "react";
-import { Check, CheckCircle2, ChevronRight, CircleStop, Copy, Download, MoreHorizontal, RefreshCw, Server, Trash2, X } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { Check, CheckCircle2, CircleStop, Copy, Download, MoreHorizontal, RefreshCw, Server, Trash2, X } from "lucide-react";
 import { apiRequest } from "../../lib/api";
 import ServiceNotInstalledState from "../../components/ServiceNotInstalledState";
 import { useServiceInstallationState } from "../../hooks/useServiceInstallationState";
@@ -9,7 +8,6 @@ import InstallServiceModal from "./InstallServiceModal";
 const linkButton = "inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2 py-2 text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300";
 
 export default function NodeRuntimesPage({ modal = false, onClose }) {
-  const navigate = useNavigate();
   const nodeState = useServiceInstallationState("nodejs");
   const [service, setService] = React.useState(null);
   const [installed, setInstalled] = React.useState([]);
@@ -96,7 +94,6 @@ export default function NodeRuntimesPage({ modal = false, onClose }) {
           </div>
         ) : (
           <>
-            <nav aria-label="Breadcrumb"><ol className="flex items-center gap-1.5 text-sm text-slate-500 dark:text-slate-400"><li><button type="button" className="font-medium hover:text-blue-600 dark:hover:text-blue-400" onClick={() => navigate("/services")}>Services</button></li><li aria-hidden="true"><ChevronRight size={15} /></li><li className="font-medium text-slate-900 dark:text-slate-100" aria-current="page">Node.js runtimes</li></ol></nav>
             <div className="flex items-start justify-between gap-4"><div><p className="text-sm text-cyan-300">Application runtimes</p><h2 className="mt-1 flex items-center gap-2 text-3xl font-semibold tracking-tight"><Server size={25} />Node.js runtimes</h2><p className="mt-2 text-slate-400">Install and manage multiple Node.js versions side by side.</p></div><button type="button" disabled={!service || loading} className={`${linkButton} bg-blue-600 text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60`} onClick={() => setSelected({ service })}><Download size={14} />Install</button></div>
           </>
         )}

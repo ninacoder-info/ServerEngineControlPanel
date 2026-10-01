@@ -4,6 +4,7 @@ import {
   FileCog,
   Gauge,
   Globe2,
+  PackageOpen,
   RefreshCw,
   ShieldCheck,
   TerminalSquare,
@@ -12,9 +13,11 @@ import {
 import { apiRequest, readApiError } from "../../lib/api";
 import ConfigEditor from "./ConfigEditor";
 import StartupPolicyToggle from "./StartupPolicyToggle";
+import InstallServiceModal from "./InstallServiceModal";
 
 const tabs = [
   ["sites", "Sites", Globe2],
+  ["versions", "Versions", PackageOpen],
   ["https", "Automatic HTTPS", ShieldCheck],
   ["proxy", "Reverse proxy", Activity],
   ["performance", "Performance", Gauge],
@@ -148,7 +151,7 @@ function SaveButton({ busy, onClick, children }) {
   );
 }
 
-export default function CaddyConfigModal({ installed, onClose }) {
+export default function CaddyConfigModal({ service, installed, onClose }) {
   const current = Array.isArray(installed)
     ? installed.find((item) => item.status === "running") || installed[0]
     : installed;
@@ -160,6 +163,18 @@ export default function CaddyConfigModal({ installed, onClose }) {
   const [action, setAction] = React.useState("");
   const [message, setMessage] = React.useState("");
   const [logs, setLogs] = React.useState(null);
+  const [caddyVersions, setCaddyVersions] = React.useState([]);
+  const [activeCaddyVersion, setActiveCaddyVersion] = React.useState("");
+  const [showInstaller, setShowInstaller] = React.useState(false);
+  const loadCaddyVersions = React.useCallback(() => {
+    apiRequest("/api/v1/services/caddy/versions")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((value) => {
+        setCaddyVersions(value?.versions || []);
+        setActiveCaddyVersion(value?.active_version || "");
+      })
+      .catch(() => {});
+  }, []);
   const loadConfig = React.useCallback(
     () =>
       apiRequest("/api/v1/services/caddy/configuration")
@@ -179,6 +194,20 @@ export default function CaddyConfigModal({ installed, onClose }) {
   React.useEffect(() => {
     loadConfig();
   }, [loadConfig]);
+  React.useEffect(() => {
+    if (tab === "versions") loadCaddyVersions();
+  }, [tab, loadCaddyVersions]);
+  async function makeDefault(version) {
+    const response = await apiRequest("/api/v1/services/caddy/default", {
+      method: "PUT",
+      body: JSON.stringify({ version }),
+    });
+    const body = response.ok
+      ? await response.json()
+      : { message: await readApiError(response) };
+    setMessage(body.message || "Unable to change the Caddy default version.");
+    if (response.ok) loadCaddyVersions();
+  }
   React.useEffect(() => {
     if (tab !== "logs") return undefined;
     const load = () =>
@@ -287,6 +316,49 @@ export default function CaddyConfigModal({ installed, onClose }) {
           ))}
         </div>
         <div className="pt-5">
+          {tab === "versions" && (
+            <div className="space-y-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                    Caddy versions
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                    Install a prebuilt Caddy binary or build one with the Application Shield adapter. Only the selected default runs.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className={`${buttonClass} bg-blue-600 text-white hover:bg-blue-700`}
+                  onClick={() => setShowInstaller(true)}
+                >
+                  <PackageOpen size={15} />
+                  Install version
+                </button>
+              </div>
+              <div className="divide-y divide-slate-200 border-y border-slate-200 dark:divide-slate-800 dark:border-slate-800">
+                {caddyVersions.length ? caddyVersions.map((item) => (
+                  <div key={`${item.version}-${item.path}`} className="flex items-center justify-between gap-4 py-4">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-medium text-slate-900 dark:text-slate-100">Caddy {item.version}</p>
+                        {item.active && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">Default</span>}
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">{item.install_method === "source" ? "Build from source" : "Prebuilt package"}</span>
+                      </div>
+                      <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">{item.path}</p>
+                    </div>
+                    {!item.active && (
+                      <button type="button" className="shrink-0 cursor-pointer text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400" onClick={() => makeDefault(item.version)}>
+                        Make default
+                      </button>
+                    )}
+                  </div>
+                )) : (
+                  <p className="py-6 text-sm text-slate-500 dark:text-slate-400">No managed Caddy versions are available yet.</p>
+                )}
+              </div>
+            </div>
+          )}
           {tab === "sites" && (
             <div className="space-y-5">
               <div>
@@ -573,6 +645,15 @@ export default function CaddyConfigModal({ installed, onClose }) {
           </p>
         )}
       </section>
+      {showInstaller && (
+        <InstallServiceModal
+          service={service || { id: "caddy", name: "Caddy", install_methods: ["prebuilt", "source"] }}
+          onClose={() => {
+            setShowInstaller(false);
+            loadCaddyVersions();
+          }}
+        />
+      )}
     </div>
   );
 }

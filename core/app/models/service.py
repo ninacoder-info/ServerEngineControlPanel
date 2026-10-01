@@ -61,6 +61,11 @@ class ConfigurationSaveRequest(BaseModel):
     content: str = Field(max_length=2_000_000)
 
 
+class StalwartStorageRequest(BaseModel):
+    data_store: Literal["RocksDB", "SQLite", "PostgreSQL", "MySQL/MariaDB"] = "RocksDB"
+    data_directory: str = Field(default="/opt/server-engine/services/stalwart/data", min_length=1, max_length=512)
+
+
 class ExtensionInstallRequest(BaseModel):
     extension: str = Field(min_length=2, max_length=32, pattern=r"^[a-z0-9_-]+$")
     confirmed: bool = False

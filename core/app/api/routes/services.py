@@ -1,8 +1,11 @@
 import os
+import json
 import re
 import shutil
+import shlex
 import subprocess
 import math
+import uuid
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import HTMLResponse
 
 from app.api.dependencies import require_user
-from app.models.service import ConfigurationSaveRequest, ExtensionInstallRequest, InstallServiceRequest, InstalledService, ServiceActionRequest, ServiceDefinition, SwitchVersionRequest
+from app.models.service import ConfigurationSaveRequest, ExtensionInstallRequest, InstallServiceRequest, InstalledService, ServiceActionRequest, ServiceDefinition, StalwartStorageRequest, SwitchVersionRequest
 from app.services.service_catalog import CATALOG, PHP_EXTENSIONS, get_service, refresh_service_versions
 from app.services.job_service import job_store
 from app.services.service_runtime import PHP_BASELINE_MODULES, SERVICE_PACKAGES, binary_path, composer_path, composer_php_version, default_startup_enabled, enable_php_baseline_extensions, ensure_composer_launcher, ensure_nginx_layout, ensure_node_runtime, ensure_php_fpm_layout, ensure_php_runtime_launcher, ensure_php_terminal_launcher, normalize_php_runtime_layout, nginx_default_configuration, nginx_paths, php_cli_path, php_runtime_library_path, service_root, set_startup_enabled, startup_enabled, version_sort_key
@@ -19,6 +22,26 @@ from app.services.service_runtime import PHP_BASELINE_MODULES, SERVICE_PACKAGES,
 router = APIRouter(prefix="/api/v1/services", tags=["services"])
 
 NON_DAEMON_SERVICES = {"git", "imagemagick", "ffmpeg", "ruby", "lynis"}
+
+
+@router.put("/stalwart/storage")
+def save_stalwart_storage(payload: StalwartStorageRequest, user=Depends(require_user)):
+    root = service_root("stalwart").resolve()
+    data_directory = Path(payload.data_directory).expanduser().resolve()
+    if root not in data_directory.parents and data_directory != root:
+        raise HTTPException(422, "Stalwart storage must remain inside its service directory")
+    if not (root / "bin/stalwart").exists():
+        raise HTTPException(409, "Install Stalwart before configuring mailbox storage")
+    (root / "conf").mkdir(parents=True, exist_ok=True)
+    data_directory.mkdir(parents=True, exist_ok=True)
+    storage = {"data_store": payload.data_store, "data_directory": str(data_directory)}
+    (root / "conf/storage.json").write_text(json.dumps(storage, indent=2) + "\n")
+    return {"saved": True, **storage, "message": f"{payload.data_store} storage is prepared for Stalwart."}
+
+
+def _sanitize_apache_configuration(content: str) -> str:
+    """Remove module directives for modules compiled into Apache itself."""
+    return re.sub(r"(?mi)^\s*LoadModule\s+unixd_module\s+[^\n]*(?:\n|$)", "", content)
 
 
 def _configured_service_port(service_id: str) -> int:
@@ -30,6 +53,57 @@ def _configured_service_port(service_id: str) -> int:
         return defaults.get(service_id, 0)
     match = re.search(r"(?mi)^\s*port\s*=\s*(\d+)\s*$", content)
     return int(match.group(1)) if match else defaults.get(service_id, 0)
+
+
+def _docker_compose_preview(item: dict, config: dict, host_config: dict, ports: dict) -> str:
+    """Render the inspected container as a safe, readable Compose preview."""
+    name = str(item.get("Name", "container")).lstrip("/")
+    lines = ["services:", f"  {name}:"]
+
+    def add_scalar(key: str, value: str):
+        if value:
+            lines.append(f"    {key}: {json.dumps(value)}")
+
+    add_scalar("image", str(config.get("Image") or ""))
+    add_scalar("container_name", name)
+    add_scalar("restart", str((host_config.get("RestartPolicy") or {}).get("Name") or "no"))
+
+    port_lines = []
+    for container_port, bindings in (ports or {}).items():
+        for binding in bindings or []:
+            host_ip = binding.get("HostIp") or "0.0.0.0"
+            host_port = binding.get("HostPort")
+            if host_port:
+                port_lines.append(f"{host_ip}:{host_port}:{container_port.split('/')[0]}/{container_port.split('/')[-1]}")
+    if port_lines:
+        lines.append("    ports:")
+        lines.extend(f"      - {json.dumps(value)}" for value in port_lines)
+
+    mounts = item.get("Mounts") or []
+    if mounts:
+        lines.append("    volumes:")
+        for mount in mounts:
+            source = mount.get("Source") or mount.get("Name") or ""
+            destination = mount.get("Destination") or ""
+            mode = mount.get("Mode") or "rw"
+            lines.append(f"      - {json.dumps(f'{source}:{destination}:{mode}')}" )
+
+    environment = config.get("Env") or []
+    if environment:
+        lines.append("    environment:")
+        for entry in environment:
+            lines.append(f"      - {json.dumps(entry)}")
+
+    command = config.get("Cmd") or []
+    if command:
+        lines.append("    command:")
+        lines.extend(f"      - {json.dumps(str(value))}" for value in command)
+
+    entrypoint = config.get("Entrypoint") or []
+    if entrypoint:
+        lines.append("    entrypoint:")
+        lines.extend(f"      - {json.dumps(str(value))}" for value in entrypoint)
+    return "\n".join(lines) + "\n"
 
 
 @router.get("/{service_id}/startup")
@@ -374,6 +448,133 @@ def refresh_versions(service_id: str, install_method: str = Query(default="sourc
     }
 
 
+@router.get("/apache/versions")
+def apache_versions(user=Depends(require_user)):
+    """List every managed Apache version and identify the active default."""
+    base = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / "apache"
+    active_marker = base / ".serverengine-active-version"
+    active = active_marker.read_text(errors="replace").strip() if active_marker.exists() else None
+    values = []
+    versions_root = base / "versions"
+    if versions_root.exists():
+        for version_root in sorted((item for item in versions_root.iterdir() if item.is_dir()), key=lambda item: version_sort_key(item.name), reverse=True):
+            binary = version_root / "bin/httpd"
+            if not binary.exists():
+                continue
+            marker = version_root / ".serverengine-version"
+            version = marker.read_text(errors="replace").strip() if marker.exists() else version_root.name
+            method_marker = version_root / ".serverengine-install-method"
+            method = method_marker.read_text(errors="replace").strip() if method_marker.exists() else "source"
+            values.append({"version": version, "path": str(version_root), "install_method": method, "active": active == version, "status": "running" if active == version and _process_running("apache") else "stopped"})
+    legacy_binary = next(
+        (candidate for candidate in (base / "bin/httpd", base / "usr/sbin/apache2") if candidate.exists()),
+        base / "bin/httpd",
+    )
+    if legacy_binary.exists() and not values:
+        marker = base / ".serverengine-version"
+        version = marker.read_text(errors="replace").strip() if marker.exists() else "unknown"
+        method_marker = base / ".serverengine-install-method"
+        method = method_marker.read_text(errors="replace").strip() if method_marker.exists() else "source"
+        values.append({"version": version, "path": str(base), "install_method": method, "active": True, "status": "running" if _process_running("apache") else "stopped"})
+    return {"active_version": active or (values[0]["version"] if values else None), "versions": values}
+
+
+@router.put("/apache/default")
+def set_apache_default(payload: dict, user=Depends(require_user)):
+    version = str(payload.get("version") or "").strip()
+    base = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / "apache"
+    target = base / "versions" / version
+    if not (target / "bin/httpd").exists():
+        raise HTTPException(status_code=404, detail="That Apache version is not installed")
+    current = service_root("apache")
+    if current != target and _process_running("apache"):
+        raise HTTPException(status_code=409, detail="Stop the running Apache version before changing the default version.")
+    (base / ".serverengine-active-version").write_text(version + "\n")
+    return {"active_version": version, "message": f"Apache {version} is now the default runtime."}
+
+
+@router.get("/redis/versions")
+def redis_versions(user=Depends(require_user)):
+    """List managed Redis runtimes and identify the active default."""
+    base = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / "redis"
+    active_marker = base / ".serverengine-active-version"
+    active = active_marker.read_text(errors="replace").strip() if active_marker.exists() else None
+    values = []
+    versions_root = base / "versions"
+    if versions_root.exists():
+        for version_root in sorted((item for item in versions_root.iterdir() if item.is_dir()), key=lambda item: version_sort_key(item.name), reverse=True):
+            binary = version_root / "usr/bin/redis-server"
+            if not binary.exists():
+                continue
+            marker = version_root / ".serverengine-version"
+            version = marker.read_text(errors="replace").strip() if marker.exists() else version_root.name
+            method_marker = version_root / ".serverengine-install-method"
+            method = method_marker.read_text(errors="replace").strip() if method_marker.exists() else "source"
+            values.append({"version": version, "path": str(version_root), "install_method": method, "active": active == version, "status": "running" if active == version and _process_running("redis") else "stopped"})
+    legacy_binary = binary_path("redis")
+    if legacy_binary.exists() and not values:
+        marker = base / ".serverengine-version"
+        version = marker.read_text(errors="replace").strip() if marker.exists() else "unknown"
+        method_marker = base / ".serverengine-install-method"
+        method = method_marker.read_text(errors="replace").strip() if method_marker.exists() else "source"
+        values.append({"version": version, "path": str(base), "install_method": method, "active": True, "status": "running" if _process_running("redis") else "stopped"})
+    return {"active_version": active or (values[0]["version"] if values else None), "versions": values}
+
+
+@router.put("/redis/default")
+def set_redis_default(payload: dict, user=Depends(require_user)):
+    version = str(payload.get("version") or "").strip()
+    base = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / "redis"
+    target = base / "versions" / version
+    if not (target / "usr/bin/redis-server").exists():
+        raise HTTPException(status_code=404, detail="That Redis version is not installed")
+    if service_root("redis") != target and _process_running("redis"):
+        raise HTTPException(status_code=409, detail="Stop the running Redis version before changing the default version.")
+    (base / ".serverengine-active-version").write_text(version + "\n")
+    return {"active_version": version, "message": f"Redis {version} is now the default runtime."}
+
+
+@router.get("/caddy/versions")
+def caddy_versions(user=Depends(require_user)):
+    """List managed Caddy runtimes and identify the active default."""
+    base = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / "caddy"
+    active_marker = base / ".serverengine-active-version"
+    active = active_marker.read_text(errors="replace").strip() if active_marker.exists() else None
+    values = []
+    versions_root = base / "versions"
+    if versions_root.exists():
+        for version_root in sorted((item for item in versions_root.iterdir() if item.is_dir()), key=lambda item: version_sort_key(item.name), reverse=True):
+            binary = next((candidate for candidate in (version_root / "bin/caddy", version_root / "usr/bin/caddy") if candidate.exists()), version_root / "bin/caddy")
+            if not binary.exists():
+                continue
+            marker = version_root / ".serverengine-version"
+            version = marker.read_text(errors="replace").strip() if marker.exists() else version_root.name
+            method_marker = version_root / ".serverengine-install-method"
+            method = method_marker.read_text(errors="replace").strip() if method_marker.exists() else "source"
+            values.append({"version": version, "path": str(version_root), "install_method": method, "active": active == version, "status": "running" if active == version and _process_running("caddy") else "stopped"})
+    legacy_binary = next((candidate for candidate in (base / "bin/caddy", base / "usr/bin/caddy") if candidate.exists()), base / "bin/caddy")
+    if legacy_binary.exists() and not values:
+        marker = base / ".serverengine-version"
+        version = marker.read_text(errors="replace").strip() if marker.exists() else "unknown"
+        method_marker = base / ".serverengine-install-method"
+        method = method_marker.read_text(errors="replace").strip() if method_marker.exists() else "source"
+        values.append({"version": version, "path": str(base), "install_method": method, "active": True, "status": "running" if _process_running("caddy") else "stopped"})
+    return {"active_version": active or (values[0]["version"] if values else None), "versions": values}
+
+
+@router.put("/caddy/default")
+def set_caddy_default(payload: dict, user=Depends(require_user)):
+    version = str(payload.get("version") or "").strip()
+    base = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / "caddy"
+    target = base / "versions" / version
+    if not (target / "bin/caddy").exists():
+        raise HTTPException(status_code=404, detail="That Caddy version is not installed")
+    if service_root("caddy") != target and _process_running("caddy"):
+        raise HTTPException(status_code=409, detail="Stop the running Caddy version before changing the default version.")
+    (base / ".serverengine-active-version").write_text(version + "\n")
+    return {"active_version": version, "message": f"Caddy {version} is now the default runtime."}
+
+
 @router.get("/installed", response_model=list[InstalledService])
 def installed(user=Depends(require_user)):
     detected = [InstalledService(id="server-engine", name="Server Engine", version="0.1.0", status="running", managed=True)]
@@ -442,6 +643,58 @@ def installed(user=Depends(require_user)):
                     if version is not None:
                         detected.append(InstalledService(id=f"python@{version_root.name}", name=f"Python {version_root.name}", version=version_root.name, status="installed", managed=False))
             continue
+        if service_id == "apache":
+            apache_base = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / "apache"
+            active_marker = apache_base / ".serverengine-active-version"
+            active = active_marker.read_text(errors="replace").strip() if active_marker.exists() else None
+            versions_root = apache_base / "versions"
+            found = False
+            if versions_root.exists():
+                definition = get_service(service_id)
+                for version_root in sorted((item for item in versions_root.iterdir() if item.is_dir()), key=lambda item: version_sort_key(item.name), reverse=True):
+                    binary = version_root / "bin/httpd"
+                    if not binary.exists():
+                        continue
+                    found = True
+                    marker = version_root / ".serverengine-version"
+                    version = marker.read_text(errors="replace").strip() if marker.exists() else version_root.name
+                    detected.append(InstalledService(id="apache", name=definition.name if definition else "Apache HTTP Server", version=version, status="running" if active == version and _process_running("apache") else "stopped", managed=False))
+            if found:
+                continue
+        if service_id == "caddy":
+            caddy_base = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / "caddy"
+            active_marker = caddy_base / ".serverengine-active-version"
+            active = active_marker.read_text(errors="replace").strip() if active_marker.exists() else None
+            versions_root = caddy_base / "versions"
+            found = False
+            if versions_root.exists():
+                definition = get_service(service_id)
+                for version_root in sorted((item for item in versions_root.iterdir() if item.is_dir()), key=lambda item: version_sort_key(item.name), reverse=True):
+                    if not any((version_root / path).exists() for path in ("bin/caddy", "usr/bin/caddy")):
+                        continue
+                    found = True
+                    marker = version_root / ".serverengine-version"
+                    version = marker.read_text(errors="replace").strip() if marker.exists() else version_root.name
+                    detected.append(InstalledService(id="caddy", name=definition.name if definition else "Caddy", version=version, status="running" if active == version and _process_running("caddy") else "stopped", managed=False))
+            if found:
+                continue
+        if service_id == "redis":
+            redis_base = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / "redis"
+            active_marker = redis_base / ".serverengine-active-version"
+            active = active_marker.read_text(errors="replace").strip() if active_marker.exists() else None
+            versions_root = redis_base / "versions"
+            found = False
+            if versions_root.exists():
+                definition = get_service(service_id)
+                for version_root in sorted((item for item in versions_root.iterdir() if item.is_dir()), key=lambda item: version_sort_key(item.name), reverse=True):
+                    if not (version_root / "usr/bin/redis-server").exists():
+                        continue
+                    found = True
+                    marker = version_root / ".serverengine-version"
+                    version = marker.read_text(errors="replace").strip() if marker.exists() else version_root.name
+                    detected.append(InstalledService(id="redis", name=definition.name if definition else "Redis", version=version, status="running" if active == version and _process_running("redis") else "stopped", managed=False))
+            if found:
+                continue
         version = _installed_service_version(service_id, package)
         if version is None:
             continue
@@ -467,6 +720,475 @@ def installed(user=Depends(require_user)):
             version = marker.read_text(errors="replace").strip() if marker.exists() else version_root.name
             detected.append(InstalledService(id="wp-cli", name=definition.name if definition else "WP-CLI", version=version, status="installed", managed=False))
     return detected
+
+
+@router.get("/docker/overview")
+def docker_overview(user=Depends(require_user)):
+    """Return live Docker Engine data without inventing local workloads."""
+    docker = shutil.which("docker")
+    if not docker:
+        return {
+            "installed": False,
+            "running": False,
+            "version": None,
+            "containers": [],
+            "images_list": [],
+            "volumes_list": [],
+            "networks_list": [],
+            "compose_list": [],
+            "images": 0,
+            "volumes": 0,
+            "networks": 0,
+            "error": "Docker Engine is not installed or is not available to Server Engine.",
+        }
+
+    version_result = subprocess.run([docker, "--version"], capture_output=True, text=True, check=False)
+    version_match = re.search(r"Docker version\s+([^,\s]+)", version_result.stdout or "")
+    info_result = subprocess.run([docker, "info"], capture_output=True, text=True, check=False)
+    if info_result.returncode != 0:
+        return {
+            "installed": True,
+            "running": False,
+            "version": version_match.group(1) if version_match else None,
+            "containers": [],
+            "images_list": [],
+            "volumes_list": [],
+            "networks_list": [],
+            "compose_list": [],
+            "images": 0,
+            "volumes": 0,
+            "networks": 0,
+            "error": (info_result.stderr or "Docker Engine is installed but not running.").strip(),
+        }
+
+    def count(resource: str) -> int:
+        result = subprocess.run([docker, resource, "ls", "-q"], capture_output=True, text=True, check=False)
+        return len([line for line in result.stdout.splitlines() if line.strip()]) if result.returncode == 0 else 0
+
+    container_result = subprocess.run(
+        [docker, "ps", "-a", "--format", "{{json .}}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    container_items = []
+    for line in container_result.stdout.splitlines():
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        container_items.append(item)
+
+    container_paths = {}
+    container_ids = [item.get("ID", "") for item in container_items if item.get("ID")]
+    if container_ids:
+        inspect_result = subprocess.run(
+            [docker, "inspect", "--format", "{{json .}}", *container_ids],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        for line in inspect_result.stdout.splitlines():
+            try:
+                inspected = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            inspected_id = inspected.get("Id", "")
+            bind_mounts = [
+                mount.get("Source", "")
+                for mount in inspected.get("Mounts", [])
+                if mount.get("Type") == "bind" and mount.get("Source")
+            ]
+            container_path = bind_mounts[0] if bind_mounts else ""
+            container_paths[inspected_id] = container_path
+            container_paths[inspected_id[:12]] = container_path
+
+    containers = []
+    for item in container_items:
+        status = item.get("Status", "")
+        containers.append({
+            "id": item.get("ID", ""),
+            "name": item.get("Names", ""),
+            "image": item.get("Image", ""),
+            "path": container_paths.get(item.get("ID", ""), ""),
+            "status": "Running" if status.lower().startswith("up") else "Stopped",
+            "status_detail": status,
+            "ports": item.get("Ports", "—") or "—",
+        })
+    containers.sort(key=lambda item: (item["name"].lower(), item["id"]))
+    def parse_size(value: str) -> int:
+        match = re.match(r"\s*([0-9.]+)\s*([kmgtpe]?i?b)?", value or "", re.IGNORECASE)
+        if not match:
+            return 0
+        units = {"b": 1, "kb": 1000, "kib": 1024, "mb": 1000**2, "mib": 1024**2, "gb": 1000**3, "gib": 1024**3, "tb": 1000**4, "tib": 1024**4}
+        return int(float(match.group(1)) * units.get((match.group(2) or "b").lower(), 1))
+
+    stats_result = subprocess.run(
+        [docker, "stats", "--no-stream", "--format", "{{json .}}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    cpu_percent = 0.0
+    memory_used = 0
+    memory_limit = 0
+    for line in stats_result.stdout.splitlines():
+        try:
+            stat = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        try:
+            cpu_percent += float(str(stat.get("CPUPerc", "0")).strip().rstrip("%"))
+        except ValueError:
+            pass
+        memory_parts = str(stat.get("MemUsage", "")).split("/")
+        if len(memory_parts) == 2:
+            memory_used += parse_size(memory_parts[0])
+            memory_limit += parse_size(memory_parts[1])
+    image_result = subprocess.run(
+        [docker, "image", "ls", "--format", "{{json .}}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    images_list = []
+    for line in image_result.stdout.splitlines():
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        images_list.append({
+            "repository": item.get("Repository", "<none>"),
+            "tag": item.get("Tag", "<none>"),
+            "id": item.get("ID", ""),
+            "created": item.get("CreatedSince", "—"),
+            "size": item.get("Size", "—"),
+        })
+    volume_result = subprocess.run(
+        [docker, "volume", "ls", "--format", "{{json .}}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    volumes_list = []
+    for line in volume_result.stdout.splitlines():
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        volume_name = item.get("Name", "")
+        volume_details = subprocess.run([docker, "volume", "inspect", volume_name], capture_output=True, text=True, check=False)
+        volume_inspect = {}
+        if volume_details.returncode == 0:
+            try:
+                volume_inspect = json.loads(volume_details.stdout)[0]
+            except (json.JSONDecodeError, IndexError):
+                pass
+        mountpoint = volume_inspect.get("Mountpoint") or ""
+        size_result = subprocess.run(["du", "-sb", mountpoint], capture_output=True, text=True, check=False) if mountpoint else None
+        size_bytes = 0
+        if size_result and size_result.returncode == 0:
+            try:
+                size_bytes = int(size_result.stdout.split()[0])
+            except (ValueError, IndexError):
+                pass
+        volumes_list.append({
+            "name": volume_name,
+            "driver": item.get("Driver", "local"),
+            "scope": item.get("Scope", "local"),
+            "created": volume_inspect.get("CreatedAt") or "—",
+            "size": size_bytes,
+        })
+    network_result = subprocess.run(
+        [docker, "network", "ls", "--format", "{{json .}}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    networks_list = []
+    for line in network_result.stdout.splitlines():
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        networks_list.append({
+            "name": item.get("Name", ""),
+            "driver": item.get("Driver", ""),
+            "scope": item.get("Scope", "local"),
+            "id": item.get("ID", ""),
+        })
+    compose_result = subprocess.run(
+        [docker, "compose", "ls", "--format", "json"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    compose_list = []
+    if compose_result.returncode == 0:
+        try:
+            compose_items = json.loads(compose_result.stdout or "[]")
+            if isinstance(compose_items, dict):
+                compose_items = [compose_items]
+            for item in compose_items:
+                compose_list.append({
+                    "name": item.get("Name", ""),
+                    "status": item.get("Status", "Unknown"),
+                    "services": item.get("ConfigFiles", "—"),
+                    "config": item.get("ConfigFiles", "—"),
+                })
+        except json.JSONDecodeError:
+            pass
+    return {
+        "installed": True,
+        "running": True,
+        "version": version_match.group(1) if version_match else None,
+        "containers": containers,
+        "images_list": images_list,
+        "volumes_list": volumes_list,
+        "networks_list": networks_list,
+        "compose_list": compose_list,
+        "images": count("image"),
+        "volumes": count("volume"),
+        "networks": count("network"),
+        "cpu_percent": round(cpu_percent, 2),
+        "cpu_limit_percent": (os.cpu_count() or 1) * 100,
+        "memory_used_bytes": memory_used,
+        "memory_limit_bytes": memory_limit,
+        "error": None,
+    }
+
+
+@router.post("/docker/compose")
+def create_docker_compose(payload: dict, user=Depends(require_user)):
+    docker = shutil.which("docker")
+    if not docker:
+        raise HTTPException(409, "Docker Engine is not installed or available.")
+    project_name = str(payload.get("project_name") or "").strip()
+    filename = str(payload.get("filename") or "compose.yml").strip()
+    content = str(payload.get("content") or "")
+    if not re.fullmatch(r"[A-Za-z0-9]{1,64}", project_name):
+        raise HTTPException(422, "Project name must contain only letters and numbers.")
+    if filename not in {"compose.yml", "compose.yaml", "docker-compose.yml", "docker-compose.yaml"}:
+        raise HTTPException(422, "Choose a supported Compose filename.")
+    if not content.strip() or len(content) > 256 * 1024:
+        raise HTTPException(422, "The Compose definition is empty or too large.")
+    project_dir = Path(os.getenv("SE_COMPOSE_ROOT", "/server-engine/compose")) / project_name
+    if project_dir.exists() and any(project_dir.iterdir()):
+        raise HTTPException(409, f"Compose project directory already exists: {project_dir}")
+    job_id = f"docker-compose-{project_name}-{uuid.uuid4().hex[:8]}"
+    job = job_store.enqueue_docker_compose(job_id, project_dir, filename, content)
+    return {"status": "queued", "job_id": job.id, "project_name": project_name, "project_dir": str(project_dir)}
+
+
+@router.post("/docker/containers/{container_id}/action")
+def docker_container_action(container_id: str, payload: dict, user=Depends(require_user)):
+    docker = shutil.which("docker")
+    action = str(payload.get("action") or "").lower()
+    if not docker:
+        raise HTTPException(409, "Docker Engine is not installed or available.")
+    if action not in {"start", "stop", "restart", "pause", "delete"}:
+        raise HTTPException(422, "Unsupported container action.")
+    job_id = f"docker-{action}-{container_id[:12]}"
+    job_store.enqueue_docker_action(job_id, container_id, action)
+    return {"status": "queued", "job_id": job_id, "action": action, "container_id": container_id}
+
+
+@router.get("/docker/containers/{container_id}")
+def docker_container_details(container_id: str, user=Depends(require_user)):
+    docker = shutil.which("docker")
+    if not docker:
+        raise HTTPException(409, "Docker Engine is not installed or available.")
+    inspected = subprocess.run([docker, "inspect", "-s", container_id], capture_output=True, text=True, check=False)
+    if inspected.returncode != 0:
+        raise HTTPException(404, (inspected.stderr or "Container was not found.").strip())
+    try:
+        item = json.loads(inspected.stdout)[0]
+    except (json.JSONDecodeError, IndexError):
+        raise HTTPException(502, "Docker returned an invalid container description.")
+    logs = subprocess.run([docker, "logs", "--tail", "200", container_id], capture_output=True, text=True, check=False)
+    config = item.get("Config") or {}
+    state = item.get("State") or {}
+    host_config = item.get("HostConfig") or {}
+    ports = item.get("NetworkSettings", {}).get("Ports") or {}
+    return {
+        "id": item.get("Id", "")[:12],
+        "name": str(item.get("Name", "")).lstrip("/"),
+        "image": config.get("Image", ""),
+        "working_dir": config.get("WorkingDir") or "/",
+        "size_rw": item.get("SizeRw") or 0,
+        "size_rootfs": item.get("SizeRootFs") or 0,
+        "status": state.get("Status", "unknown"),
+        "started_at": state.get("StartedAt"),
+        "ports": ports,
+        "mounts": [{"source": mount.get("Source"), "destination": mount.get("Destination"), "mode": mount.get("Mode")} for mount in item.get("Mounts", [])],
+        "restart_policy": (host_config.get("RestartPolicy") or {}).get("Name") or "no",
+        "compose_yaml": _docker_compose_preview(item, config, host_config, ports),
+        "logs": logs.stdout + logs.stderr,
+    }
+
+
+@router.get("/docker/images/{image_ref:path}")
+def docker_image_details(image_ref: str, user=Depends(require_user)):
+    docker = shutil.which("docker")
+    if not docker:
+        raise HTTPException(409, "Docker Engine is not installed or available.")
+    inspected = subprocess.run([docker, "image", "inspect", image_ref], capture_output=True, text=True, check=False)
+    if inspected.returncode:
+        raise HTTPException(404, (inspected.stderr or "Docker image was not found.").strip())
+    try:
+        item = json.loads(inspected.stdout)[0]
+    except (json.JSONDecodeError, IndexError):
+        raise HTTPException(502, "Docker returned an invalid image description.")
+    config = item.get("Config") or {}
+    history_result = subprocess.run(
+        [docker, "history", "--no-trunc", "--format", "{{json .}}", image_ref],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    layers = []
+    for index, line in enumerate(history_result.stdout.splitlines()):
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        layers.append({
+            "index": index,
+            "id": value.get("ID") or "",
+            "command": value.get("CreatedBy") or "—",
+            "size": value.get("Size") or "0 B",
+            "created": value.get("CreatedSince") or value.get("CreatedAt") or "—",
+        })
+    return {
+        "reference": image_ref,
+        "id": str(item.get("Id") or "").replace("sha256:", "")[:12],
+        "size": f"{round((item.get('Size') or 0) / 1024 / 1024, 1)} MB",
+        "created_at": item.get("Created") or "",
+        "os": item.get("Os") or "—",
+        "architecture": item.get("Architecture") or "—",
+        "layers": layers,
+        "command": config.get("Cmd") or [],
+        "entrypoint": config.get("Entrypoint") or [],
+        "environment": config.get("Env") or [],
+    }
+
+
+@router.get("/docker/volumes/{volume_name}")
+def docker_volume_details(volume_name: str, user=Depends(require_user)):
+    docker = shutil.which("docker")
+    if not docker:
+        raise HTTPException(409, "Docker Engine is not installed or available.")
+    inspected = subprocess.run([docker, "volume", "inspect", volume_name], capture_output=True, text=True, check=False)
+    if inspected.returncode:
+        raise HTTPException(404, (inspected.stderr or "Docker volume was not found.").strip())
+    try:
+        item = json.loads(inspected.stdout)[0]
+    except (json.JSONDecodeError, IndexError):
+        raise HTTPException(502, "Docker returned an invalid volume description.")
+    mountpoint = item.get("Mountpoint") or ""
+    size_result = subprocess.run(["du", "-sb", mountpoint], capture_output=True, text=True, check=False) if mountpoint else None
+    size_bytes = 0
+    if size_result and size_result.returncode == 0:
+        try:
+            size_bytes = int(size_result.stdout.split()[0])
+        except (ValueError, IndexError):
+            pass
+    return {
+        "kind": "volume",
+        "name": item.get("Name") or volume_name,
+        "driver": item.get("Driver") or "—",
+        "scope": item.get("Scope") or "—",
+        "mountpoint": mountpoint or "—",
+        "created": item.get("CreatedAt") or "—",
+        "size": size_bytes,
+        "labels": item.get("Labels") or {},
+        "options": item.get("Options") or {},
+        "inspect": item,
+    }
+
+
+@router.post("/docker/volumes/{volume_name}/action")
+def docker_volume_action(volume_name: str, payload: dict, user=Depends(require_user)):
+    docker = shutil.which("docker")
+    if not docker:
+        raise HTTPException(409, "Docker Engine is not installed or available.")
+    action = str(payload.get("action") or "").lower()
+    if action == "delete":
+        result = subprocess.run([docker, "volume", "rm", volume_name], capture_output=True, text=True, check=False)
+        if result.returncode:
+            raise HTTPException(409, (result.stderr or "Docker could not delete this volume.").strip())
+        return {"status": "deleted", "name": volume_name}
+    if action == "clone":
+        clone_name = str(payload.get("clone_name") or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", clone_name):
+            raise HTTPException(422, "Enter a valid volume name for the clone.")
+        created = subprocess.run([docker, "volume", "create", clone_name], capture_output=True, text=True, check=False)
+        if created.returncode:
+            raise HTTPException(409, (created.stderr or "Docker could not create the clone volume.").strip())
+        copy_result = subprocess.run(
+            [docker, "run", "--rm", "-v", f"{volume_name}:/from:ro", "-v", f"{clone_name}:/to", "busybox:latest", "sh", "-c", "cp -a /from/. /to/"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if copy_result.returncode:
+            subprocess.run([docker, "volume", "rm", clone_name], capture_output=True, text=True, check=False)
+            raise HTTPException(409, (copy_result.stderr or "Docker could not copy the volume contents.").strip())
+        return {"status": "cloned", "source": volume_name, "name": clone_name}
+    raise HTTPException(422, "Unsupported Docker volume action.")
+
+
+@router.get("/docker/networks/{network_name:path}")
+def docker_network_details(network_name: str, user=Depends(require_user)):
+    docker = shutil.which("docker")
+    if not docker:
+        raise HTTPException(409, "Docker Engine is not installed or available.")
+    inspected = subprocess.run([docker, "network", "inspect", network_name], capture_output=True, text=True, check=False)
+    if inspected.returncode:
+        raise HTTPException(404, (inspected.stderr or "Docker network was not found.").strip())
+    try:
+        item = json.loads(inspected.stdout)[0]
+    except (json.JSONDecodeError, IndexError):
+        raise HTTPException(502, "Docker returned an invalid network description.")
+    return {
+        "kind": "network",
+        "name": item.get("Name") or network_name,
+        "id": str(item.get("Id") or "")[:12],
+        "driver": item.get("Driver") or "—",
+        "scope": item.get("Scope") or "—",
+        "internal": bool(item.get("Internal")),
+        "attachable": bool(item.get("Attachable")),
+        "ipam": item.get("IPAM") or {},
+        "containers": item.get("Containers") or {},
+        "inspect": item,
+    }
+
+
+@router.post("/docker/containers")
+def create_docker_container(payload: dict, user=Depends(require_user)):
+    docker = shutil.which("docker")
+    if not docker:
+        raise HTTPException(409, "Docker Engine is not installed or available.")
+    name = str(payload.get("name") or "").strip()
+    image = str(payload.get("image") or "").strip()
+    if not name or not image or any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-" for character in name):
+        raise HTTPException(422, "Enter a valid container name and image.")
+    command = [docker, "run", "-d", "--name", name]
+    restart = str(payload.get("restart") or "").lower()
+    restart_map = {"unless stopped": "unless-stopped", "always": "always", "on failure": "on-failure", "never": "no"}
+    if restart in restart_map:
+        command.extend(["--restart", restart_map[restart]])
+    for port in str(payload.get("ports") or "").split(","):
+        port = port.strip()
+        if port:
+            command.extend(["-p", port])
+    command.append(image)
+    if str(payload.get("command") or "").strip():
+        command.extend(shlex.split(str(payload["command"])))
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        raise HTTPException(409, (result.stderr or result.stdout or "Docker container creation failed.").strip())
+    return {"ok": True, "id": result.stdout.strip(), "message": f"Container {name} created."}
 
 
 def _installed_package_version(package: str) -> str | None:
@@ -603,6 +1325,11 @@ def configuration(service_id: str, version: str | None = None, file: str = "fpm"
     config_path = _configuration_path(service_id, version, file)
     path = Path(config_path)
     content = path.read_text(errors="replace") if path.exists() else _default_configuration(service_id, file)
+    if service_id == "apache":
+        sanitized = _sanitize_apache_configuration(content)
+        if sanitized != content and path.exists():
+            path.write_text(sanitized)
+        content = sanitized
     if service_id == "apache" and "CustomLog" not in content:
         content = content.replace(
             "IncludeOptional conf/sites/*.conf",
@@ -705,7 +1432,7 @@ processManagement:
   fork: false
 """
     if service_id == "apache":
-        return """ServerRoot \"/opt/server-engine/services/apache\"\nListen 80\nServerName localhost\n\n# Apache production baseline for Server Engine\nLoadModule mpm_event_module modules/mod_mpm_event.so\nLoadModule unixd_module modules/mod_unixd.so\nLoadModule authz_core_module modules/mod_authz_core.so\nLoadModule dir_module modules/mod_dir.so\nLoadModule mime_module modules/mod_mime.so\nLoadModule rewrite_module modules/mod_rewrite.so\nLoadModule headers_module modules/mod_headers.so\nLoadModule ssl_module modules/mod_ssl.so\nLoadModule proxy_module modules/mod_proxy.so\nLoadModule proxy_fcgi_module modules/mod_proxy_fcgi.so\nLoadModule http2_module modules/mod_http2.so\nLoadModule deflate_module modules/mod_deflate.so\n\nPidFile \"/opt/server-engine/services/apache/run/httpd.pid\"\nErrorLog \"/opt/server-engine/services/apache/logs/error.log\"\nLogLevel warn\nServerTokens Prod\nServerSignature Off\nEnableSendfile On\nKeepAlive On\nKeepAliveTimeout 5\nMaxKeepAliveRequests 100\nTimeout 60\n\nTypesConfig conf/mime.types\nDirectoryIndex index.php index.html index.htm\nDocumentRoot \"/opt/server-engine/www\"\n\n<Directory \"/opt/server-engine/www\">\n    AllowOverride All\n    Options FollowSymLinks\n    Require all granted\n</Directory>\n\n<IfModule mod_headers.c>\n    Header always set X-Content-Type-Options \"nosniff\"\n    Header always set X-Frame-Options \"SAMEORIGIN\"\n    Header always set Referrer-Policy \"strict-origin-when-cross-origin\"\n</IfModule>\n\n<IfModule mod_deflate.c>\n    AddOutputFilterByType DEFLATE text/plain text/html text/css application/javascript application/json application/xml image/svg+xml\n</IfModule>\n\nIncludeOptional conf/sites/*.conf\n"""
+        return """ServerRoot \"/opt/server-engine/services/apache\"\nListen 80\nServerName localhost\n\n# Apache production baseline for Server Engine\nLoadModule mpm_event_module modules/mod_mpm_event.so\nLoadModule authz_core_module modules/mod_authz_core.so\nLoadModule dir_module modules/mod_dir.so\nLoadModule mime_module modules/mod_mime.so\nLoadModule rewrite_module modules/mod_rewrite.so\nLoadModule headers_module modules/mod_headers.so\nLoadModule ssl_module modules/mod_ssl.so\nLoadModule proxy_module modules/mod_proxy.so\nLoadModule proxy_fcgi_module modules/mod_proxy_fcgi.so\nLoadModule http2_module modules/mod_http2.so\nLoadModule deflate_module modules/mod_deflate.so\n\nPidFile \"/opt/server-engine/services/apache/run/httpd.pid\"\nErrorLog \"/opt/server-engine/services/apache/logs/error.log\"\nLogLevel warn\nServerTokens Prod\nServerSignature Off\nEnableSendfile On\nKeepAlive On\nKeepAliveTimeout 5\nMaxKeepAliveRequests 100\nTimeout 60\n\nTypesConfig conf/mime.types\nDirectoryIndex index.php index.html index.htm\nDocumentRoot \"/opt/server-engine/www\"\n\n<Directory \"/opt/server-engine/www\">\n    AllowOverride All\n    Options FollowSymLinks\n    Require all granted\n</Directory>\n\n<IfModule mod_headers.c>\n    Header always set X-Content-Type-Options \"nosniff\"\n    Header always set X-Frame-Options \"SAMEORIGIN\"\n    Header always set Referrer-Policy \"strict-origin-when-cross-origin\"\n</IfModule>\n\n<IfModule mod_deflate.c>\n    AddOutputFilterByType DEFLATE text/plain text/html text/css application/javascript application/json application/xml image/svg+xml\n</IfModule>\n\nIncludeOptional conf/sites/*.conf\n"""
     if service_id == "openlitespeed":
         root = service_root("openlitespeed")
         return f"""# Server Engine OpenLiteSpeed baseline
@@ -950,7 +1677,8 @@ def save_configuration(service_id: str, payload: ConfigurationSaveRequest, versi
     backup = backup_dir / f"{path.name}.{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}.bak"
     if path.exists():
         shutil.copy2(path, backup)
-    path.write_text(payload.content)
+    content = _sanitize_apache_configuration(payload.content) if service_id == "apache" else payload.content
+    path.write_text(content)
     if service_id == "nginx":
         nginx = nginx_paths()
         check = subprocess.run([str(nginx["binary"]), "-p", str(nginx["root"]), "-c", str(path), "-t"], capture_output=True, text=True, check=False)

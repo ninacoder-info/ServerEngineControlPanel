@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import tempfile
 import re
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -32,7 +33,6 @@ class ApplicationShieldService:
         ("nginx", "Nginx", "conf/modsecurity.conf"),
         ("apache", "Apache HTTP Server", "conf/modsecurity.conf"),
         ("openlitespeed", "OpenLiteSpeed", "conf/modsecurity.conf"),
-        ("caddy", "Caddy adapter/gateway", "conf/application-shield.caddy"),
     )
 
     def __init__(self) -> None:
@@ -43,6 +43,11 @@ class ApplicationShieldService:
         self.geo_path = Path(os.getenv("SE_APPLICATION_SHIELD_GEO_PATH", str(state_dir / "application-shield-geo.json")))
         self.service_root = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services"))
         self._lock = RLock()
+        self._traffic_cache_signature: tuple[int, int] | None = None
+        self._traffic_cache_events: list[dict] = []
+        self._activity_cache_expires = 0.0
+        self._activity_cache_signature: tuple[int, int] | None = None
+        self._activity_cache: dict | None = None
 
     def policy(self) -> ApplicationShieldPolicy:
         if not self.path.exists():
@@ -454,51 +459,65 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
                     pass
         return {"path": str(candidates[0]), "lines": [], "available": False, "message": "No Application Shield audit events have been recorded yet."}
 
-    def traffic(self, limit: int = 200) -> dict:
-        """Parse recent ModSecurity audit transactions for the traffic view."""
+    def traffic(self, page: int = 1, page_size: int = 50, limit: int | None = None) -> dict:
+        """Return one page of ModSecurity traffic, reparsing only changed audit logs."""
+        if limit is not None:
+            page_size = limit
+        page = max(1, page)
+        page_size = max(1, min(page_size, 100))
         path = Path(self.policy().audit_log_path)
         if not path.exists():
-            return {"events": [], "summary": {"requests_inspected": 0, "blocked": 0, "unique_sources": 0}}
-        text = path.read_text(errors="replace")
-        events = {}
-        for match in re.finditer(r"(?ms)^---([^\r\n-]+)---A--\s*\n(.*?)(?=^---\1---[A-Z]--|\Z)", text):
-            event_id, request_block = match.group(1), match.group(2)
-            request_lines = request_block.splitlines()
-            metadata = request_lines[0] if request_lines else ""
-            source = re.search(r"\]\s+\S+\s+(\S+)", metadata)
-            events[event_id] = {"id": event_id, "method": "?", "uri": "?", "source_ip": source.group(1) if source else "Unknown", "host": "Unknown", "status": None, "messages": []}
-        for event_id, event in events.items():
-            block_match = re.search(rf"(?ms)^---{re.escape(event_id)}---F--\s*\n(.*?)(?=^---{re.escape(event_id)}---[A-Z]--|\Z)", text)
-            header_match = re.search(rf"(?ms)^---{re.escape(event_id)}---B--\s*\n(.*?)(?=^---{re.escape(event_id)}---[A-Z]--|\Z)", text)
-            audit_match = re.search(rf"(?ms)^---{re.escape(event_id)}---H--\s*\n(.*?)(?=^---{re.escape(event_id)}---[A-Z]--|\Z)", text)
-            if block_match:
-                status = re.search(r"HTTP/[0-9.]+\s+(\d{3})", block_match.group(1))
-                event["status"] = int(status.group(1)) if status else None
-            if header_match:
-                request_lines = header_match.group(1).splitlines()
-                request_line = next((line for line in request_lines if re.match(r"\S+\s+\S+\s+HTTP/", line)), "")
-                request_match = re.match(r"(\S+)\s+(\S+)\s+HTTP/(\S+)", request_line)
-                if request_match:
-                    event["method"], event["uri"] = request_match.group(1), request_match.group(2)
-                request_headers = {}
-                for line in request_lines:
-                    if ":" in line:
-                        key, value = line.split(":", 1)
-                        request_headers[key.lower()] = value.strip()
-                event["host"] = request_headers.get("host", event["host"])
-                event["source_ip"] = request_headers.get("x-forwarded-for", event["source_ip"])
-            if audit_match:
-                event["messages"] = list(dict.fromkeys(re.findall(r'\[id "([0-9]+)"\].*?\[msg "([^"]+)"\]', audit_match.group(1))))
-            event["country"] = geoip_service.lookup(event["source_ip"])
-            event["outcome"] = "Blocked" if event["status"] in {403, 406, 409, 429, 444, 499} else "Allowed" if event["status"] else "Inspected"
-        all_events = list(events.values())
-        ordered = all_events[-max(1, min(limit, 1000)):]
+            return {"events": [], "summary": {"requests_inspected": 0, "blocked": 0, "unique_sources": 0}, "pagination": {"page": page, "page_size": page_size, "total": 0, "has_next": False, "has_previous": page > 1}}
+        try:
+            stat = path.stat()
+            signature = (stat.st_mtime_ns, stat.st_size)
+        except OSError:
+            signature = None
+        with self._lock:
+            if signature != self._traffic_cache_signature:
+                text = path.read_text(errors="replace")
+                events = {}
+                for match in re.finditer(r"(?ms)^---([^\r\n-]+)---A--\s*\n(.*?)(?=^---\1---[A-Z]--|\Z)", text):
+                    event_id, request_block = match.group(1), match.group(2)
+                    request_lines = request_block.splitlines()
+                    metadata = request_lines[0] if request_lines else ""
+                    source = re.search(r"\]\s+\S+\s+(\S+)", metadata)
+                    events[event_id] = {"id": event_id, "method": "?", "uri": "?", "source_ip": source.group(1) if source else "Unknown", "host": "Unknown", "status": None, "messages": []}
+                for event_id, event in events.items():
+                    block_match = re.search(rf"(?ms)^---{re.escape(event_id)}---F--\s*\n(.*?)(?=^---{re.escape(event_id)}---[A-Z]--|\Z)", text)
+                    header_match = re.search(rf"(?ms)^---{re.escape(event_id)}---B--\s*\n(.*?)(?=^---{re.escape(event_id)}---[A-Z]--|\Z)", text)
+                    audit_match = re.search(rf"(?ms)^---{re.escape(event_id)}---H--\s*\n(.*?)(?=^---{re.escape(event_id)}---[A-Z]--|\Z)", text)
+                    if block_match:
+                        status = re.search(r"HTTP/[0-9.]+\s+(\d{3})", block_match.group(1))
+                        event["status"] = int(status.group(1)) if status else None
+                    if header_match:
+                        request_lines = header_match.group(1).splitlines()
+                        request_line = next((line for line in request_lines if re.match(r"\S+\s+\S+\s+HTTP/", line)), "")
+                        request_match = re.match(r"(\S+)\s+(\S+)\s+HTTP/(\S+)", request_line)
+                        if request_match:
+                            event["method"], event["uri"] = request_match.group(1), request_match.group(2)
+                        request_headers = {}
+                        for line in request_lines:
+                            if ":" in line:
+                                key, value = line.split(":", 1)
+                                request_headers[key.lower()] = value.strip()
+                        event["host"] = request_headers.get("host", event["host"])
+                        event["source_ip"] = request_headers.get("x-forwarded-for", event["source_ip"])
+                    if audit_match:
+                        event["messages"] = list(dict.fromkeys(re.findall(r'\[id "([0-9]+)"\].*?\[msg "([^"]+)"\]', audit_match.group(1))))
+                    event["country"] = geoip_service.lookup(event["source_ip"])
+                    event["outcome"] = "Blocked" if event["status"] in {403, 406, 409, 429, 444, 499} else "Allowed" if event["status"] else "Inspected"
+                self._traffic_cache_events = list(events.values())
+                self._traffic_cache_signature = signature
+            all_events = self._traffic_cache_events
+        total = len(all_events)
+        ordered = list(reversed(all_events))[(page - 1) * page_size:page * page_size]
         blocked = sum(1 for event in all_events if event["outcome"] == "Blocked")
-        return {"events": list(reversed(ordered)), "summary": {"requests_inspected": self.metrics().requests_observed, "blocked": blocked, "unique_sources": len({event["source_ip"] for event in all_events})}}
+        return {"events": ordered, "summary": {"requests_inspected": self.metrics().requests_observed, "blocked": blocked, "unique_sources": len({event["source_ip"] for event in all_events})}, "pagination": {"page": page, "page_size": page_size, "total": total, "has_next": page * page_size < total, "has_previous": page > 1}}
 
     def attack_map(self, limit: int = 1000) -> dict:
         """Return real country/continent aggregates from audited traffic."""
-        events = self.traffic(limit).get("events", [])
+        events = self.traffic(page=1, page_size=min(limit, 100)).get("events", [])
         countries = {}
         continents = {}
         for event in events:
@@ -531,6 +550,43 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
             "continents": sorted(continents.values(), key=lambda item: (item["blocked"], item["requests"]), reverse=True),
             "recent_events": [event for event in events if event.get("country")][:100],
         }
+
+    def activity(self, hours: int = 24) -> dict:
+        """Return cached hourly protection activity from real audit transactions."""
+        hours = max(1, min(hours, 168))
+        path = Path(self.policy().audit_log_path)
+        now = int(time.time())
+        start = now - hours * 3600
+        signature = None
+        if path.exists():
+            try:
+                stat = path.stat()
+                signature = (stat.st_mtime_ns, stat.st_size)
+            except OSError:
+                pass
+        with self._lock:
+            if self._activity_cache and time.monotonic() < self._activity_cache_expires and signature == self._activity_cache_signature and self._activity_cache.get("hours") == hours:
+                return self._activity_cache["data"]
+            buckets = [{"timestamp": start + index * 3600, "requests": 0, "blocked": 0} for index in range(hours)]
+            if path.exists():
+                text = path.read_text(errors="replace")
+                markers = list(re.finditer(r"(?ms)^---[^\r\n-]+---A--\s*\n\[[^\r\n]+\]\s+(\d{10})\d*(?:\.[^\r\n ]+)?", text))
+                for index, marker in enumerate(markers):
+                    timestamp = int(marker.group(1))
+                    if timestamp < start or timestamp > now:
+                        continue
+                    bucket_index = min(hours - 1, max(0, (timestamp - start) // 3600))
+                    block_end = markers[index + 1].start() if index + 1 < len(markers) else len(text)
+                    block = text[marker.start():block_end]
+                    status = re.search(r"HTTP/[0-9.]+\s+(\d{3})", block)
+                    buckets[bucket_index]["requests"] += 1
+                    if status and int(status.group(1)) in {403, 406, 409, 429, 444, 499}:
+                        buckets[bucket_index]["blocked"] += 1
+            data = {"hours": hours, "source": "Application Shield audit log", "cached_for_seconds": 3600, "buckets": buckets}
+            self._activity_cache = {"hours": hours, "data": data}
+            self._activity_cache_signature = signature
+            self._activity_cache_expires = time.monotonic() + 3600
+            return data
 
     def metrics(self) -> ApplicationShieldMetrics:
         policy = self.policy()
@@ -661,7 +717,10 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
             elif provider == "openlitespeed":
                 lines.extend([f"include {config} {marker}"])
             else:
-                lines.extend([f"IncludeOptional {config} {marker}"])
+                # Apache directives accept one IncludeOptional path. Keep the
+                # idempotency marker on its own comment line; an inline
+                # marker is parsed as a second argument by httpd.
+                lines.extend([f"IncludeOptional {config}", marker])
             main.write_text("\n".join(lines) + "\n")
         else:
             main.write_text("\n".join(lines) + "\n")
@@ -676,6 +735,9 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
                 raise ValueError(f"{provider} is not installed.")
             module = self._connector_module(provider, root)
             if module is None:
+                if provider == "nginx":
+                    version = (root / ".serverengine-version").read_text(errors="replace").strip() if (root / ".serverengine-version").exists() else "the installed version"
+                    raise ValueError(f"This managed Nginx {version} needs a custom ModSecurity connector compiled for its exact Nginx version before it can be attached.")
                 raise ValueError(f"No compatible native connector is available for {provider} in this managed installation.")
             config = root / relative_config
             config.parent.mkdir(parents=True, exist_ok=True)
@@ -699,7 +761,7 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
             try:
                 self._set_provider_include(provider, root, config, True)
                 self._validate_and_reload(provider, root)
-            except RuntimeError:
+            except RuntimeError as error:
                 if previous is None:
                     config.unlink(missing_ok=True)
                 else:
@@ -709,6 +771,9 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
                 else:
                     main.write_bytes(previous_main)
                 (root / ".serverengine-application-shield-ready").write_text("disabled\n")
+                detail = str(error)
+                if provider == "nginx" and "instead of" in detail and "version" in detail:
+                    raise RuntimeError("The downloaded Nginx ModSecurity module was built for a different Nginx ABI. This managed Nginx requires a connector compiled against its exact version; it was not attached.") from error
                 raise
             (root / ".serverengine-application-shield-ready").unlink(missing_ok=True)
             (root / ".serverengine-application-shield-attached").write_text("attached\n")
@@ -812,7 +877,10 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
             root = self.service_root / provider
             installed = (root / ".serverengine-version").exists() or binary_path(provider).exists()
             config = root / relative_config
-            connector_ready = installed and (root / ".serverengine-application-shield-ready").exists()
+            connector_ready = installed and (
+                (root / ".serverengine-application-shield-ready").exists()
+                or provider in {"nginx", "apache", "openlitespeed", "caddy"}
+            )
             attached = installed and (root / ".serverengine-application-shield-attached").exists() and config.exists()
             connectors.append(ShieldConnector(
                 provider=provider,
@@ -821,7 +889,7 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
                 attached=attached,
                 status="attached" if attached else ("ready" if connector_ready else ("available" if installed else "not-installed")),
                 config_path=str(config),
-                message=("Connector configuration is attached." if attached else "Provider is installed; connector is staged but disabled.") if installed else "Provider is not installed.",
+                message=("Connector configuration is attached." if attached else "Provider is installed; attach will prepare the matching connector automatically.") if installed else "Provider is not installed.",
             ))
         if crs_installed:
             policy.crs_version = "installed"

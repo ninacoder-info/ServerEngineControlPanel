@@ -22,7 +22,6 @@ import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import ActionDialog from "../../components/ActionDialog";
 
-const apiBase = import.meta.env.VITE_API_URL || window.location.origin;
 const starter = {
   id: "local",
   name: "Local Server",
@@ -37,7 +36,10 @@ const starter = {
 const input =
   "mt-2 block min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100";
 const wsUrl = () => {
-  const u = new URL(apiBase);
+  // Use the page origin so development goes through Vite's /api WebSocket
+  // proxy and production uses the same authenticated reverse-proxy route.
+  // This avoids stale VITE_API_URL values pointing at an old core port.
+  const u = new URL(window.location.origin);
   u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
   return `${u.protocol}//${u.host}/api/v1/terminal/ws`;
 };
@@ -72,7 +74,7 @@ function Field({ label, error, children }) {
   );
 }
 
-function TerminalSession({
+export function TerminalSession({
   profile,
   visible,
   enabled,
@@ -106,6 +108,7 @@ function TerminalSession({
           auth_method: profile.auth_method,
           private_key: profile.private_key || "",
           password: profile.password || "",
+          container_id: profile.container_id || "",
         }),
       );
       term.current?.writeln(`\r\n\x1b[32mConnected to ${profile.name}\x1b[0m`);
@@ -162,7 +165,10 @@ function TerminalSession({
       clear: () => terminal.clear(),
       fullscreen: () => root.current?.requestFullscreen?.(),
       switchUser: () => {
-        if (profile.kind === "local" && socket.current?.readyState === WebSocket.OPEN)
+        if (
+          profile.kind === "local" &&
+          socket.current?.readyState === WebSocket.OPEN
+        )
           socket.current.send("su -s /bin/bash serverengine\n");
       },
       reconnect: () => {
@@ -200,25 +206,42 @@ function TerminalSession({
     <div
       ref={root}
       onClick={() => term.current?.focus()}
-      className={`${visible ? "" : "hidden"} h-[min(62vh,620px)] min-h-[360px] w-full bg-slate-900 p-3`}
+      className={`${visible ? "" : "hidden"} box-border h-[32rem] max-h-[32rem] min-h-0 w-full overflow-hidden rounded-lg bg-slate-900 p-3`}
     />
   );
 }
 
 export default function TerminalPage({ autoConnect = false }) {
+  const dockerContainer = new URLSearchParams(window.location.search).get(
+    "container",
+  );
+  const dockerProfile = dockerContainer
+    ? {
+        id: `docker-${dockerContainer}`,
+        name: dockerContainer,
+        kind: "docker",
+        container_id: dockerContainer,
+        username: "root",
+      }
+    : null;
   const [profiles, setProfiles] = React.useState(() => {
+    if (dockerProfile) return [dockerProfile];
     try {
       return (
-        (JSON.parse(localStorage.getItem("serverengine:terminal-profiles")) || [starter]).map((profile) =>
-          profile.id === "local" ? { ...profile, name: "Local Server" } : profile,
-        )
+        JSON.parse(localStorage.getItem("serverengine:terminal-profiles")) || [
+          starter,
+        ]
+      ).map((profile) =>
+        profile.id === "local" ? { ...profile, name: "Local Server" } : profile,
       );
     } catch {
       return [starter];
     }
   });
-  const [activeId, setActiveId] = React.useState("local"),
-    [enabled, setEnabled] = React.useState({ local: false }),
+  const [activeId, setActiveId] = React.useState(dockerProfile?.id || "local"),
+    [enabled, setEnabled] = React.useState(
+      dockerProfile ? { [dockerProfile.id]: false } : { local: false },
+    ),
     [restart, setRestart] = React.useState({}),
     [statuses, setStatuses] = React.useState({ local: "disconnected" });
   const [modal, setModal] = React.useState(null),
@@ -239,9 +262,10 @@ export default function TerminalPage({ autoConnect = false }) {
     });
   React.useEffect(() => {
     if (autoConnect) {
-      setEnabled((value) => (value.local ? value : { ...value, local: true }));
+      const id = dockerProfile?.id || "local";
+      setEnabled((value) => (value[id] ? value : { ...value, [id]: true }));
     }
-  }, [autoConnect]);
+  }, [autoConnect, dockerProfile?.id]);
   React.useEffect(() => {
     const closeMenu = (event) => {
       if (!event.target.closest("[data-terminal-actions]")) setMenuId(null);
@@ -252,6 +276,7 @@ export default function TerminalPage({ autoConnect = false }) {
   const testSocket = React.useRef(null);
   const controls = React.useRef({}),
     current = profiles.find((profile) => profile.id === activeId) || starter;
+  const dockerMode = current.kind === "docker";
   const updateStatus = React.useCallback(
     (id, status) =>
       setStatuses((value) =>
@@ -468,86 +493,90 @@ export default function TerminalPage({ autoConnect = false }) {
           {statuses[activeId] || "Disconnected"}
         </span>
       </header>
-      <div className="grid gap-6 xl:grid-cols-[18rem_minmax(0,1fr)]">
-        <aside className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
-          <div className="flex items-center justify-between px-2 pb-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Saved connections
-            </p>
-            <button onClick={openNew} className="p-1.5 text-blue-600">
-              <Plus size={17} />
-            </button>
-          </div>
-          {profiles.map((profile) => (
-            <div
-              key={profile.id}
-              className="group relative"
-              data-terminal-actions
-            >
-              <button
-                onClick={() => choose(profile.id)}
-                className={`flex w-full items-center gap-3 rounded-lg px-3 py-3 pr-10 text-left ${activeId === profile.id ? "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300" : "text-slate-600 dark:text-slate-300"}`}
-              >
-                <Server size={16} />
-                <span className="min-w-0 flex-1">
-                  <strong className="block truncate text-sm">
-                    {profile.name}
-                  </strong>
-                  <small className="block truncate text-xs text-slate-500">
-                    {profile.kind === "local"
-                      ? "Docker local"
-                      : `${profile.username}@${profile.host}`}
-                  </small>
-                </span>
-                {statuses[profile.id] === "connected" && (
-                  <span
-                    className={`pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 ${profile.id !== "local" ? "group-hover:opacity-0" : ""}`}
-                  >
-                    <i
-                      className="block h-2.5 w-2.5 rounded-full bg-emerald-500"
-                      title="Connected"
-                    />
-                  </span>
-                )}
+      <div
+        className={`grid gap-6 ${dockerMode ? "" : "xl:grid-cols-[18rem_minmax(0,1fr)]"}`}
+      >
+        {!dockerMode && (
+          <aside className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between px-2 pb-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Saved connections
+              </p>
+              <button onClick={openNew} className="p-1.5 text-blue-600">
+                <Plus size={17} />
               </button>
-              {profile.id !== "local" && (
-                <>
-                  <button
-                    onClick={() =>
-                      setMenuId(menuId === profile.id ? null : profile.id)
-                    }
-                    aria-label={`More actions for ${profile.name}`}
-                    className="absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded-full p-1.5 text-slate-400 opacity-0 hover:bg-slate-200 hover:text-slate-700 group-hover:opacity-100 dark:hover:bg-slate-700 dark:hover:text-slate-200"
-                  >
-                    <MoreHorizontal size={17} />
-                  </button>
-                  {menuId === profile.id && (
-                    <div className="absolute right-2 top-12 z-20 w-36 rounded-lg border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
-                      <button
-                        onClick={() => editProfile(profile)}
-                        className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
-                      >
-                        <Pencil size={14} /> Edit
-                      </button>
-                      <button
-                        onClick={() => deleteProfile(profile)}
-                        className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
-                      >
-                        <Trash2 size={14} /> Delete
-                      </button>
-                    </div>
-                  )}
-                </>
-              )}
             </div>
-          ))}
-          <button
-            onClick={openNew}
-            className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-2.5 text-sm font-semibold text-slate-600 dark:border-slate-700 dark:text-slate-300"
-          >
-            <Plus size={15} /> Add server
-          </button>
-        </aside>
+            {profiles.map((profile) => (
+              <div
+                key={profile.id}
+                className="group relative"
+                data-terminal-actions
+              >
+                <button
+                  onClick={() => choose(profile.id)}
+                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-3 pr-10 text-left ${activeId === profile.id ? "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300" : "text-slate-600 dark:text-slate-300"}`}
+                >
+                  <Server size={16} />
+                  <span className="min-w-0 flex-1">
+                    <strong className="block truncate text-sm">
+                      {profile.name}
+                    </strong>
+                    <small className="block truncate text-xs text-slate-500">
+                      {profile.kind === "local"
+                        ? "Docker local"
+                        : `${profile.username}@${profile.host}`}
+                    </small>
+                  </span>
+                  {statuses[profile.id] === "connected" && (
+                    <span
+                      className={`pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 ${profile.id !== "local" ? "group-hover:opacity-0" : ""}`}
+                    >
+                      <i
+                        className="block h-2.5 w-2.5 rounded-full bg-emerald-500"
+                        title="Connected"
+                      />
+                    </span>
+                  )}
+                </button>
+                {profile.id !== "local" && (
+                  <>
+                    <button
+                      onClick={() =>
+                        setMenuId(menuId === profile.id ? null : profile.id)
+                      }
+                      aria-label={`More actions for ${profile.name}`}
+                      className="absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded-full p-1.5 text-slate-400 opacity-0 hover:bg-slate-200 hover:text-slate-700 group-hover:opacity-100 dark:hover:bg-slate-700 dark:hover:text-slate-200"
+                    >
+                      <MoreHorizontal size={17} />
+                    </button>
+                    {menuId === profile.id && (
+                      <div className="absolute right-2 top-12 z-20 w-36 rounded-lg border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                        <button
+                          onClick={() => editProfile(profile)}
+                          className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+                        >
+                          <Pencil size={14} /> Edit
+                        </button>
+                        <button
+                          onClick={() => deleteProfile(profile)}
+                          className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
+                        >
+                          <Trash2 size={14} /> Delete
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            ))}
+            <button
+              onClick={openNew}
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-2.5 text-sm font-semibold text-slate-600 dark:border-slate-700 dark:text-slate-300"
+            >
+              <Plus size={15} /> Add server
+            </button>
+          </aside>
+        )}
         <section className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-800">
             <div className="flex items-center gap-3">
@@ -559,7 +588,9 @@ export default function TerminalPage({ autoConnect = false }) {
                 <p className="text-xs text-slate-500">
                   {current.kind === "local"
                     ? "Local Docker shell"
-                    : `${current.username}@${current.host}`}
+                    : current.kind === "docker"
+                      ? "Docker container · root shell"
+                      : `${current.username}@${current.host}`}
                 </p>
               </div>
             </div>
@@ -607,7 +638,7 @@ export default function TerminalPage({ autoConnect = false }) {
               key={profile.id}
               profile={profile}
               visible={profile.id === activeId}
-            enabled={!!enabled[profile.id]}
+              enabled={!!enabled[profile.id]}
               restart={restart[profile.id] || 0}
               onStatus={updateStatus}
               onControls={setControls}

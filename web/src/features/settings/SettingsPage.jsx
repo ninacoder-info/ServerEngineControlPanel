@@ -166,7 +166,7 @@ const apiSettingsValues = (values) => ({
 });
 const storageValues = (values) => ({
   default_site_root: values.default_site_root || "/server-engine/www",
-  default_backup_root: values.default_backup_root || "/var/lib/server-engine/backups",
+  default_backup_root: "/server-engine/backups",
   storage_file_manager_start: values.storage_file_manager_start || "web-root",
   storage_show_hidden_files: values.storage_show_hidden_files !== false,
   storage_verify_encoding: values.storage_verify_encoding !== false,

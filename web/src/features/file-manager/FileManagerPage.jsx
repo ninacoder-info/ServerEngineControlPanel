@@ -33,7 +33,7 @@ import { Tree } from "react-arborist";
 import ActionDialog from "../../components/ActionDialog";
 import Toast from "../../components/Toast";
 import ConfigEditor from "../services/ConfigEditor";
-import { apiRequest, readApiError } from "../../lib/api";
+import { apiRequest as requestApi, readApiError } from "../../lib/api";
 
 const formatBytes = (value) => {
   if (value < 1024) return `${value} B`;
@@ -120,13 +120,24 @@ function TreeNode({ node, style }) {
   );
 }
 
-export default function FileManagerPage() {
+export function FileManagerWorkspace({ embedded = false, initialPath = "", containerId = "" } = {}) {
+  const fileManagerBase = containerId
+    ? `/api/v1/services/docker/containers/${encodeURIComponent(containerId)}/files`
+    : "/api/v1/file-manager";
+  const apiRequest = React.useCallback(
+    (url, options) => {
+      const path = containerId ? url.replace("/api/v1/file-manager", "") : url;
+      return requestApi(containerId ? `${fileManagerBase}${path}` : path, options);
+    },
+    [containerId, fileManagerBase],
+  );
+  const startingPath = initialPath || (containerId ? "/" : "/server-engine/www");
   const [tree, setTree] = React.useState(null);
   const [entries, setEntries] = React.useState([]);
-  const [currentPath, setCurrentPath] = React.useState("/server-engine/www");
+  const [currentPath, setCurrentPath] = React.useState(startingPath);
   const [rootPath, setRootPath] = React.useState("/");
-  const [treeRootPath, setTreeRootPath] = React.useState("/server-engine/www");
-  const [pathInput, setPathInput] = React.useState("/server-engine/www");
+  const [treeRootPath, setTreeRootPath] = React.useState(startingPath);
+  const [pathInput, setPathInput] = React.useState(startingPath);
   const [selectedPaths, setSelectedPaths] = React.useState([]);
   const [clipboard, setClipboard] = React.useState([]);
   const [toast, setToast] = React.useState(null);
@@ -222,7 +233,7 @@ export default function FileManagerPage() {
     apiRequest("/api/v1/file-manager/root")
       .then((response) => (response.ok ? response.json() : null))
       .then((value) => {
-        const defaultPath = value?.default_path || "/server-engine/www";
+        const defaultPath = startingPath || value?.default_path || "/server-engine/www";
         setRootPath(value?.root_path || "/");
         setTreeRootPath(defaultPath);
         setPathInput(defaultPath);
@@ -233,7 +244,7 @@ export default function FileManagerPage() {
         loadEntries("/server-engine/www");
         loadTreeRoot("/server-engine/www");
       });
-  }, [loadTreeRoot, loadEntries]);
+  }, [loadTreeRoot, loadEntries, startingPath]);
   React.useEffect(() => {
     const close = () => setContextMenu(null);
     window.addEventListener("click", close);
@@ -546,7 +557,7 @@ export default function FileManagerPage() {
       const xhr = new XMLHttpRequest();
       xhr.open(
         "POST",
-        `/api/v1/file-manager/upload?path=${encodeURIComponent(currentPath)}&relative_path=${encodeURIComponent(relativePath)}&overwrite=${proceed === true && conflicts.includes(relativePath)}`,
+        `${fileManagerBase}/upload?path=${encodeURIComponent(currentPath)}&relative_path=${encodeURIComponent(relativePath)}&overwrite=${proceed === true && conflicts.includes(relativePath)}`,
       );
       xhr.withCredentials = true;
       await new Promise((resolve) => {
@@ -577,7 +588,7 @@ export default function FileManagerPage() {
       : currentPath.split("/").slice(0, -1).join("/") || "/";
   const downloadUrl =
     selected?.kind === "file"
-      ? `/api/v1/file-manager/download?path=${encodeURIComponent(selected.path)}`
+      ? `${fileManagerBase}/download?path=${encodeURIComponent(selected.path)}`
       : "";
   const treeData = tree
     ? tree.path === "/"
@@ -587,13 +598,13 @@ export default function FileManagerPage() {
   const treeInitialOpenState = tree && tree.path !== "/" ? { [tree.path]: true } : {};
   return (
     <div
-      className="file-manager-page space-y-7"
+      className={`file-manager-page ${embedded ? "file-manager-embedded" : "space-y-7"}`}
       onClick={() => {
         setContextMenu(null);
         setUploadMenuOpen(false);
       }}
     >
-      <div className="file-manager-heading">
+      {!embedded && <div className="file-manager-heading">
         <div>
           <p className="text-sm text-cyan-300">Storage</p>
           <h2 className="mt-1 text-3xl font-semibold tracking-tight">
@@ -686,7 +697,7 @@ export default function FileManagerPage() {
             onChange={uploadSelection}
           />
         </div>
-      </div>
+      </div>}
       <section className="file-manager-shell">
         {uploadProgress !== null && (
           <div className="upload-progress-line">
@@ -1033,4 +1044,8 @@ export default function FileManagerPage() {
       />
     </div>
   );
+}
+
+export default function FileManagerPage() {
+  return <FileManagerWorkspace />;
 }

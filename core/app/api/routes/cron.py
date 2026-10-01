@@ -66,6 +66,14 @@ def delete_job(job_id: str, user=Depends(require_user)):
     return {"deleted": True}
 
 
+@router.get("/jobs/{job_id}")
+def get_job(job_id: str, user=Depends(require_user)):
+    job = store().get(job_id)
+    if not job:
+        raise HTTPException(404, "Cron job not found")
+    return job
+
+
 @router.get("/jobs/{job_id}/logs")
 def job_logs(job_id: str, limit: int = 50, user=Depends(require_user)):
     if not store().get(job_id):

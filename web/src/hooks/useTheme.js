@@ -1,5 +1,5 @@
 import React from "react";
-import { readPanelPreferences } from "../lib/panelPreferences";
+import { applyPanelPreferences, readPanelPreferences } from "../lib/panelPreferences";
 
 function readLightPreference() {
   const panelTheme = readPanelPreferences().panel_theme;
@@ -25,7 +25,9 @@ export function useTheme() {
   function toggle() {
     const next = !light;
     setLight(next);
-    localStorage.setItem("server-engine-theme", next ? "light" : "dark");
+    // Keep the explicit toggle in the same preference store used during boot.
+    // Otherwise a reload falls back to the old `system` setting.
+    applyPanelPreferences({ panel_theme: next ? "light" : "dark" });
   }
   return { light, toggle };
 }

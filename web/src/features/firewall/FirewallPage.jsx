@@ -1,5 +1,6 @@
 import React from "react";
 import {
+  Activity,
   AlertTriangle,
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -22,8 +23,6 @@ import { apiRequest, readApiError } from "../../lib/api";
 
 const tabs = [
   ["rules", "Firewall rules"],
-  ["waf", "Web application firewall"],
-  ["ddos", "DDoS protection"],
   ["forwarding", "Port forwarding"],
   ["aliases", "Aliases"],
   ["blocked", "Blocked addresses"],
@@ -313,15 +312,267 @@ function RuleModal({ rule, onClose, onSave }) {
   );
 }
 
+function ForwardingModal({ forwarding, onClose, onSave }) {
+  const [form, setForm] = React.useState({
+    protocol: "TCP",
+    source: "Any",
+    interface: "Any",
+    listen_address: "Any",
+    listen_port: "",
+    target_address: "",
+    target_port: "",
+    note: "",
+    enabled: true,
+  });
+  const [errors, setErrors] = React.useState({});
+  React.useEffect(() => {
+    if (forwarding) setForm({ ...form, ...forwarding });
+  }, [forwarding]);
+  const change = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+  const save = async (event) => {
+    event.preventDefault();
+    const next = {};
+    if (!form.listen_port.trim()) next.listen_port = "Public port is required.";
+    if (!form.target_address.trim()) next.target_address = "Target host is required.";
+    if (!form.target_port.trim()) next.target_port = "Target port is required.";
+    if (Object.keys(next).length) {
+      setErrors(next);
+      return;
+    }
+    if (await onSave(form)) onClose();
+  };
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/60 p-4">
+      <form onSubmit={save} className="max-h-[calc(100vh-2rem)] w-full max-w-3xl overflow-y-auto rounded-xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">NAT gateway</p>
+            <h2 className="mt-1 text-2xl font-semibold text-slate-900 dark:text-slate-100">{forwarding ? "Edit port forwarding" : "Add port forwarding"}</h2>
+            <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">Forward traffic arriving on this server to an IPv4 service behind it.</p>
+          </div>
+          <button type="button" onClick={onClose} className="grid h-9 w-9 cursor-pointer place-items-center rounded-full text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"><X size={18} /></button>
+        </div>
+        <div className="mt-6 grid gap-5 md:grid-cols-2">
+          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Protocol<select className={input} value={form.protocol} onChange={(event) => change("protocol", event.target.value)}><option>TCP</option><option>UDP</option><option>TCP / UDP</option></select></label>
+          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Network interface<select className={input} value={form.interface} onChange={(event) => change("interface", event.target.value)}><option>Any</option><option>eth0</option><option>ens3</option><option>enp1s0</option><option>virbr0</option></select></label>
+          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Public/listen address<span className="mt-1 block text-xs font-normal text-slate-500">Use Any for all server addresses.</span><input className={input} value={form.listen_address} onChange={(event) => change("listen_address", event.target.value)} placeholder="Any or 51.161.115.162" /></label>
+          <label className={`text-sm font-medium ${errors.listen_port ? "text-rose-600 dark:text-rose-400" : "text-slate-700 dark:text-slate-300"}`}>Public port<input className={`${input} ${errors.listen_port ? "border-rose-500" : ""}`} value={form.listen_port} onChange={(event) => change("listen_port", event.target.value)} placeholder="2222" />{errors.listen_port && <span className="mt-1 block text-xs font-normal">{errors.listen_port}</span>}</label>
+          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Source restriction<span className="mt-1 block text-xs font-normal text-slate-500">Optional client IP or CIDR.</span><input className={input} value={form.source} onChange={(event) => change("source", event.target.value)} placeholder="Any or 203.0.113.0/24" /></label>
+          <div />
+          <label className={`text-sm font-medium ${errors.target_address ? "text-rose-600 dark:text-rose-400" : "text-slate-700 dark:text-slate-300"}`}>Target host<input className={`${input} ${errors.target_address ? "border-rose-500" : ""}`} value={form.target_address} onChange={(event) => change("target_address", event.target.value)} placeholder="192.168.122.233" />{errors.target_address && <span className="mt-1 block text-xs font-normal">{errors.target_address}</span>}</label>
+          <label className={`text-sm font-medium ${errors.target_port ? "text-rose-600 dark:text-rose-400" : "text-slate-700 dark:text-slate-300"}`}>Target port<input className={`${input} ${errors.target_port ? "border-rose-500" : ""}`} value={form.target_port} onChange={(event) => change("target_port", event.target.value)} placeholder="22" />{errors.target_port && <span className="mt-1 block text-xs font-normal">{errors.target_port}</span>}</label>
+          <label className="text-sm font-medium text-slate-700 dark:text-slate-300 md:col-span-2">Note<input className={input} value={form.note} onChange={(event) => change("note", event.target.value)} placeholder="SSH access to the test VPS" /></label>
+        </div>
+        <label className="mt-5 flex cursor-pointer items-start gap-3 text-sm text-slate-700 dark:text-slate-300"><input type="checkbox" className="mt-0.5 h-4 w-4 cursor-pointer accent-blue-600" checked={form.enabled} onChange={(event) => change("enabled", event.target.checked)} /><span><span className="block font-medium">Enable forwarding rule</span><span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">The rule is applied immediately after saving.</span></span></label>
+        <div className="mt-6 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200"><AlertTriangle size={18} className="mt-0.5 shrink-0" /><span>IP forwarding must be enabled and the target host must route replies through this server. Server Engine will not change the host's default route.</span></div>
+        <div className="mt-6 flex justify-end gap-3"><button type="button" onClick={onClose} className="cursor-pointer rounded-md border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-300">Cancel</button><button className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"><CirclePlus size={16} />{forwarding ? "Save forwarding" : "Add forwarding"}</button></div>
+      </form>
+    </div>
+  );
+}
+
+function ForwardingTab({ forwardings, backend, onCreate, onEdit, onToggle, onDelete }) {
+  return (
+    <div className="p-5">
+      <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center"><div><h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Port forwarding</h3><p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500 dark:text-slate-400">Publish a service behind this server by translating an incoming port to an internal IPv4 host and port.</p></div><button type="button" onClick={onCreate} className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"><CirclePlus size={15} />Add forwarding</button></div>
+      {backend && !backend.forwarding_enabled && <div className="mt-5 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-200"><AlertTriangle size={17} className="mt-0.5 shrink-0" /><span>IP forwarding is disabled on this server. The rule can be saved, but traffic will not reach the target until IPv4 forwarding is enabled.</span></div>}
+      <div className="mt-5 overflow-x-auto"><table className="w-full min-w-[980px] text-left"><thead><tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:text-slate-400"><th className="px-3 py-3">Status</th><th className="px-3 py-3">Public listener</th><th className="px-3 py-3">Target</th><th className="px-3 py-3">Protocol</th><th className="px-3 py-3">Packets</th><th className="px-3 py-3">Note</th><th className="px-3 py-3" /></tr></thead><tbody>{forwardings.map((forwarding) => <tr key={forwarding.id} className={`border-b border-slate-100 dark:border-slate-800 ${!forwarding.enabled ? "opacity-50" : ""}`}><td className="px-3 py-4"><span className={`inline-flex items-center gap-2 text-xs font-semibold ${forwarding.enabled ? "text-emerald-600 dark:text-emerald-400" : "text-slate-500"}`}><span className="h-2 w-2 rounded-full bg-current" />{forwarding.enabled ? "Enabled" : "Disabled"}</span></td><td className="px-3 py-4"><p className="text-sm font-semibold text-slate-800 dark:text-slate-200">{forwarding.listen_address}:{forwarding.listen_port}</p><p className="mt-1 text-xs text-slate-500">{forwarding.interface} · {forwarding.source}</p></td><td className="px-3 py-4 text-sm text-slate-700 dark:text-slate-300">{forwarding.target_address}:{forwarding.target_port}</td><td className="px-3 py-4 text-sm text-slate-600 dark:text-slate-400">{forwarding.protocol}</td><td className="px-3 py-4 text-sm text-slate-600 dark:text-slate-400">{Number(forwarding.states || 0).toLocaleString()}</td><td className="max-w-xs px-3 py-4 text-sm text-slate-600 dark:text-slate-400">{forwarding.note || "—"}</td><td className="px-3 py-4 text-right"><div className="flex justify-end gap-2"><button type="button" onClick={() => onEdit(forwarding)} className="cursor-pointer text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400">Edit</button><button type="button" onClick={() => onToggle(forwarding)} className="cursor-pointer text-sm font-semibold text-slate-600 hover:text-slate-900 dark:text-slate-300">{forwarding.enabled ? "Disable" : "Enable"}</button><button type="button" onClick={() => onDelete(forwarding)} className="cursor-pointer text-sm font-semibold text-rose-600 hover:text-rose-700 dark:text-rose-400">Delete</button></div></td></tr>)}</tbody></table>{forwardings.length === 0 && <div className="grid place-items-center py-16 text-center"><ArrowDownToLine size={30} className="text-slate-400" /><h4 className="mt-4 text-base font-semibold text-slate-900 dark:text-slate-100">No port forwarding rules</h4><p className="mt-2 text-sm text-slate-500 dark:text-slate-400">Add a rule to publish a service behind this server.</p></div>}</div>
+    </div>
+  );
+}
+
+function AliasValuesField({ values, onChange, kind }) {
+  const [draft, setDraft] = React.useState("");
+  const add = () => {
+    const value = draft.trim();
+    if (!value || values.includes(value)) return;
+    onChange([...values, value]);
+    setDraft("");
+  };
+  return <div className="mt-2 rounded-md border border-slate-300 p-2 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/20 dark:border-slate-700"><div className="flex flex-wrap items-center gap-1.5">{values.map((value) => <span key={value} className="inline-flex items-center gap-1 rounded bg-slate-100 px-2 py-1 font-mono text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-200">{value}<button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => onChange(values.filter((item) => item !== value))} className="cursor-pointer text-slate-400 hover:text-slate-800 dark:hover:text-white">×</button></span>)}<input className="min-w-[12rem] flex-1 border-0 bg-transparent px-1 py-1 text-sm outline-none dark:text-slate-100" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === ",") { event.preventDefault(); add(); } }} placeholder={kind === "Port" ? "80 or 8000-8010, then Enter" : "IP or CIDR, then Enter"} /><button type="button" onClick={add} className="cursor-pointer px-1 text-sm font-semibold text-blue-600 dark:text-blue-400">Add</button></div></div>;
+}
+
+function AliasModal({ alias, onClose, onSave }) {
+  const [form, setForm] = React.useState({ name: "", kind: "Address", values: [], note: "", enabled: true });
+  const [error, setError] = React.useState("");
+  React.useEffect(() => { if (alias) setForm({ ...form, ...alias }); }, [alias]);
+  const change = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+  const save = async (event) => {
+    event.preventDefault();
+    if (!form.name.trim() || !/^[A-Za-z][A-Za-z0-9_-]*$/.test(form.name)) return setError("Use a name beginning with a letter; letters, numbers, hyphens, and underscores are allowed.");
+    if (!form.values.length) return setError("Add at least one value.");
+    if (await onSave(form)) onClose();
+  };
+  return <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/60 p-4"><form onSubmit={save} className="max-h-[calc(100vh-2rem)] w-full max-w-2xl overflow-y-auto rounded-xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Reusable network object</p><h2 className="mt-1 text-2xl font-semibold text-slate-900 dark:text-slate-100">{alias ? "Edit alias" : "Add alias"}</h2><p className="mt-2 text-sm text-slate-500 dark:text-slate-400">Create a named group once, then use it in firewall rule sources, destinations, or ports.</p></div><button type="button" onClick={onClose} className="grid h-9 w-9 cursor-pointer place-items-center rounded-full text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"><X size={18} /></button></div><div className="mt-6 space-y-5"><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Alias name<input className={input} value={form.name} onChange={(event) => change("name", event.target.value)} placeholder="trusted-admins" disabled={Boolean(alias)} /></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Alias type<select className={input} value={form.kind} onChange={(event) => change("kind", event.target.value)} disabled={Boolean(alias)}><option>Address</option><option>Port</option></select></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Values<AliasValuesField values={form.values} onChange={(value) => change("values", value)} kind={form.kind} /></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Note<input className={input} value={form.note} onChange={(event) => change("note", event.target.value)} placeholder="Office and VPN administrator addresses" /></label><label className="flex cursor-pointer items-center gap-3 text-sm text-slate-700 dark:text-slate-300"><input type="checkbox" className="h-4 w-4 cursor-pointer accent-blue-600" checked={form.enabled} onChange={(event) => change("enabled", event.target.checked)} />Use this alias in applied rules</label>{error && <p className="text-sm text-rose-600 dark:text-rose-400">{error}</p>}</div><div className="mt-6 flex justify-end gap-3"><button type="button" onClick={onClose} className="cursor-pointer rounded-md border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-300">Cancel</button><button className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"><CirclePlus size={16} />{alias ? "Save alias" : "Add alias"}</button></div></form></div>;
+}
+
+function AliasesTab({ aliases, onCreate, onEdit, onToggle, onDelete }) {
+  return <div className="p-5"><div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center"><div><h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Aliases</h3><p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500 dark:text-slate-400">Manage reusable address and port groups. Updating an alias re-applies every firewall rule that uses it.</p></div><button type="button" onClick={onCreate} className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"><CirclePlus size={15} />Add alias</button></div><div className="mt-5 overflow-x-auto"><table className="w-full min-w-[850px] text-left"><thead><tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:text-slate-400"><th className="px-3 py-3">Status</th><th className="px-3 py-3">Name</th><th className="px-3 py-3">Type</th><th className="px-3 py-3">Values</th><th className="px-3 py-3">Note</th><th className="px-3 py-3" /></tr></thead><tbody>{aliases.map((alias) => <tr key={alias.id} className={`border-b border-slate-100 dark:border-slate-800 ${!alias.enabled ? "opacity-50" : ""}`}><td className="px-3 py-4"><span className={`inline-flex items-center gap-2 text-xs font-semibold ${alias.enabled ? "text-emerald-600 dark:text-emerald-400" : "text-slate-500"}`}><span className="h-2 w-2 rounded-full bg-current" />{alias.enabled ? "Enabled" : "Disabled"}</span></td><td className="px-3 py-4 font-mono text-sm font-semibold text-slate-800 dark:text-slate-200">{alias.name}</td><td className="px-3 py-4 text-sm text-slate-600 dark:text-slate-400">{alias.kind}</td><td className="max-w-md px-3 py-4"><div className="flex flex-wrap gap-1">{alias.values.map((value) => <code key={value} className="rounded bg-slate-100 px-1.5 py-1 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-300">{value}</code>)}</div></td><td className="max-w-xs px-3 py-4 text-sm text-slate-600 dark:text-slate-400">{alias.note || "—"}</td><td className="px-3 py-4 text-right"><div className="flex justify-end gap-2"><button type="button" onClick={() => onEdit(alias)} className="cursor-pointer text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400">Edit</button><button type="button" onClick={() => onToggle(alias)} className="cursor-pointer text-sm font-semibold text-slate-600 hover:text-slate-900 dark:text-slate-300">{alias.enabled ? "Disable" : "Enable"}</button><button type="button" onClick={() => onDelete(alias)} className="cursor-pointer text-sm font-semibold text-rose-600 hover:text-rose-700 dark:text-rose-400">Delete</button></div></td></tr>)}</tbody></table>{aliases.length === 0 && <div className="grid place-items-center py-16 text-center"><Network size={30} className="text-slate-400" /><h4 className="mt-4 text-base font-semibold text-slate-900 dark:text-slate-100">No aliases yet</h4><p className="mt-2 text-sm text-slate-500 dark:text-slate-400">Add address groups or port groups to simplify your rules.</p></div>}</div></div>;
+}
+
+function BlockedAddressModal({ entry, onClose, onSave }) {
+  const [form, setForm] = React.useState({ address: "", note: "", expires_at: "", enabled: true });
+  const [error, setError] = React.useState("");
+  React.useEffect(() => { if (entry) setForm({ address: entry.address || "", note: entry.note || "", expires_at: entry.expires_at ? entry.expires_at.slice(0, 16) : "", enabled: entry.enabled ?? true }); }, [entry]);
+  const save = async (event) => {
+    event.preventDefault();
+    if (!form.address.trim()) return setError("IP address or CIDR range is required.");
+    if (await onSave({ ...form, expires_at: form.expires_at ? new Date(form.expires_at).toISOString() : null })) onClose();
+  };
+  return <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/60 p-4"><form onSubmit={save} className="w-full max-w-xl rounded-xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wide text-rose-600 dark:text-rose-400">Traffic deny list</p><h2 className="mt-1 text-2xl font-semibold text-slate-900 dark:text-slate-100">{entry ? "Edit blocked address" : "Block an address"}</h2><p className="mt-2 text-sm text-slate-500 dark:text-slate-400">Drop new connections from an IP address or CIDR range before other firewall rules are evaluated.</p></div><button type="button" onClick={onClose} className="grid h-9 w-9 cursor-pointer place-items-center rounded-full text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"><X size={18} /></button></div><div className="mt-6 space-y-5"><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">IP address or CIDR range<input className={`${input} ${error ? "border-rose-500" : ""}`} value={form.address} onChange={(event) => { setForm({ ...form, address: event.target.value }); setError(""); }} placeholder="203.0.113.44 or 203.0.113.0/24" />{error && <span className="mt-1 block text-xs font-normal text-rose-600 dark:text-rose-400">{error}</span>}</label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Expires at<span className="mt-1 block text-xs font-normal text-slate-500">Leave empty for a permanent block.</span><input type="datetime-local" className={input} value={form.expires_at} onChange={(event) => setForm({ ...form, expires_at: event.target.value })} /></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Reason<input className={input} value={form.note} onChange={(event) => setForm({ ...form, note: event.target.value })} placeholder="Repeated SSH scans" /></label><label className="flex cursor-pointer items-center gap-3 text-sm text-slate-700 dark:text-slate-300"><input type="checkbox" className="h-4 w-4 cursor-pointer accent-blue-600" checked={form.enabled} onChange={(event) => setForm({ ...form, enabled: event.target.checked })} />Apply this block immediately</label></div><div className="mt-6 flex justify-end gap-3"><button type="button" onClick={onClose} className="cursor-pointer rounded-md border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-300">Cancel</button><button className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-rose-700"><ShieldAlert size={16} />{entry ? "Save block" : "Block address"}</button></div></form></div>;
+}
+
+function BlockedAddressesTab({ entries, onCreate, onEdit, onToggle, onDelete }) {
+  const [query, setQuery] = React.useState("");
+  const visible = entries.filter((entry) => `${entry.address} ${entry.note}`.toLowerCase().includes(query.toLowerCase()));
+  return <div className="p-5"><div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center"><div><h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Blocked addresses</h3><p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500 dark:text-slate-400">Deny hostile IPs or networks at the firewall boundary. Expired entries remain visible for audit but are no longer applied.</p></div><button type="button" onClick={onCreate} className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md bg-rose-600 px-3 py-2 text-sm font-semibold text-white hover:bg-rose-700"><ShieldAlert size={15} />Block address</button></div><label className="mt-5 flex max-w-md items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-slate-400 dark:border-slate-700"><Search size={15} /><input className="w-full bg-transparent text-sm text-slate-900 outline-none dark:text-slate-100" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search blocked addresses" /></label><div className="mt-5 overflow-x-auto"><table className="w-full min-w-[820px] text-left"><thead><tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:text-slate-400"><th className="px-3 py-3">Status</th><th className="px-3 py-3">Address</th><th className="px-3 py-3">Reason</th><th className="px-3 py-3">Expires</th><th className="px-3 py-3">Packets</th><th className="px-3 py-3" /></tr></thead><tbody>{visible.map((entry) => <tr key={entry.id} className={`border-b border-slate-100 dark:border-slate-800 ${!entry.enabled ? "opacity-50" : ""}`}><td className="px-3 py-4"><span className={`inline-flex items-center gap-2 text-xs font-semibold ${entry.enabled ? "text-rose-600 dark:text-rose-400" : "text-slate-500"}`}><span className="h-2 w-2 rounded-full bg-current" />{entry.enabled ? "Blocked" : "Paused"}</span></td><td className="px-3 py-4 font-mono text-sm font-semibold text-slate-800 dark:text-slate-200">{entry.address}</td><td className="max-w-sm px-3 py-4 text-sm text-slate-600 dark:text-slate-400">{entry.note || "—"}</td><td className="px-3 py-4 text-sm text-slate-600 dark:text-slate-400">{entry.expires_at ? new Date(entry.expires_at).toLocaleString() : "Permanent"}</td><td className="px-3 py-4 text-sm text-slate-600 dark:text-slate-400">{Number(entry.states || 0).toLocaleString()}</td><td className="px-3 py-4 text-right"><div className="flex justify-end gap-2"><button type="button" onClick={() => onEdit(entry)} className="cursor-pointer text-sm font-semibold text-blue-600 dark:text-blue-400">Edit</button><button type="button" onClick={() => onToggle(entry)} className="cursor-pointer text-sm font-semibold text-slate-600 dark:text-slate-300">{entry.enabled ? "Pause" : "Enable"}</button><button type="button" onClick={() => onDelete(entry)} className="cursor-pointer text-sm font-semibold text-rose-600 dark:text-rose-400">Remove</button></div></td></tr>)}</tbody></table>{visible.length === 0 && <div className="py-16 text-center text-sm text-slate-500 dark:text-slate-400">No blocked addresses match your search.</div>}</div></div>;
+}
+
+function ActivityStat({ icon: Icon, label, value, detail }) {
+  return <div className={panel}><div className="flex items-center gap-3"><Icon size={19} className="text-blue-500" /><div><p className="text-xs text-slate-500 dark:text-slate-400">{label}</p><p className="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">{value}</p></div></div><p className="mt-3 text-xs text-slate-500 dark:text-slate-400">{detail}</p></div>;
+}
+
+function DdosConfigModal({ value, onChange, onSave, onClose }) {
+  return <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/60 p-4 sm:p-8"><section className="w-full max-w-3xl rounded-xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-900"><div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5 dark:border-slate-800"><div><p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Firewall configuration</p><h2 className="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">DDoS protection</h2><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Set local connection and request limits for this server.</p></div><button type="button" aria-label="Close DDoS configuration" onClick={onClose} className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"><X size={18} /></button></div><form className="space-y-5 p-6" onSubmit={(event) => { event.preventDefault(); onSave(); }}><label className="flex cursor-pointer items-start gap-3 text-sm text-slate-700 dark:text-slate-300"><input type="checkbox" className="mt-1 h-4 w-4 accent-blue-600" checked={value.enabled} onChange={(event) => onChange("enabled", event.target.checked)} /><span><span className="block font-semibold text-slate-900 dark:text-slate-100">Enable local traffic protection</span><span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">Apply limits before requests reach the website runtime.</span></span></label><div className="grid gap-5 md:grid-cols-2"><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Mitigation mode<select className={input} value={value.mode} onChange={(event) => onChange("mode", event.target.value)}><option value="rate-limit">Rate limit</option><option value="challenge">Challenge suspicious clients</option><option value="block">Block over-limit clients</option></select></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Requests per second<input className={input} type="number" min="1" value={value.requestsPerSecond} onChange={(event) => onChange("requestsPerSecond", Number(event.target.value))} /></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Burst allowance<input className={input} type="number" min="1" value={value.burst} onChange={(event) => onChange("burst", Number(event.target.value))} /></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Concurrent connections<input className={input} type="number" min="1" value={value.concurrent} onChange={(event) => onChange("concurrent", Number(event.target.value))} /></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Temporary ban duration<input className={input} value={value.banDuration} onChange={(event) => onChange("banDuration", event.target.value)} placeholder="10m" /></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Trusted proxy networks<textarea className={`${input} min-h-24`} value={value.trustedProxies} onChange={(event) => onChange("trustedProxies", event.target.value)} placeholder="One CIDR range per line" /></label></div><label className="flex cursor-pointer items-start gap-3 text-sm text-slate-700 dark:text-slate-300"><input type="checkbox" className="mt-1 h-4 w-4 accent-blue-600" checked={value.logMitigations} onChange={(event) => onChange("logMitigations", event.target.checked)} /><span><span className="block font-medium">Log mitigation events</span><span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">Keep rate-limit and temporary-block decisions available for review.</span></span></label><div className="flex justify-end gap-3 border-t border-slate-200 pt-5 dark:border-slate-800"><button type="button" onClick={onClose} className="cursor-pointer rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-300">Cancel</button><button type="submit" className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"><Shield size={15} />Save DDoS policy</button></div></form></section></div>;
+}
+
+function TrafficActivityTab({ data, loading, onRefresh, rules, forwardings, blockedAddresses }) {
+  const summary = data?.summary || {};
+  const configuredEntries = [
+    ...rules.map((rule) => ({
+      id: rule.id,
+      type: "Firewall rule",
+      name: rule.service || "Firewall rule",
+      match: `${rule.protocol || "TCP"} · ${rule.port || "Any"}`,
+      action: rule.action || "Allow",
+      packets: rule.states || 0,
+      note: rule.note || "",
+    })),
+    ...forwardings.map((forwarding) => ({
+      id: forwarding.id,
+      type: "Port forwarding",
+      name: `${forwarding.listen_address}:${forwarding.listen_port}`,
+      match: `${forwarding.target_address}:${forwarding.target_port}`,
+      action: forwarding.enabled ? "Forward" : "Paused",
+      packets: forwarding.states || 0,
+      note: forwarding.note || "",
+    })),
+    ...blockedAddresses.map((blocked) => ({
+      id: blocked.id,
+      type: "Blocked address",
+      name: blocked.address,
+      match: "Input and forwarded traffic",
+      action: blocked.enabled ? "Drop" : "Paused",
+      packets: blocked.states || 0,
+      note: blocked.note || "",
+    })),
+  ];
+  const entries = data?.entries?.length ? data.entries : data ? configuredEntries : [];
+
+  return (
+    <div className="p-5">
+      <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
+        <div>
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+            Traffic activity
+          </h3>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500 dark:text-slate-400">
+            Live packet counters from the firewall, blocked-address list, and port forwarding rules.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={loading}
+          className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 disabled:cursor-wait disabled:opacity-60 dark:border-slate-700 dark:text-slate-300"
+        >
+          <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
+          Refresh counters
+        </button>
+      </div>
+      {data?.last_apply && (
+        <p className="mt-4 text-xs text-slate-500 dark:text-slate-400">
+          Counters since the last policy apply: {new Date(data.last_apply).toLocaleString()}
+        </p>
+      )}
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <ActivityStat icon={Network} label="Packets counted" value={data ? Number(summary.packets || 0).toLocaleString() : "—"} detail="Managed nftables counters" />
+        <ActivityStat icon={ShieldAlert} label="Blocked packets" value={data ? Number(summary.blocked_packets || 0).toLocaleString() : "—"} detail="Deny, reject, and address blocks" />
+        <ActivityStat icon={ArrowUpFromLine} label="Forwarded packets" value={data ? Number(summary.forwarded_packets || 0).toLocaleString() : "—"} detail="Port forwarding counters" />
+        <ActivityStat icon={Activity} label="Active counters" value={data ? Number(summary.active_sources || 0).toLocaleString() : "—"} detail="Rules with traffic" />
+      </div>
+      {data?.backend && !data.backend.available && (
+        <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-200">
+          {data.backend.message}
+        </div>
+      )}
+      {data && Number(summary.packets || 0) === 0 && entries.length > 0 && (
+        <div className="mt-5 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 dark:border-blue-900/60 dark:bg-blue-950/20 dark:text-blue-200">
+          The firewall is ready, but no packets have matched these managed rules since the last policy apply. Generate traffic to a configured port, then refresh counters.
+        </div>
+      )}
+      {loading && !data ? (
+        <div className="mt-5 space-y-3">
+          {[1, 2, 3, 4].map((item) => <div key={item} className="h-14 animate-pulse rounded-md bg-slate-100 dark:bg-slate-800" />)}
+        </div>
+      ) : (
+        <div className="mt-5 overflow-x-auto">
+          <table className="w-full min-w-[850px] text-left">
+            <thead>
+              <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:text-slate-400">
+                <th className="px-3 py-3">Type</th>
+                <th className="px-3 py-3">Source/rule</th>
+                <th className="px-3 py-3">Match</th>
+                <th className="px-3 py-3">Decision</th>
+                <th className="px-3 py-3">Packets</th>
+                <th className="px-3 py-3">Note</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map((entry) => (
+                <tr key={`${entry.type}-${entry.id}`} className="border-b border-slate-100 dark:border-slate-800">
+                  <td className="px-3 py-4 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{entry.type}</td>
+                  <td className="px-3 py-4 font-mono text-sm text-slate-800 dark:text-slate-200">{entry.name}</td>
+                  <td className="px-3 py-4 text-sm text-slate-600 dark:text-slate-400">{entry.match}</td>
+                  <td className={`px-3 py-4 text-sm font-semibold ${["Deny", "Reject", "Drop"].includes(entry.action) ? "text-rose-600 dark:text-rose-400" : entry.action === "Forward" ? "text-blue-600 dark:text-blue-400" : "text-emerald-600 dark:text-emerald-400"}`}>{entry.action}</td>
+                  <td className="px-3 py-4 text-sm font-semibold text-slate-800 dark:text-slate-200">{Number(entry.packets || 0).toLocaleString()}</td>
+                  <td className="max-w-sm px-3 py-4 text-sm text-slate-500 dark:text-slate-400">{entry.note || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {data && entries.length === 0 && (
+            <div className="py-16 text-center text-sm text-slate-500 dark:text-slate-400">
+              No firewall rules, forwarding rules, or blocked addresses have been configured yet.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function FirewallPage() {
-  const [tab, setTab] = React.useState(() => window.location.hash === "#waf" ? "waf" : window.location.hash === "#ddos" ? "ddos" : "rules");
+  const [tab, setTab] = React.useState("rules");
   const [rules, setRules] = React.useState(initialRules);
+  const [forwardings, setForwardings] = React.useState([]);
+  const [aliases, setAliases] = React.useState([]);
+  const [blockedAddresses, setBlockedAddresses] = React.useState([]);
+  const [activity, setActivity] = React.useState(null);
+  const [activityLoading, setActivityLoading] = React.useState(false);
   const [query, setQuery] = React.useState("");
   const [action, setAction] = React.useState("all");
   const [modal, setModal] = React.useState(null);
+  const [forwardingModal, setForwardingModal] = React.useState(null);
+  const [aliasModal, setAliasModal] = React.useState(null);
+  const [blockedModal, setBlockedModal] = React.useState(null);
+  const [ddosModal, setDdosModal] = React.useState(false);
   const [menu, setMenu] = React.useState(null);
+  const [menuPosition, setMenuPosition] = React.useState(null);
   const [blockedStates, setBlockedStates] = React.useState(0);
   const [firewallStatus, setFirewallStatus] = React.useState("loading");
+  const [backend, setBackend] = React.useState(null);
+  const [applyWarnings, setApplyWarnings] = React.useState([]);
   const [error, setError] = React.useState("");
   const [loading, setLoading] = React.useState(true);
   const [waf, setWaf] = React.useState(() => {
@@ -358,16 +609,29 @@ export default function FirewallPage() {
     if (response.ok) {
       const value = await response.json();
       setRules(value.rules || []);
+      setForwardings(value.forwardings || []);
+      setAliases(value.aliases || []);
+      setBlockedAddresses(value.blocked_addresses || []);
       setBlockedStates(value.blocked_states || 0);
       setFirewallStatus(value.status || "protected");
+      setBackend(value.backend || null);
+      setApplyWarnings(value.apply_warnings || []);
       setError("");
     } else setError(await readApiError(response, "Unable to load firewall policy"));
     setLoading(false);
   }, []);
+  const loadActivity = React.useCallback(async () => {
+    setActivityLoading(true);
+    const response = await apiRequest("/api/v1/firewall/traffic-activity");
+    if (response.ok) setActivity(await response.json());
+    else setError(await readApiError(response, "Unable to load traffic activity"));
+    setActivityLoading(false);
+  }, []);
   React.useEffect(() => { load(); }, [load]);
+  React.useEffect(() => { if (tab === "activity") loadActivity(); }, [tab, loadActivity]);
   React.useEffect(() => {
     if (!menu) return undefined;
-    const close = (event) => { if (!event.target.closest("[data-firewall-menu]")) setMenu(null); };
+    const close = (event) => { if (!event.target.closest("[data-firewall-menu]")) { setMenu(null); setMenuPosition(null); } };
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
   }, [menu]);
@@ -376,6 +640,7 @@ export default function FirewallPage() {
     if (!response.ok) { setError(await readApiError(response)); return false; }
     const created = await response.json();
     setRules((current) => [...current, created]);
+    await load();
     return true;
   };
   const updateRule = async (rule) => {
@@ -383,24 +648,115 @@ export default function FirewallPage() {
     if (!response.ok) { setError(await readApiError(response)); return false; }
     const updated = await response.json();
     setRules((current) => current.map((item) => item.id === updated.id ? updated : item));
+    await load();
     return true;
   };
   const toggleRule = async (rule) => {
     const response = await apiRequest(`/api/v1/firewall/rules/${rule.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !rule.enabled }) });
-    if (response.ok) setRules((current) => current.map((item) => item.id === rule.id ? { ...item, enabled: !item.enabled } : item));
+    if (response.ok) {
+      setRules((current) => current.map((item) => item.id === rule.id ? { ...item, enabled: !item.enabled } : item));
+      await load();
+    }
     else setError(await readApiError(response));
     setMenu(null);
+    setMenuPosition(null);
   };
   const deleteRule = async (rule) => {
     const response = await apiRequest(`/api/v1/firewall/rules/${rule.id}`, { method: "DELETE" });
-    if (response.ok) setRules((current) => current.filter((item) => item.id !== rule.id));
+    if (response.ok) {
+      setRules((current) => current.filter((item) => item.id !== rule.id));
+      await load();
+    }
     else setError(await readApiError(response));
     setMenu(null);
+    setMenuPosition(null);
+  };
+  const toggleRuleMenu = (event, ruleId) => {
+    if (menu === ruleId) {
+      setMenu(null);
+      setMenuPosition(null);
+      return;
+    }
+    const rect = event.currentTarget.getBoundingClientRect();
+    setMenu(ruleId);
+    setMenuPosition({
+      top: rect.bottom + 6,
+      right: Math.max(12, window.innerWidth - rect.right),
+    });
   };
   const reloadPolicy = async () => {
     const response = await apiRequest("/api/v1/firewall/reload", { method: "POST" });
-    if (response.ok) { const value = await response.json(); setRules(value.rules || []); setBlockedStates(value.blocked_states || 0); setFirewallStatus(value.status || "protected"); setError(""); }
+    if (response.ok) { const value = await response.json(); setRules(value.rules || []); setBlockedStates(value.blocked_states || 0); setFirewallStatus(value.status || "protected"); setBackend(value.backend || null); setApplyWarnings(value.apply_warnings || []); setError(""); }
     else setError(await readApiError(response));
+  };
+  const createForwarding = async (forwarding) => {
+    const response = await apiRequest("/api/v1/firewall/forwardings", { method: "POST", body: JSON.stringify(forwarding) });
+    if (!response.ok) { setError(await readApiError(response)); return false; }
+    await load();
+    return true;
+  };
+  const updateForwarding = async (forwarding) => {
+    const response = await apiRequest(`/api/v1/firewall/forwardings/${forwardingModal.id}`, { method: "PUT", body: JSON.stringify(forwarding) });
+    if (!response.ok) { setError(await readApiError(response)); return false; }
+    await load();
+    return true;
+  };
+  const toggleForwarding = async (forwarding) => {
+    const response = await apiRequest(`/api/v1/firewall/forwardings/${forwarding.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !forwarding.enabled }) });
+    if (!response.ok) setError(await readApiError(response));
+    else await load();
+  };
+  const deleteForwarding = async (forwarding) => {
+    if (!window.confirm(`Delete forwarding ${forwarding.listen_port} → ${forwarding.target_address}:${forwarding.target_port}?`)) return;
+    const response = await apiRequest(`/api/v1/firewall/forwardings/${forwarding.id}`, { method: "DELETE" });
+    if (!response.ok) setError(await readApiError(response));
+    else await load();
+  };
+  const createAlias = async (alias) => {
+    const response = await apiRequest("/api/v1/firewall/aliases", { method: "POST", body: JSON.stringify(alias) });
+    if (!response.ok) { setError(await readApiError(response)); return false; }
+    await load();
+    return true;
+  };
+  const updateAlias = async (alias) => {
+    const response = await apiRequest(`/api/v1/firewall/aliases/${aliasModal.id}`, { method: "PUT", body: JSON.stringify(alias) });
+    if (!response.ok) { setError(await readApiError(response)); return false; }
+    await load();
+    return true;
+  };
+  const toggleAlias = async (alias) => {
+    const response = await apiRequest(`/api/v1/firewall/aliases/${alias.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !alias.enabled }) });
+    if (!response.ok) setError(await readApiError(response));
+    else await load();
+  };
+  const deleteAlias = async (alias) => {
+    if (!window.confirm(`Delete alias ${alias.name}? Rules using it will stop matching this alias.`)) return;
+    const response = await apiRequest(`/api/v1/firewall/aliases/${alias.id}`, { method: "DELETE" });
+    if (!response.ok) setError(await readApiError(response));
+    else await load();
+  };
+  const createBlockedAddress = async (entry) => {
+    const response = await apiRequest("/api/v1/firewall/blocked-addresses", { method: "POST", body: JSON.stringify(entry) });
+    if (!response.ok) { setError(await readApiError(response)); return false; }
+    await load();
+    return true;
+  };
+  const updateBlockedAddress = async (entry) => {
+    const response = await apiRequest(`/api/v1/firewall/blocked-addresses/${blockedModal.id}`, { method: "PUT", body: JSON.stringify(entry) });
+    if (!response.ok) { setError(await readApiError(response)); return false; }
+    await load();
+    return true;
+  };
+  const toggleBlockedAddress = async (entry) => {
+    const response = await apiRequest(`/api/v1/firewall/blocked-addresses/${entry.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !entry.enabled }) });
+    if (!response.ok) setError(await readApiError(response));
+    else await load();
+  };
+  const deleteBlockedAddress = async (entry) => {
+    if (!window.confirm(`Remove block for ${entry.address}?`)) return;
+    const response = await apiRequest(`/api/v1/firewall/blocked-addresses/${entry.id}`, { method: "DELETE" });
+    if (!response.ok) setError(await readApiError(response));
+    else await load();
   };
   const visible = rules.filter(
     (rule) =>
@@ -435,9 +791,17 @@ export default function FirewallPage() {
           </p>
         </div>
         <div className="flex gap-3">
-          <button onClick={reloadPolicy} disabled={loading} className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-300 disabled:cursor-not-allowed disabled:opacity-50">
+          <button type="button" className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800" onClick={() => { window.location.href = "/application-shield"; }}>
+            <ShieldAlert size={16} />
+            Configure WAF
+          </button>
+          <button type="button" className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800" onClick={() => setDdosModal(true)}>
+            <Shield size={16} />
+            Configure DDoS
+          </button>
+          <button onClick={reloadPolicy} disabled={loading || !backend?.available} className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-300 disabled:cursor-not-allowed disabled:opacity-50">
             <RefreshCw size={16} />
-            Reload policy
+            Apply rules
           </button>
           <button
             className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
@@ -515,6 +879,16 @@ export default function FirewallPage() {
         </div>
       </section>
       {error && <div className="border-b border-rose-300 pb-3 text-sm text-rose-600 dark:border-rose-900 dark:text-rose-400">{error}</div>}
+      {backend && (
+        <div className={`flex items-start gap-3 rounded-lg border px-4 py-3 text-sm ${backend.available ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/20 dark:text-emerald-200" : "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-200"}`}>
+          {backend.available ? <CheckCircle2 size={17} className="mt-0.5 shrink-0" /> : <AlertTriangle size={17} className="mt-0.5 shrink-0" />}
+          <div>
+            <p className="font-semibold">{backend.available ? "Firewall backend ready" : "Firewall backend unavailable"}</p>
+            <p className="mt-1">{backend.message}</p>
+            {applyWarnings.length > 0 && <p className="mt-1">{applyWarnings.join(" ")}</p>}
+          </div>
+        </div>
+      )}
       <section className="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <div className="border-b border-slate-200 px-5 pt-5 dark:border-slate-800">
           <div className="flex gap-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
@@ -568,6 +942,21 @@ export default function FirewallPage() {
             <label className="flex cursor-pointer items-start gap-3"><input type="checkbox" className="mt-1 h-4 w-4 accent-blue-600" checked={ddos.logMitigations} onChange={(event) => updateDdos("logMitigations", event.target.checked)} /><span><span className="block text-sm font-medium text-slate-900 dark:text-slate-100">Log mitigation events</span><span className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">Record rate-limit, challenge, and temporary-ban decisions for review.</span></span></label>
             <div className="flex items-center justify-between gap-4"><p className="text-sm text-slate-500 dark:text-slate-400">{ddosMessage || "Provider-level volumetric DDoS protection must be configured at the hosting or CDN edge."}</p><button type="button" className="inline-flex cursor-pointer items-center justify-center rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700" onClick={saveDdos}>Save DDoS policy</button></div>
           </div>
+        ) : tab === "forwarding" ? (
+          <ForwardingTab forwardings={forwardings} backend={backend} onCreate={() => setForwardingModal({})} onEdit={setForwardingModal} onToggle={toggleForwarding} onDelete={deleteForwarding} />
+        ) : tab === "aliases" ? (
+          <AliasesTab aliases={aliases} onCreate={() => setAliasModal({})} onEdit={setAliasModal} onToggle={toggleAlias} onDelete={deleteAlias} />
+        ) : tab === "blocked" ? (
+          <BlockedAddressesTab entries={blockedAddresses} onCreate={() => setBlockedModal({})} onEdit={setBlockedModal} onToggle={toggleBlockedAddress} onDelete={deleteBlockedAddress} />
+        ) : tab === "activity" ? (
+          <TrafficActivityTab
+            data={activity}
+            loading={activityLoading}
+            onRefresh={loadActivity}
+            rules={rules}
+            forwardings={forwardings}
+            blockedAddresses={blockedAddresses}
+          />
         ) : tab === "rules" ? (
           <div className="p-5">
             <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
@@ -655,11 +1044,10 @@ export default function FirewallPage() {
                       <td className="px-3 py-4 text-sm text-slate-600 dark:text-slate-400">
                         {rule.states.toLocaleString()}
                       </td>
-                      <td data-firewall-menu className="relative px-3 py-4 text-right">
-                        <button onClick={() => setMenu(menu === rule.id ? null : rule.id)} className="cursor-pointer rounded-md p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">
+                      <td data-firewall-menu className="px-3 py-4 text-right">
+                        <button onClick={(event) => toggleRuleMenu(event, rule.id)} className="cursor-pointer rounded-md p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">
                           <MoreHorizontal size={17} />
                         </button>
-                        {menu === rule.id && <div className="absolute right-3 top-12 z-10 w-44 rounded-md border border-slate-200 bg-white py-1 text-left shadow-lg dark:border-slate-700 dark:bg-slate-900"><button className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800" onClick={() => { setModal(rule); setMenu(null); }}><Edit3 size={15} />Edit rule</button><button className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800" onClick={() => toggleRule(rule)}><CheckCircle2 size={15} />{rule.enabled ? "Disable rule" : "Enable rule"}</button><button className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/30" onClick={() => deleteRule(rule)}><Trash2 size={15} />Delete rule</button></div>}
                       </td>
                     </tr>
                   ))}
@@ -695,6 +1083,15 @@ export default function FirewallPage() {
           </div>
         )}
       </section>
+      {menu && menuPosition && (() => {
+        const rule = rules.find((item) => item.id === menu);
+        if (!rule) return null;
+        return <div data-firewall-menu className="fixed z-[60] w-44 rounded-md border border-slate-200 bg-white py-1 text-left shadow-lg dark:border-slate-700 dark:bg-slate-900" style={menuPosition}>
+          <button className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800" onClick={() => { setModal(rule); setMenu(null); setMenuPosition(null); }}><Edit3 size={15} />Edit rule</button>
+          <button className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800" onClick={() => toggleRule(rule)}><CheckCircle2 size={15} />{rule.enabled ? "Disable rule" : "Enable rule"}</button>
+          <button className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/30" onClick={() => deleteRule(rule)}><Trash2 size={15} />Delete rule</button>
+        </div>;
+      })()}
       {modal && (
         <RuleModal
           rule={modal.id ? modal : null}
@@ -702,6 +1099,10 @@ export default function FirewallPage() {
           onSave={modal.id ? updateRule : createRule}
         />
       )}
+      {forwardingModal && <ForwardingModal forwarding={forwardingModal.id ? forwardingModal : null} onClose={() => setForwardingModal(null)} onSave={forwardingModal.id ? updateForwarding : createForwarding} />}
+      {aliasModal && <AliasModal alias={aliasModal.id ? aliasModal : null} onClose={() => setAliasModal(null)} onSave={aliasModal.id ? updateAlias : createAlias} />}
+      {blockedModal && <BlockedAddressModal entry={blockedModal.id ? blockedModal : null} onClose={() => setBlockedModal(null)} onSave={blockedModal.id ? updateBlockedAddress : createBlockedAddress} />}
+      {ddosModal && <DdosConfigModal value={ddos} onChange={updateDdos} onSave={() => { saveDdos(); setDdosModal(false); }} onClose={() => setDdosModal(false)} />}
     </div>
   );
 }

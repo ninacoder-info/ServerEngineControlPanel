@@ -1,6 +1,5 @@
 import React from "react";
-import { ChevronRight, ExternalLink, Server, X } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { ExternalLink, Server, X } from "lucide-react";
 import { apiRequest } from "../../lib/api";
 import ServiceNotInstalledState from "../../components/ServiceNotInstalledState";
 import { useServiceInstallationState } from "../../hooks/useServiceInstallationState";
@@ -9,7 +8,6 @@ import PhpRuntimeTable from "./PhpRuntimeTable";
 import ServiceManagerModal from "./ServiceManagerModal";
 
 export default function PhpRuntimesPage({ modal = false, onClose }) {
-  const navigate = useNavigate();
   const phpState = useServiceInstallationState("php");
   const [service, setService] = React.useState(null);
   const [runtimes, setRuntimes] = React.useState([]);
@@ -118,28 +116,6 @@ export default function PhpRuntimesPage({ modal = false, onClose }) {
       <div className={`space-y-7 ${modal ? "pr-2" : ""}`}>
       {!modal && (
         <>
-          <nav aria-label="Breadcrumb">
-            <ol className="flex items-center gap-1.5 text-sm text-slate-500 dark:text-slate-400">
-              <li>
-                <button
-                  type="button"
-                  className="font-medium hover:text-blue-600 dark:hover:text-blue-400"
-                  onClick={() => navigate("/services")}
-                >
-                  Services
-                </button>
-              </li>
-              <li aria-hidden="true">
-                <ChevronRight size={15} />
-              </li>
-              <li
-                className="font-medium text-slate-900 dark:text-slate-100"
-                aria-current="page"
-              >
-                PHP-FPM runtimes
-              </li>
-            </ol>
-          </nav>
           <div className="php-page-heading">
             <div>
               <p className="text-sm text-cyan-300">Application runtimes</p>

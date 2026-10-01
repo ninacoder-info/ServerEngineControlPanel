@@ -204,8 +204,45 @@ function NodeExporterWorkspace({ policy, updatePolicy, onSave, saved, onTest, te
   );
 }
 
+function ServerHealthSkeleton() {
+  return (
+    <div className="animate-pulse space-y-7" aria-label="Loading server health">
+      <header className="flex flex-col items-start justify-between gap-4 md:flex-row md:items-end">
+        <div className="space-y-3">
+          <div className="h-4 w-28 rounded bg-slate-200 dark:bg-slate-800" />
+          <div className="h-9 w-48 rounded bg-slate-200 dark:bg-slate-800" />
+          <div className="h-4 w-[34rem] max-w-full rounded bg-slate-100 dark:bg-slate-800/70" />
+        </div>
+        <div className="h-10 w-32 rounded-md bg-slate-200 dark:bg-slate-800" />
+      </header>
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <div key={index} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="h-4 w-28 rounded bg-slate-100 dark:bg-slate-800/70" />
+            <div className="mt-5 h-8 w-24 rounded bg-slate-200 dark:bg-slate-800" />
+            <div className="mt-2 h-3 w-36 rounded bg-slate-100 dark:bg-slate-800/70" />
+          </div>
+        ))}
+      </section>
+      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="space-y-2"><div className="h-5 w-36 rounded bg-slate-200 dark:bg-slate-800" /><div className="h-3 w-80 max-w-full rounded bg-slate-100 dark:bg-slate-800/70" /></div>
+        <div className="mt-6 h-48 rounded-md bg-slate-100 dark:bg-slate-800/70" />
+      </section>
+      <div className="grid gap-5 xl:grid-cols-2">
+        {Array.from({ length: 2 }).map((_, index) => (
+          <section key={index} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="space-y-2"><div className="h-5 w-40 rounded bg-slate-200 dark:bg-slate-800" /><div className="h-3 w-64 rounded bg-slate-100 dark:bg-slate-800/70" /></div>
+            <div className="mt-5 space-y-4">{Array.from({ length: 4 }).map((__, row) => <div key={row} className="flex items-center gap-3"><div className="h-8 w-8 rounded bg-slate-100 dark:bg-slate-800/70" /><div className="h-4 flex-1 rounded bg-slate-100 dark:bg-slate-800/70" /></div>)}</div>
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function ServerHealthPage() {
   const [metrics, setMetrics] = React.useState(null);
+  const [metricsLoading, setMetricsLoading] = React.useState(true);
   const [history, setHistory] = React.useState({
     cpu: [],
     memory: [],
@@ -239,19 +276,23 @@ export default function ServerHealthPage() {
   const [lynisSaved, setLynisSaved] = React.useState(false);
   const [lynisScanning, setLynisScanning] = React.useState(false);
   const load = React.useCallback(async () => {
-    const response = await apiRequest("/api/v1/metrics");
-    if (!response.ok) return;
-    const next = await response.json();
-    setMetrics(next);
-    setHistory((previous) => ({
-      cpu: [...previous.cpu, next.cpu.percent].slice(-60),
-      memory: [...previous.memory, next.memory.percent].slice(-60),
-      disk: [...previous.disk, next.disk.percent].slice(-60),
-      network: [
-        ...previous.network,
-        next.network.download + next.network.upload,
-      ].slice(-60),
-    }));
+    try {
+      const response = await apiRequest("/api/v1/metrics");
+      if (!response.ok) return;
+      const next = await response.json();
+      setMetrics(next);
+      setHistory((previous) => ({
+        cpu: [...previous.cpu, next.cpu.percent].slice(-60),
+        memory: [...previous.memory, next.memory.percent].slice(-60),
+        disk: [...previous.disk, next.disk.percent].slice(-60),
+        network: [
+          ...previous.network,
+          next.network.download + next.network.upload,
+        ].slice(-60),
+      }));
+    } finally {
+      setMetricsLoading(false);
+    }
   }, []);
   React.useEffect(() => {
     load();
@@ -272,6 +313,7 @@ export default function ServerHealthPage() {
   const updateLynis = (key, value) => setLynis((current) => ({ ...current, [key]: value }));
   const saveLynis = () => { localStorage.setItem("serverengine:lynis-policy", JSON.stringify(lynis)); setLynisSaved(true); window.setTimeout(() => setLynisSaved(false), 3000); };
   const runLynis = () => { setLynisScanning(true); window.setTimeout(() => setLynisScanning(false), 1400); };
+  if (metricsLoading && !metrics) return <ServerHealthSkeleton />;
   return (
     <div className="space-y-7">
       <div className="flex flex-col items-start justify-between gap-4 md:flex-row md:items-end">

@@ -30,6 +30,10 @@ import HaProxyConfigModal from "./HaProxyConfigModal";
 import ValkeyConfigModal from "./ValkeyConfigModal";
 import Fail2banConfigModal from "./Fail2banConfigModal";
 import MongoDbConfigModal from "./MongoDbConfigModal";
+import StalwartConfigModal from "./StalwartConfigModal";
+import WpCliConfigModal from "./WpCliConfigModal";
+import LinuxAuditConfigModal from "./LinuxAuditConfigModal";
+import ClamAvConfigModal from "./ClamAvConfigModal";
 import SaveButton from "../../components/SaveButton";
 import Toast from "../../components/Toast";
 
@@ -1155,6 +1159,7 @@ export default function ServiceManagerModal({
   if (service.id === "redis") {
     return (
       <RedisConfigModal
+        service={service}
         installed={installedProp}
         onClose={onClose}
       />
@@ -1175,7 +1180,7 @@ export default function ServiceManagerModal({
     return <OpenLiteSpeedConfigModal installed={installedProp} onClose={onClose} />;
   }
   if (service.id === "caddy") {
-    return <CaddyConfigModal installed={installedProp} onClose={onClose} />;
+    return <CaddyConfigModal service={service} installed={installedProp} onClose={onClose} />;
   }
   if (service.id === "haproxy") {
     return <HaProxyConfigModal installed={installedProp} onClose={onClose} />;
@@ -1188,6 +1193,18 @@ export default function ServiceManagerModal({
   }
   if (service.id === "fail2ban") {
     return <Fail2banConfigModal installed={installedProp} onClose={onClose} />;
+  }
+  if (service.id === "stalwart") {
+    return <StalwartConfigModal service={service} installed={installedProp} onClose={onClose} />;
+  }
+  if (service.id === "wp-cli") {
+    return <WpCliConfigModal service={service} installed={installedProp} onClose={onClose} />;
+  }
+  if (service.id === "auditd") {
+    return <LinuxAuditConfigModal service={service} installed={installedProp} onClose={onClose} />;
+  }
+  if (service.id === "clamav") {
+    return <ClamAvConfigModal service={service} installed={installedProp} onClose={onClose} />;
   }
   const initialInstalledItems = Array.isArray(installedProp)
     ? installedProp

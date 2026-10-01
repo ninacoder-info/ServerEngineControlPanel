@@ -2,6 +2,11 @@ services:
   core-dev:
     image: ubuntu:24.04
     platform: linux/arm64
+    # Permit the Local Server terminal and firewall provider to manage this
+    # container's network namespace during development. This does not grant
+    # access to the physical host firewall.
+    cap_add:
+      - NET_ADMIN
     working_dir: /app
     ports:
       - "${CORE_DEV_PORT:-18001}:8000"
@@ -9,6 +14,8 @@ services:
       SE_DB_PATH: /var/lib/server-engine/control.db
       SE_STATE_DIR: /var/lib/server-engine
       SE_SERVICE_ROOT: /opt/server-engine/services
+      SE_LOG_ROOT: /server-engine/logs
+      SE_BACKUP_ROOT: /server-engine/backups
       SE_FILE_MANAGER_ROOT: /
       SE_WEB_ROOT: /server-engine/www
       SE_WEBAUTHN_RP_ID: localhost
@@ -22,9 +29,14 @@ services:
       - core-dev-state:/var/lib/server-engine
       - core-dev-services:/opt/server-engine/services
       - core-dev-web-root:/server-engine/www
+      - core-dev-logs:/server-engine/logs
+      - core-dev-backups:/server-engine/backups
+      # Development uses the host Docker daemon so the Docker manager can be
+      # tested without running a privileged nested Docker daemon.
+      - /var/run/docker.sock:/var/run/docker.sock
     command: >-
       bash -lc "apt-get update &&
-      apt-get install -y --no-install-recommends python3 python3-pip python3-venv openssh-client ca-certificates passwd git golang-go build-essential &&
+      apt-get install -y --no-install-recommends python3 python3-pip python3-venv openssh-client ca-certificates passwd git golang-go build-essential nftables docker.io &&
       id -u serverengine >/dev/null 2>&1 || useradd --system --user-group --home-dir /var/lib/server-engine --shell /usr/sbin/nologin serverengine &&
       test -x /opt/server-engine-venv/bin/python || python3 -m venv /opt/server-engine-venv &&
       /opt/server-engine-venv/bin/pip install -e . &&
@@ -60,5 +72,7 @@ volumes:
   core-dev-state:
   core-dev-services:
   core-dev-web-root:
+  core-dev-logs:
+  core-dev-backups:
   web-dev-node-modules:
   web-dev-npm-cache:

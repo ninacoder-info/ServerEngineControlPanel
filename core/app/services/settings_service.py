@@ -17,7 +17,7 @@ DEFAULT_SETTINGS = {
     "panel_date_format": "local",
     "panel_show_hints": True,
     "default_site_root": "/server-engine/www",
-    "default_backup_root": "/var/lib/server-engine/backups",
+    "default_backup_root": "/server-engine/backups",
     "storage_file_manager_start": "web-root",
     "storage_show_hidden_files": True,
     "storage_verify_encoding": True,
@@ -251,6 +251,9 @@ class SettingsService:
                 if isinstance(stored, dict): values.update({key: value for key, value in stored.items() if key in DEFAULT_SETTINGS})
             except (OSError, json.JSONDecodeError):
                 raise HTTPException(status_code=500, detail="Settings file is unreadable")
+        # Backup storage is a panel-managed location, not a user-selectable
+        # setting. Keep older settings files compatible with the fixed path.
+        values["default_backup_root"] = "/server-engine/backups"
         return values
 
     def update(self, changes: dict) -> dict:
@@ -258,6 +261,7 @@ class SettingsService:
         if unknown: raise HTTPException(status_code=400, detail=f"Unknown settings: {', '.join(unknown)}")
         values = self.read()
         values.update(changes)
+        values["default_backup_root"] = "/server-engine/backups"
         self._validate(values)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd, temporary = tempfile.mkstemp(prefix="settings.", suffix=".tmp", dir=self.path.parent)

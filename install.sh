@@ -13,7 +13,7 @@ ARTIFACT_DIR=""
 ARTIFACT_ARCHIVE=""
 PREFIX="/opt/server-engine"
 STATE_DIR="/var/lib/server-engine"
-LOG_DIR="/var/log/server-engine"
+LOG_DIR="/server-engine/logs"
 WEB_PORT="8888"
 API_PORT="8000"
 API_HOST="127.0.0.1"
@@ -25,8 +25,8 @@ RUN_GROUP="serverengine"
 WEB_ROOT="/server-engine/www"
 CERTBOT_ROOT=""
 LOCK_FILE="/run/lock/server-engine-install.lock"
-LOG_FILE="/var/log/server-engine-install.log"
-BACKUP_ROOT="/var/backups/server-engine"
+LOG_FILE="/server-engine/logs/installer.log"
+BACKUP_ROOT="/server-engine/backups"
 readonly MIN_RAM_MB="1024"
 RELEASE_ID="$(date -u +%Y%m%d%H%M%S)-$$"
 RELEASE_DIR=""
@@ -58,7 +58,8 @@ Options:
   -h, --help              Show this help
 
 This script installs the panel natively on a Linux customer server.
-It does not install Docker, Nginx, Apache, PHP, databases, or firewall rules.
+It does not install Docker, Nginx, Apache, PHP, or databases. It may prepare
+a host firewall backend, but never enables, flushes, or applies firewall rules.
 EOF
 }
 
@@ -201,6 +202,69 @@ install_certbot_runtime() {
   ln -sfn "$certbot_bin" /usr/local/bin/serverengine-certbot
 }
 
+firewall_backend_state() {
+  local backend="unavailable"
+  if has ufw && ufw status 2>/dev/null | grep -q '^Status: active'; then
+    backend="ufw"
+  elif has firewall-cmd && firewall-cmd --state >/dev/null 2>&1; then
+    backend="firewalld"
+  elif has nft && nft list ruleset 2>/dev/null | grep -qE '^[[:space:]]*(table|chain|set|map)[[:space:]]'; then
+    backend="nftables"
+  elif has iptables-save && iptables-save 2>/dev/null | grep -qE '^-A (INPUT|FORWARD|OUTPUT) '; then
+    backend="iptables"
+  elif has nft; then
+    backend="nftables-available"
+  elif has iptables || has iptables-save; then
+    backend="iptables-available"
+  fi
+  printf '%s' "$backend"
+}
+
+prepare_firewall_backend() {
+  local detected
+  detected="$(firewall_backend_state)"
+  if [ "$detected" != "unavailable" ]; then
+    log "Firewall backend detected: $detected; no firewall package or rules will be changed"
+    printf '%s\n' "$detected" > "$STATE_DIR/firewall-backend"
+    chown "$RUN_USER:$RUN_GROUP" "$STATE_DIR/firewall-backend"
+    chmod 0640 "$STATE_DIR/firewall-backend"
+    return 0
+  fi
+
+  log "No firewall backend detected; preparing nftables for Firewall controls"
+  local install_ok="false"
+  case "$PM" in
+    apt)
+      if DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nftables; then
+        install_ok="true"
+      else
+        log "nftables package install failed; refreshing package metadata and retrying"
+        if DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nftables; then
+          install_ok="true"
+        fi
+      fi
+      ;;
+    dnf|yum)
+      if "$PM" install -y nftables; then install_ok="true"; fi
+      ;;
+    *)
+      log "No supported package manager is available for automatic nftables preparation"
+      ;;
+  esac
+
+  if [ "$install_ok" = true ]; then
+    detected="$(firewall_backend_state)"
+    [ "$detected" = "unavailable" ] && detected="nftables-available"
+    log "Firewall backend prepared: $detected (rules remain unchanged)"
+  else
+    detected="unavailable"
+    log "WARNING: unable to prepare nftables; Server Engine installation will continue without host firewall support"
+  fi
+  printf '%s\n' "$detected" > "$STATE_DIR/firewall-backend"
+  chown "$RUN_USER:$RUN_GROUP" "$STATE_DIR/firewall-backend"
+  chmod 0640 "$STATE_DIR/firewall-backend"
+}
+
 detect_runtimes() {
   has python3 || die "python3 is required; rerun with --install-system-deps"
   PYTHON="$(command -v python3)"
@@ -251,7 +315,17 @@ create_runtime_user() {
   if ! id -u "$RUN_USER" >/dev/null 2>&1; then
     if has useradd; then useradd --system --gid "$RUN_GROUP" --home-dir "$STATE_DIR" --shell /usr/sbin/nologin "$RUN_USER"; else die "useradd is required"; fi
   fi
-  install -d -o "$RUN_USER" -g "$RUN_GROUP" -m 0750 "$STATE_DIR" "$LOG_DIR"
+  install -d -o "$RUN_USER" -g "$RUN_GROUP" -m 0750 "$STATE_DIR" "$LOG_DIR" "$BACKUP_ROOT"
+  # Migrate data created by older releases without deleting the old location.
+  if [ -d /var/lib/server-engine/backups ] && [ "$BACKUP_ROOT" != "/var/lib/server-engine/backups" ]; then
+    cp -a /var/lib/server-engine/backups/. "$BACKUP_ROOT/" 2>/dev/null || true
+  fi
+  if [ -d /var/log/server-engine ] && [ "$LOG_DIR" != "/var/log/server-engine" ]; then
+    cp -a /var/log/server-engine/. "$LOG_DIR/" 2>/dev/null || true
+  fi
+  chown -R "$RUN_USER:$RUN_GROUP" "$BACKUP_ROOT" 2>/dev/null || true
+  chown -R "$RUN_USER:$RUN_GROUP" "$LOG_DIR" 2>/dev/null || true
+  [ ! -e "$STATE_DIR/backups.json" ] || chown "$RUN_USER:$RUN_GROUP" "$STATE_DIR/backups.json"
   install -d -o "$RUN_USER" -g "$RUN_GROUP" -m 0755 "$WEB_ROOT"
 }
 
@@ -261,6 +335,8 @@ cat > "$RELEASE_DIR/core/run.sh" <<EOF
 export SE_SERVICE_ROOT="$PREFIX/services"
 export SE_WEB_ROOT="$WEB_ROOT"
 export SE_STATE_DIR="$STATE_DIR"
+export SE_LOG_ROOT="$LOG_DIR"
+export SE_BACKUP_ROOT="$BACKUP_ROOT"
 export SE_WEB_DIST="$RELEASE_DIR/web/dist"
 exec "$RELEASE_DIR/core/.venv/bin/uvicorn" app.main:app --host "$API_HOST" --port "$API_PORT"
 EOF
@@ -372,6 +448,7 @@ main() {
   check_existing_state
   create_release
   create_runtime_user
+  prepare_firewall_backend
   install_certbot_runtime
   write_runtime_files
   activate_release

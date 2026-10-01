@@ -107,6 +107,22 @@ export default function ServicesPage() {
     return () => window.removeEventListener("hashchange", openAuditInstaller);
   }, [catalog, installed, selected]);
 
+  React.useEffect(() => {
+    const openDatabaseServiceConfig = () => {
+      const match = window.location.hash.match(/^#(mysql|postgresql|mongodb|redis|sqlserver)-config$/);
+      if (!match || manage) return;
+      const service = catalog.find((item) => item.id === match[1]);
+      if (!service) return;
+      const versions = installed.filter(
+        (item) => item.id === service.id || item.id.startsWith(`${service.id}@`),
+      );
+      setManage({ service, versions });
+    };
+    openDatabaseServiceConfig();
+    window.addEventListener("hashchange", openDatabaseServiceConfig);
+    return () => window.removeEventListener("hashchange", openDatabaseServiceConfig);
+  }, [catalog, installed, manage]);
+
   const togglePin = (serviceId) =>
     setPinned((current) =>
       current.includes(serviceId)

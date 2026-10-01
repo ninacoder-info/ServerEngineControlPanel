@@ -706,6 +706,62 @@ function AccountModal({ account, onClose, onSaved }) {
   );
 }
 
+function FTPPageSkeleton() {
+  return (
+    <div className="animate-pulse space-y-7" aria-label="Loading FTP accounts">
+      <header className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
+        <div className="space-y-3">
+          <div className="h-4 w-36 rounded bg-slate-200 dark:bg-slate-800" />
+          <div className="h-9 w-44 rounded bg-slate-200 dark:bg-slate-800" />
+          <div className="h-4 w-[30rem] max-w-full rounded bg-slate-100 dark:bg-slate-800/70" />
+        </div>
+        <div className="h-10 w-40 rounded-md bg-slate-200 dark:bg-slate-800" />
+      </header>
+
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <div key={index} className={`${card} space-y-4`}>
+            <div className="flex items-center gap-3">
+              <div className="h-5 w-5 rounded bg-slate-200 dark:bg-slate-800" />
+              <div className="space-y-2">
+                <div className="h-3 w-20 rounded bg-slate-100 dark:bg-slate-800/70" />
+                <div className="h-6 w-24 rounded bg-slate-200 dark:bg-slate-800" />
+              </div>
+            </div>
+          </div>
+        ))}
+      </section>
+
+      <section className={card}>
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-2">
+            <div className="h-5 w-32 rounded bg-slate-200 dark:bg-slate-800" />
+            <div className="h-3 w-64 rounded bg-slate-100 dark:bg-slate-800/70" />
+          </div>
+          <div className="h-5 w-20 rounded bg-slate-100 dark:bg-slate-800/70" />
+        </div>
+        <div className="mt-5 overflow-hidden">
+          <div className="grid grid-cols-6 gap-4 border-b border-slate-200 px-3 py-3 dark:border-slate-800">
+            {Array.from({ length: 6 }).map((_, index) => <div key={index} className="h-3 rounded bg-slate-100 dark:bg-slate-800/70" />)}
+          </div>
+          <div className="divide-y divide-slate-100 dark:divide-slate-800">
+            {Array.from({ length: 5 }).map((_, index) => (
+              <div key={index} className="grid grid-cols-6 items-center gap-4 px-3 py-5">
+                <div className="h-4 w-24 rounded bg-slate-200 dark:bg-slate-800" />
+                <div className="h-3 w-40 rounded bg-slate-100 dark:bg-slate-800/70" />
+                <div className="h-3 w-16 rounded bg-slate-100 dark:bg-slate-800/70" />
+                <div className="h-3 w-20 rounded bg-slate-100 dark:bg-slate-800/70" />
+                <div className="h-5 w-20 rounded-full bg-slate-100 dark:bg-slate-800/70" />
+                <div className="ml-auto h-7 w-16 rounded bg-slate-100 dark:bg-slate-800/70" />
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 export default function FTPPage() {
   const vsftpdState = useServiceInstallationState("vsftpd");
   const [data, setData] = React.useState({
@@ -797,7 +853,7 @@ export default function FTPPage() {
   };
   const installed = vsftpdState.installed && data.service.installed;
   if (loading || vsftpdState.loading) {
-    return <ServiceNotInstalledState state={{ ...vsftpdState, loading: true }} eyebrow="FTP Accounts" title="Checking FTP status" description="Checking whether vsftpd is available on this server." installLabel="Install vsftpd" icon={Server} />;
+    return <FTPPageSkeleton />;
   }
   if (!installed) {
     return <ServiceNotInstalledState state={vsftpdState} icon={Server} eyebrow="FTP Accounts" title="vsftpd is not installed" description="Install vsftpd to create restricted FTP accounts, configure FTPS, and manage passive transfer ports." installLabel="Install vsftpd" />;

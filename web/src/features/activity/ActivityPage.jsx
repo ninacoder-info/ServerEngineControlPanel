@@ -78,7 +78,7 @@ const seedEvents = [
     time: "2026-09-27T08:40:00",
     status: "warning",
     icon: AlertTriangle,
-    metadata: { Destination: "/var/lib/server-engine/backups", Usage: "82%", Schedule: "Daily at 02:00" },
+    metadata: { Destination: "/server-engine/backups", Usage: "82%", Schedule: "Daily at 02:00" },
   },
   {
     id: "firewall-reloaded",
@@ -158,6 +158,19 @@ function ActivityRow({ event, expanded, onExpand }) {
   );
 }
 
+function ActivitySkeleton() {
+  return (
+    <div className="animate-pulse space-y-6" aria-label="Loading activity logs">
+      <header className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
+        <div className="space-y-3"><div className="h-4 w-36 rounded bg-slate-200 dark:bg-slate-800" /><div className="h-9 w-32 rounded bg-slate-200 dark:bg-slate-800" /><div className="h-4 w-96 max-w-full rounded bg-slate-100 dark:bg-slate-800/70" /></div>
+        <div className="flex gap-2"><div className="h-9 w-28 rounded bg-slate-100 dark:bg-slate-800/70" /><div className="h-9 w-24 rounded bg-slate-200 dark:bg-slate-800" /></div>
+      </header>
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{Array.from({ length: 4 }).map((_, index) => <div key={index} className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"><div className="flex justify-between"><div className="h-9 w-9 rounded-md bg-slate-100 dark:bg-slate-800/70" /><div className="h-7 w-12 rounded bg-slate-200 dark:bg-slate-800" /></div><div className="mt-3 h-3 w-24 rounded bg-slate-100 dark:bg-slate-800/70" /><div className="mt-2 h-3 w-36 rounded bg-slate-100 dark:bg-slate-800/70" /></div>)}</section>
+      <section className="overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"><div className="flex gap-6 border-b border-slate-200 px-4 pt-4 dark:border-slate-800">{Array.from({ length: 5 }).map((_, index) => <div key={index} className="mb-3 h-4 w-24 rounded bg-slate-200 dark:bg-slate-800" />)}</div><div className="p-4"><div className="flex justify-between gap-4"><div className="space-y-2"><div className="h-5 w-36 rounded bg-slate-200 dark:bg-slate-800" /><div className="h-3 w-64 rounded bg-slate-100 dark:bg-slate-800/70" /></div><div className="h-9 w-80 rounded bg-slate-100 dark:bg-slate-800/70" /></div><div className="mt-5 divide-y divide-slate-100 dark:divide-slate-800">{Array.from({ length: 6 }).map((_, index) => <div key={index} className="flex items-start gap-3 py-5"><div className="h-9 w-9 shrink-0 rounded-md bg-slate-100 dark:bg-slate-800/70" /><div className="flex-1 space-y-2"><div className="h-4 w-56 rounded bg-slate-200 dark:bg-slate-800" /><div className="h-3 w-full max-w-xl rounded bg-slate-100 dark:bg-slate-800/70" /><div className="h-3 w-40 rounded bg-slate-100 dark:bg-slate-800/70" /></div><div className="h-3 w-24 rounded bg-slate-100 dark:bg-slate-800/70" /></div>)}</div></div></section>
+    </div>
+  );
+}
+
 export default function ActivityPage() {
   const [activeFilter, setActiveFilter] = React.useState("all");
   const [range, setRange] = React.useState("24h");
@@ -194,6 +207,7 @@ export default function ActivityPage() {
   }, [loadActivity]);
   const visible = events.filter((event) => (activeFilter === "all" || event.category === activeFilter) && (status === "all" || event.status === status) && `${event.type} ${event.actor} ${event.target} ${event.detail}`.toLowerCase().includes(query.toLowerCase()));
   const attention = events.filter((event) => event.status === "warning" || event.status === "error").length;
+  if (loading && !events.length) return <ActivitySkeleton />;
   return (
     <div className="space-y-6">
       <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">

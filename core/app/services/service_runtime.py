@@ -33,6 +33,7 @@ SERVICE_PACKAGES = {
     "postfix": "postfix",
     "dovecot": "dovecot-imapd",
     "rspamd": "rspamd",
+    "stalwart": "stalwart",
     "bind9": "bind9",
     "unbound": "unbound",
     "clamav": "clamav",
@@ -96,23 +97,93 @@ def version_sort_key(value: str) -> tuple:
 
 
 def service_root(service_id: str, version: str | None = None) -> Path:
-    if service_id in {"php", "nodejs", "python", "openssl"} and version:
+    root = None
+    if service_id in {"apache", "caddy", "redis"}:
+        base = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / service_id
+        if version:
+            safe_version = version.replace("/", "-").replace("\\", "-")
+            root = base / "versions" / safe_version
+        else:
+            active_marker = base / ".serverengine-active-version"
+            if active_marker.exists():
+                active = active_marker.read_text(errors="replace").strip()
+                if active:
+                    candidate = base / "versions" / active
+                    if candidate.exists():
+                        root = candidate
+            root = root or base
+    elif service_id in {"php", "nodejs", "python", "openssl"} and version:
         safe_version = version.replace("/", "-").replace("\\", "-")
         versions_root = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / service_id / "versions"
         requested = versions_root / safe_version
         if service_id != "php" or requested.exists():
-            return requested
-        # Package providers may install a minor-version directory (for
-        # example 8.5) while their metadata records the exact patch release.
-        # Resolve that metadata back to the real managed runtime directory.
-        for candidate in versions_root.iterdir() if versions_root.exists() else ():
-            if not candidate.is_dir():
-                continue
-            marker = candidate / ".serverengine-version"
-            if marker.exists() and marker.read_text(errors="replace").strip() == version:
-                return candidate
-        return requested
-    return Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / service_id
+            root = requested
+        else:
+            # Package providers may install a minor-version directory (for
+            # example 8.5) while metadata records the exact patch release.
+            for candidate in versions_root.iterdir() if versions_root.exists() else ():
+                if not candidate.is_dir():
+                    continue
+                marker = candidate / ".serverengine-version"
+                if marker.exists() and marker.read_text(errors="replace").strip() == version:
+                    root = candidate
+                    break
+            root = root or requested
+    else:
+        root = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / service_id
+    _ensure_service_log_link(service_id, root)
+    return root
+
+
+def _ensure_service_log_link(service_id: str, root: Path) -> None:
+    """Store service logs in the shared Server Engine log directory.
+
+    Service configurations continue to use ``<service>/logs``; the directory
+    is a compatibility symlink so existing providers and configuration files
+    keep working while the actual files live under /server-engine/logs.
+    """
+    if root.name == "versions" or not root:
+        return
+    if not root.exists():
+        return
+    log_root = Path(os.getenv("SE_LOG_ROOT", "/server-engine/logs")) / service_id
+    if "versions" in root.parts:
+        version_index = root.parts.index("versions")
+        if version_index + 1 < len(root.parts):
+            log_root = log_root / "versions" / root.parts[version_index + 1]
+    try:
+        log_root.mkdir(parents=True, exist_ok=True)
+        legacy = root / "logs"
+        if legacy.is_symlink():
+            target = log_root
+        else:
+            target = log_root
+        if legacy.exists() and not legacy.is_symlink():
+            for item in legacy.iterdir():
+                destination = log_root / item.name
+                if not destination.exists():
+                    shutil.move(str(item), str(destination))
+            legacy.rmdir()
+        root.mkdir(parents=True, exist_ok=True)
+        if not legacy.is_symlink():
+            legacy.symlink_to(log_root, target_is_directory=True)
+        try:
+            owner = pwd.getpwnam("serverengine")
+            if os.geteuid() == 0:
+                subprocess.run(
+                    ["chown", "-R", f"serverengine:serverengine", str(target)],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            else:
+                os.chown(target, owner.pw_uid, owner.pw_gid)
+        except (KeyError, OSError):
+            pass
+    except OSError:
+        # A service operation should not fail solely because log relocation
+        # cannot run on a read-only or partially installed service root.
+        return
 
 
 def package_for(service_id: str) -> str | None:

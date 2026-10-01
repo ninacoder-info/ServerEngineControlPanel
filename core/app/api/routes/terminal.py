@@ -95,6 +95,7 @@ async def terminal_socket(websocket: WebSocket):
         connection = {"type": "connect", "kind": "local"}
     kind = connection.get("kind", "local")
     host = str(connection.get("host", ""))
+    container_id = str(connection.get("container_id", ""))
     username = str(connection.get("username", ""))
     port = int(connection.get("port", 22))
     key_path = str(connection.get("key_path", ""))
@@ -104,6 +105,14 @@ async def terminal_socket(websocket: WebSocket):
     if kind == "remote" and (not host or not username):
         await websocket.send_text("\r\n\x1b[31mRemote connection requires a host and username.\x1b[0m\r\n")
         await websocket.close(code=1008, reason="Invalid remote connection")
+        return
+    if kind == "docker" and not container_id:
+        await websocket.send_text("\r\n\x1b[31mDocker terminal requires a container.\x1b[0m\r\n")
+        await websocket.close(code=1008, reason="Invalid Docker container")
+        return
+    if kind == "docker" and not shutil.which("docker"):
+        await websocket.send_text("\r\n\x1b[31mDocker is not available to Server Engine.\x1b[0m\r\n")
+        await websocket.close(code=1011, reason="Docker unavailable")
         return
     if kind == "remote" and auth_method not in {"key", "password"}:
         await websocket.send_text("\r\n\x1b[31mChoose SSH key or password authentication.\x1b[0m\r\n")
@@ -132,6 +141,33 @@ async def terminal_socket(websocket: WebSocket):
                 command.extend(["-i", key_path])
             command.append(f"{username}@{host}")
             os.execvp("ssh", command)
+        elif kind == "docker":
+            # Allocate a real interactive TTY and start a shell with a normal
+            # prompt. Without -t, docker exec treats the child as a pipe and
+            # many images omit PS1, leaving users with no user/path context.
+            shell_script = (
+                "if [ -x /bin/bash ]; then "
+                "export PS1='\\u@\\h:\\w\\$ '; "
+                "exec /bin/bash --noprofile --norc -i; "
+                "else "
+                "export PS1='\\u@\\h:\\w\\$ '; "
+                "exec /bin/sh -i; "
+                "fi"
+            )
+            os.execvp(
+                "docker",
+                [
+                    "docker",
+                    "exec",
+                    "-it",
+                    "-u",
+                    "0:0",
+                    container_id,
+                    "/bin/sh",
+                    "-lc",
+                    shell_script,
+                ],
+            )
         else:
             os.chdir("/")
             runtime_environment = local_runtime_environment()

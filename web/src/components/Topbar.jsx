@@ -138,6 +138,25 @@ export default function Topbar({
       if (jobsInitialized.current && statusChanged) {
         window.dispatchEvent(new CustomEvent("serverengine:jobs-updated"));
       }
+      if (statusChanged) {
+        const actionMatch = String(job.type || "").match(/^(Start|Stop|Restart|Install|Uninstall)\s+([^\s·]+)/i);
+        if (actionMatch) {
+          const action = actionMatch[1].toLowerCase();
+          const serviceId = actionMatch[2].toLowerCase();
+          window.dispatchEvent(
+            new CustomEvent("serverengine:service-status", {
+              detail: {
+                serviceId,
+                action,
+                status: job.status,
+                running: job.status === "succeeded" && ["start", "restart"].includes(action),
+                installed: job.status === "succeeded" && action === "install",
+                job,
+              },
+            }),
+          );
+        }
+      }
       jobsInitialized.current = true;
     };
     const connect = () => {

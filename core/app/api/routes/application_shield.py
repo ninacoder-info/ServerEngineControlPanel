@@ -9,6 +9,7 @@ from app.models.application_shield_geo import ApplicationShieldGeoRequest
 from app.services.application_shield_service import application_shield_service
 from app.services.geoip_service import geoip_service
 from app.services.job_service import job_store
+from app.services.service_runtime import service_root
 
 
 router = APIRouter(prefix="/api/v1/application-shield", tags=["application-shield"])
@@ -33,8 +34,10 @@ def logs(lines: int = 120, user=Depends(require_user)):
 
 
 @router.get("/traffic")
-def traffic(limit: int = 200, user=Depends(require_user)):
-    return application_shield_service.traffic(limit)
+def traffic(page: int = 1, page_size: int = 50, limit: int | None = None, user=Depends(require_user)):
+    if limit is not None:
+        page_size = limit
+    return application_shield_service.traffic(page=page, page_size=page_size)
 
 
 @router.get("/attack-map")
@@ -45,6 +48,11 @@ def attack_map(limit: int = 1000, user=Depends(require_user)):
 @router.get("/metrics")
 def metrics(user=Depends(require_user)):
     return application_shield_service.metrics()
+
+
+@router.get("/activity")
+def activity(hours: int = 24, user=Depends(require_user)):
+    return application_shield_service.activity(hours)
 
 
 @router.get("/protected-sites")
@@ -166,9 +174,30 @@ def delete_geo_control(entry_id: str, user=Depends(require_user)):
 
 @router.post("/connectors/{provider}/attach")
 def attach_connector(provider: str, user=Depends(require_user)):
+    if provider in {"nginx", "apache", "openlitespeed", "caddy"}:
+        root = service_root(provider)
+        marker = root / ".serverengine-install-method"
+        method = marker.read_text(errors="replace").strip() if marker.exists() else "source"
+        if method != "prebuilt":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Application Shield currently supports prebuilt {provider.title()} runtimes only. Install or reinstall {provider.title()} using the Prebuilt package method, then attach Shield again.",
+            )
     try:
         return application_shield_service.attach(provider)
     except (ValueError, RuntimeError) as error:
+        overview = application_shield_service.overview()
+        installed = next((connector for connector in overview.connectors if connector.provider == provider and connector.installed and not connector.attached), None)
+        if installed and provider in {"nginx", "apache", "openlitespeed", "caddy"}:
+            job_type = f"Prepare {provider.title()} Application Shield connector"
+            active = next((job for job in job_store.list() if job.type == job_type and job.status in {"queued", "running"}), None)
+            if active:
+                job = active
+            else:
+                job = job_store.enqueue_provider_shield_connector(f"application-shield-{provider}-{secrets.token_hex(8)}", provider)
+            result = overview.model_dump(mode="json")
+            result.update({"status": "queued", "job_id": job.id, "message": f"{provider.title()} Application Shield connector preparation queued. It will attach automatically after validation."})
+            return result
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 

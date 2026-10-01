@@ -7,6 +7,7 @@ import {
   Globe2,
   Layers3,
   LockKeyhole,
+  PackageOpen,
   RefreshCw,
   Server,
   ShieldCheck,
@@ -16,9 +17,11 @@ import {
 import { apiRequest, readApiError } from "../../lib/api";
 import ConfigEditor from "./ConfigEditor";
 import StartupPolicyToggle from "./StartupPolicyToggle";
+import InstallServiceModal from "./InstallServiceModal";
 
 const tabs = [
   ["overview", "Settings", Globe2],
+  ["versions", "Versions", PackageOpen],
   ["performance", "Performance", Gauge],
   ["security", "Security", ShieldCheck],
   ["modules", "Modules", Layers3],
@@ -601,6 +604,18 @@ export default function ApacheConfigModal({ service, installed, onClose }) {
   const [message, setMessage] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [action, setAction] = React.useState("");
+  const [apacheVersions, setApacheVersions] = React.useState([]);
+  const [activeApacheVersion, setActiveApacheVersion] = React.useState("");
+  const [showInstaller, setShowInstaller] = React.useState(false);
+  const loadApacheVersions = React.useCallback(() => {
+    apiRequest("/api/v1/services/apache/versions")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((value) => {
+        setApacheVersions(value?.versions || []);
+        setActiveApacheVersion(value?.active_version || "");
+      })
+      .catch(() => {});
+  }, []);
   React.useEffect(() => {
     apiRequest("/api/v1/services/apache/configuration")
       .then((response) => (response.ok ? response.json() : null))
@@ -610,6 +625,18 @@ export default function ApacheConfigModal({ service, installed, onClose }) {
       })
       .catch(() => {});
   }, []);
+  React.useEffect(() => {
+    if (tab === "versions") loadApacheVersions();
+  }, [tab, loadApacheVersions]);
+  async function makeDefault(version) {
+    const response = await apiRequest("/api/v1/services/apache/default", {
+      method: "PUT",
+      body: JSON.stringify({ version }),
+    });
+    const body = response.ok ? await response.json() : { message: await readApiError(response) };
+    setMessage(body.message || "Unable to change the Apache default version.");
+    if (response.ok) loadApacheVersions();
+  }
   const loadLogs = React.useCallback(
     () =>
       apiRequest(
@@ -768,6 +795,49 @@ export default function ApacheConfigModal({ service, installed, onClose }) {
               onSave={savePerformance}
             />
           )}
+          {tab === "versions" && (
+            <div className="space-y-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                    Apache versions
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                    Each release has its own configuration, modules, logs, and runtime directory. Only the selected default runs.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className={`${buttonClass} bg-blue-600 text-white hover:bg-blue-700`}
+                  onClick={() => setShowInstaller(true)}
+                >
+                  <PackageOpen size={15} />
+                  Install version
+                </button>
+              </div>
+              <div className="divide-y divide-slate-200 border-y border-slate-200 dark:divide-slate-800 dark:border-slate-800">
+                {apacheVersions.length ? apacheVersions.map((item) => (
+                  <div key={`${item.version}-${item.path}`} className="flex items-center justify-between gap-4 py-4">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-medium text-slate-900 dark:text-slate-100">Apache {item.version}</p>
+                        {item.active && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">Default</span>}
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">{item.install_method === "source" ? "Build from source" : "Prebuilt package"}</span>
+                      </div>
+                      <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">{item.path}</p>
+                    </div>
+                    {!item.active && (
+                      <button type="button" className="shrink-0 cursor-pointer text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400" onClick={() => makeDefault(item.version)}>
+                        Make default
+                      </button>
+                    )}
+                  </div>
+                )) : (
+                  <p className="py-6 text-sm text-slate-500 dark:text-slate-400">No managed Apache versions are available yet.</p>
+                )}
+              </div>
+            </div>
+          )}
           {tab === "security" && <Security />}
           {tab === "modules" && <Modules />}
           {tab === "vhosts" && (
@@ -901,6 +971,15 @@ export default function ApacheConfigModal({ service, installed, onClose }) {
           )}
         </div>
       </section>
+      {showInstaller && (
+        <InstallServiceModal
+          service={service}
+          onClose={() => {
+            setShowInstaller(false);
+            loadApacheVersions();
+          }}
+        />
+      )}
     </div>
   );
 }

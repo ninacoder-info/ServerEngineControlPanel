@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.dependencies import require_user
-from app.api.routes import activity, api_access, application_shield, auth, cron, databases, domains, file_manager, firewall, ftp, jobs, servers, services, settings, system, terminal, websites
+from app.api.routes import activity, api_access, application_shield, auth, backups, cron, databases, domains, docker_files, email, file_manager, firewall, ftp, jobs, servers, services, settings, system, terminal, websites
 from app.auth import AuthStore
 from app.services.auth_service import AuthService
 from app.services.job_service import enqueue_startup_services
@@ -42,7 +42,9 @@ app.include_router(auth.router)
 app.include_router(api_access.router)
 app.include_router(domains.router)
 app.include_router(databases.router)
+app.include_router(backups.router)
 app.include_router(ftp.router)
+app.include_router(email.router)
 app.include_router(firewall.router)
 app.include_router(application_shield.router)
 app.include_router(system.router)
@@ -55,6 +57,7 @@ app.include_router(file_manager.router)
 app.include_router(settings.router)
 app.include_router(websites.router)
 app.include_router(terminal.router)
+app.include_router(docker_files.router)
 
 
 @app.get("/services/php/{version}/info", include_in_schema=False)

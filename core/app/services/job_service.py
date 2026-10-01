@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, timezone
+import gzip
 import json
 import os
 import pwd
@@ -14,18 +15,23 @@ import shlex
 import subprocess
 import tempfile
 import time
+import zipfile
 from pathlib import Path
 from threading import Event, Thread
 from threading import Lock
 
 from app.models.job import JobSummary
-from app.models.application_shield import ApplicationShieldPolicyUpdate
-from app.services.service_catalog import apache_source_for, bind9_source_for, certbot_source_for, caddy_source_for, clamav_source_for, dovecot_source_for, ffmpeg_source_for, git_source_for, haproxy_source_for, imagemagick_source_for, lynis_source_for, mariadb_source_for, memcached_source_for, mongodb_prebuilt_for, mongodb_source_for, mysql_release_for, nginx_source_for, opensearch_source_for, openlitespeed_prebuilt_for, openlitespeed_source_for, php_source_for, postfix_source_for, powerdns_source_for, postgresql_source_for, prebuilt_package_for, python_asset_for, python_source_for, rabbitmq_source_for, redis_source_for, refresh_service_versions, rspamd_source_for, ruby_source_for, stalwart_source_for, supervisor_source_for, unbound_source_for, valkey_source_for, vsftpd_source_for, wpcli_source_for
+from app.services.service_catalog import apache_source_for, bind9_source_for, certbot_source_for, caddy_source_for, clamav_source_for, dovecot_source_for, ffmpeg_source_for, git_source_for, haproxy_source_for, imagemagick_source_for, lynis_source_for, mariadb_source_for, memcached_source_for, mongodb_prebuilt_for, mongodb_source_for, mysql_release_for, nginx_source_for, opensearch_source_for, openlitespeed_prebuilt_for, openlitespeed_source_for, php_source_for, postfix_source_for, powerdns_source_for, postgresql_source_for, prebuilt_package_for, python_asset_for, python_source_for, rabbitmq_source_for, redis_source_for, refresh_service_versions, rspamd_source_for, ruby_source_for, stalwart_prebuilt_for, stalwart_source_for, supervisor_source_for, unbound_source_for, valkey_source_for, vsftpd_source_for, wpcli_source_for
 from app.services.service_runtime import PHP_BASELINE_MODULES, PHP_REQUIRED_EXTENSIONS, SERVICE_PACKAGES, binary_path, enable_php_baseline_extensions, ensure_composer_cache, ensure_nginx_layout, ensure_node_runtime, ensure_php_fpm_layout, ensure_php_runtime_configuration, ensure_php_runtime_launcher, managed_library_environment, nginx_paths, normalize_php_runtime_layout, package_for, php_cli_path, php_fpm_paths, php_runtime_library_path, prepare_mysql_runtime, service_root, startup_enabled, version_sort_key
 
 
 class InstallCancelled(Exception):
     pass
+
+
+def _sanitize_apache_configuration(content: str) -> str:
+    """Keep modules compiled into Apache out of generated configuration."""
+    return re.sub(r"(?mi)^\s*LoadModule\s+unixd_module\s+[^\n]*(?:\n|$)", "", content)
 
 
 class JobStore:
@@ -109,15 +115,134 @@ class JobStore:
         Thread(target=self._run_serialized, args=(self._run_action, job_id, service_id, action, version), daemon=True).start()
         return job
 
+    def enqueue_docker_action(self, job_id: str, container_id: str, action: str) -> JobSummary:
+        job = self.create(job_id, f"{action.title()} docker container {container_id[:12]}")
+        Thread(target=self._run_serialized, args=(self._run_docker_container_action, job_id, container_id, action), daemon=True).start()
+        return job
+
+    def enqueue_docker_compose(self, job_id: str, project_dir: Path, filename: str, content: str) -> JobSummary:
+        job = self.create(job_id, f"Create Docker Compose app {project_dir.name}")
+        Thread(target=self._run_serialized, args=(self._run_docker_compose, job_id, project_dir, filename, content), daemon=True).start()
+        return job
+
     def enqueue_extension(self, job_id: str, version: str, extension: str) -> JobSummary:
         job = self.create(job_id, f"Install PHP {version} extension {extension}")
         Thread(target=self._run_serialized, args=(self._run_extension_install, job_id, version, extension), daemon=True).start()
         return job
 
+    def enqueue_database_import(self, job_id: str, engine: str, source: Path, original_name: str, target_database: str = "") -> JobSummary:
+        job = self.create(job_id, f"Import {engine} database · {original_name}")
+        Thread(
+            target=self._run_serialized,
+            args=(self._run_database_import, job_id, engine, source, original_name, target_database),
+            daemon=True,
+        ).start()
+        return job
+
+    @staticmethod
+    def _safe_extract_import_archive(source: Path, destination: Path) -> None:
+        destination.mkdir(parents=True, exist_ok=True)
+        if zipfile.is_zipfile(source):
+            with zipfile.ZipFile(source) as archive:
+                for member in archive.infolist():
+                    target = (destination / member.filename).resolve()
+                    if destination.resolve() not in target.parents and target != destination.resolve():
+                        raise RuntimeError("The import archive contains an unsafe path.")
+                    if member.is_dir():
+                        target.mkdir(parents=True, exist_ok=True)
+                    else:
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        with archive.open(member) as source_stream, target.open("wb") as target_stream:
+                            shutil.copyfileobj(source_stream, target_stream)
+            return
+        try:
+            with tarfile.open(source, "r:*") as archive:
+                for member in archive.getmembers():
+                    target = (destination / member.name).resolve()
+                    if destination.resolve() not in target.parents and target != destination.resolve():
+                        raise RuntimeError("The import archive contains an unsafe path.")
+                    if member.isdir():
+                        target.mkdir(parents=True, exist_ok=True)
+                    elif member.isfile():
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        stream = archive.extractfile(member)
+                        if stream is not None:
+                            with stream, target.open("wb") as target_stream:
+                                shutil.copyfileobj(stream, target_stream)
+        except (tarfile.ReadError, OSError) as error:
+            raise RuntimeError("The selected archive is not a supported SQL import file.") from error
+
+    def _run_database_import(self, job_id: str, engine: str, source: Path, original_name: str, target_database: str = ""):
+        work = source.parent / f".{job_id}-extract"
+        try:
+            work.mkdir(parents=True, exist_ok=True)
+            self._prepare_service_runtime(work.parent, work.name)
+            if engine != "mysql":
+                raise RuntimeError(f"{engine.title()} imports are not available yet. Choose MySQL for SQL imports.")
+            if target_database and not re.fullmatch(r"[A-Za-z0-9_$-]{1,64}", target_database):
+                raise RuntimeError("The target database name is invalid.")
+            root = service_root("mysql")
+            client = root / "bin/mysql"
+            socket = root / "run/mysql.sock"
+            if not client.exists():
+                raise RuntimeError("MySQL is not installed.")
+            if not socket.exists():
+                raise RuntimeError("MySQL is installed but stopped.")
+            self._update(job_id, status="running", progress=8, message=f"Preparing {original_name} for MySQL import…", log=[f"Source: {source}"])
+            self._raise_if_cancelled(job_id)
+
+            sql_file = source
+            if zipfile.is_zipfile(source) or tarfile.is_tarfile(source):
+                self._update(job_id, progress=20, message="Extracting the SQL archive…")
+                self._safe_extract_import_archive(source, work)
+                candidates = sorted(work.rglob("*.sql"))
+                if not candidates:
+                    raise RuntimeError("The archive does not contain a .sql file.")
+                sql_file = candidates[0]
+            elif source.name.lower().endswith(".gz"):
+                self._update(job_id, progress=20, message="Decompressing the SQL dump…")
+                sql_file = work / source.with_suffix("").name
+                work.mkdir(parents=True, exist_ok=True)
+                with gzip.open(source, "rb") as compressed, sql_file.open("wb") as decompressed:
+                    shutil.copyfileobj(compressed, decompressed)
+            elif source.suffix.lower() != ".sql":
+                raise RuntimeError("MySQL imports accept .sql, .sql.gz, .zip, .tar, .tar.gz, and .tgz files.")
+
+            command = [str(client), "--protocol=SOCKET", f"--socket={socket}", "-uroot", "--binary-mode"]
+            if target_database:
+                command.append(target_database)
+            self._update(job_id, progress=35, message="Importing the SQL dump…", log=[f"$ {' '.join(command)} < {sql_file.name}"])
+            with sql_file.open("rb") as sql_stream:
+                result = subprocess.run(
+                    command,
+                    stdin=sql_stream,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    env=prepare_mysql_runtime(root),
+                    timeout=3600,
+                )
+            if result.returncode != 0:
+                raise RuntimeError((result.stderr or result.stdout).strip() or "MySQL rejected the import.")
+            self._update(job_id, status="succeeded", progress=100, message=f"Imported {original_name} into MySQL successfully.", log=["Import completed successfully."])
+        finally:
+            source.unlink(missing_ok=True)
+            shutil.rmtree(work, ignore_errors=True)
+
     def enqueue_application_shield(self, job_id: str) -> JobSummary:
         """Install the managed WAF engine and CRS as one serialized operation."""
         job = self.create(job_id, "Install Application Shield bundle")
         Thread(target=self._run_serialized, args=(self._run_application_shield, job_id), daemon=True).start()
+        return job
+
+    def enqueue_nginx_shield_connector(self, job_id: str) -> JobSummary:
+        job = self.create(job_id, "Build Nginx ModSecurity connector")
+        Thread(target=self._run_serialized, args=(self._run_nginx_shield_connector, job_id), daemon=True).start()
+        return job
+
+    def enqueue_provider_shield_connector(self, job_id: str, provider: str) -> JobSummary:
+        job = self.create(job_id, f"Prepare {provider.title()} Application Shield connector")
+        Thread(target=self._run_serialized, args=(self._run_provider_shield_connector, job_id, provider), daemon=True).start()
         return job
 
     def _run_serialized(self, runner, job_id: str, *args):
@@ -185,6 +310,10 @@ class JobStore:
         installed = [provider for provider in providers if binary_path(provider).exists() or (service_root(provider) / ".serverengine-version").exists()]
         if not installed:
             raise RuntimeError("Install a web server before installing Application Shield.")
+        non_prebuilt = [provider for provider in installed if not (service_root(provider) / ".serverengine-install-method").exists() or (service_root(provider) / ".serverengine-install-method").read_text(errors="replace").strip() != "prebuilt"]
+        if non_prebuilt:
+            names = ", ".join(provider.title() for provider in non_prebuilt)
+            raise RuntimeError(f"Application Shield currently supports prebuilt runtimes only. Install or reinstall {names} using the Prebuilt package method, then install Shield again.")
         self._update(job_id, status="running", progress=3, message="Preparing Application Shield for the installed web server(s)…", log=[f"Providers detected: {', '.join(installed)}"])
         self._raise_if_cancelled(job_id)
 
@@ -210,18 +339,34 @@ class JobStore:
         root = service_root("modsecurity")
         from app.services.application_shield_service import application_shield_service
         application_shield_service.ensure_engine_config()
-        if "nginx" in installed:
-            self._install_application_shield_nginx_connector(job_id)
+        provider_warnings = []
         if "apache" in installed:
             self._install_application_shield_apache_connector(job_id)
         if "caddy" in installed and application_shield_service._connector_module("caddy", service_root("caddy")) is None:
             caddy_marker = service_root("caddy") / ".serverengine-version"
             caddy_version = caddy_marker.read_text(errors="replace").strip() if caddy_marker.exists() else "2.9.1"
-            self._run_caddy_binary(job_id, caddy_version)
-            with self._lock:
-                caddy_job = self._jobs.get(job_id)
-            if not caddy_job or caddy_job.status != "succeeded":
-                return
+            caddy_method = (service_root("caddy") / ".serverengine-install-method").read_text(errors="replace").strip() if (service_root("caddy") / ".serverengine-install-method").exists() else "source"
+            if caddy_method != "prebuilt":
+                raise RuntimeError("Application Shield can currently attach to prebuilt Caddy only. Reinstall Caddy using the Prebuilt package method, then attach Shield again.")
+            if re.match(r"^2\.6\.2(?:$|[-+])", caddy_version):
+                raise RuntimeError("Caddy 2.6.2 is prebuilt but too old for the available Go toolchain's Shield build. Install a newer prebuilt Caddy release, then attach Application Shield again.")
+            # A stock Caddy binary cannot load Coraza dynamically. The Caddy
+            # connector is compiled into a managed binary with xcaddy, so
+            # prepare the Go toolchain before attempting that build. This was
+            # previously skipped for the Application Shield path, which made
+            # an installed Caddy look broken even though its normal runtime
+            # worked.
+            try:
+                self._ensure_source_build_dependencies(job_id, "caddy")
+                self._run_caddy_binary(job_id, caddy_version)
+                with self._lock:
+                    caddy_job = self._jobs.get(job_id)
+                if not caddy_job or caddy_job.status != "succeeded":
+                    provider_warnings.append("Caddy connector was skipped because its Coraza build did not complete")
+                    self._update(job_id, status="running", progress=90, message="Caddy connector skipped; continuing Application Shield setup for the available providers…")
+            except Exception as error:
+                provider_warnings.append(f"Caddy connector was skipped: {error}")
+                self._update(job_id, status="running", progress=90, message="Caddy connector skipped; continuing Application Shield setup for the available providers…", log=[f"Warning: {error}"])
         policy_dir = root / "conf"
         policy_dir.mkdir(parents=True, exist_ok=True)
         # These files are intentionally disabled until a compatible native
@@ -234,22 +379,276 @@ class JobStore:
             config.write_text("# Managed by Server Engine Application Shield\n# Connector staged; activation is disabled until provider compatibility is validated.\n")
             (provider_root / ".serverengine-application-shield-ready").write_text("disabled\n")
         (root / ".serverengine-bundle-version").write_text("modsecurity3+owasp-crs\n")
-        attached = []
-        for provider in installed:
-            try:
-                application_shield_service.attach(provider)
-                attached.append(provider)
-            except (RuntimeError, ValueError):
-                # A missing or incompatible native module must not make the
-                # engine/CRS installation fail. The UI will show the provider
-                # as ready and explain the remaining connector step.
-                continue
-        if attached:
-            application_shield_service.update_policy(ApplicationShieldPolicyUpdate(enabled=True, mode="detection", crs_enabled=True))
-            message = f"Application Shield installed and safely enabled in Detection mode for {', '.join(attached)}. Review audit logs before switching to Blocking."
-        else:
-            message = f"Application Shield engine and CRS installed for {', '.join(installed)}. A compatible provider connector is still required before protection can be enabled."
+        # Installation stages the engine and provider connectors, but never
+        # changes live web-server configuration automatically. Operators must
+        # explicitly attach each provider from the Connectors tab so an
+        # unrelated installed server (for example OpenLiteSpeed) cannot start
+        # receiving WAF configuration unexpectedly.
+        message = f"Application Shield engine and CRS installed for {', '.join(installed)}. Review each provider in Connectors and attach protection explicitly."
+        if provider_warnings:
+            message += " " + "; ".join(provider_warnings) + "."
         self._update(job_id, status="succeeded", progress=100, message=message)
+
+    def _run_nginx_shield_connector(self, job_id: str):
+        """Compile ModSecurity-nginx against the installed managed Nginx."""
+        root = service_root("nginx")
+        marker = root / ".serverengine-version"
+        requested = marker.read_text(errors="replace").strip() if marker.exists() else ""
+        match = re.match(r"(\d+\.\d+\.\d+)", requested)
+        version = match.group(1) if match else requested
+        source_url = nginx_source_for(version)
+        if not source_url and match:
+            source_url = f"https://nginx.org/download/nginx-{version}.tar.gz"
+        if not source_url:
+            raise RuntimeError(f"Nginx source {version or 'version'} is unavailable for the connector build.")
+        apt = shutil.which("apt")
+        dpkg_deb = shutil.which("dpkg-deb")
+        make = shutil.which("make")
+        compiler = shutil.which("cc") or shutil.which("gcc")
+        if not all((apt, dpkg_deb, make, compiler)):
+            raise RuntimeError("Building the Nginx ModSecurity connector requires apt, dpkg-deb, make, and a C compiler.")
+        staging = root.parent / f".nginx-modsecurity-build-{job_id}"
+        archive = staging / f"nginx-{version}.tar.gz"
+        connector_archive = staging / "modsecurity-nginx.tar.gz"
+        try:
+            staging.mkdir(parents=True, exist_ok=True)
+            self._update(job_id, status="running", progress=5, message=f"Downloading Nginx {version} source for the connector…", log=[])
+            with urllib.request.urlopen(urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"}), timeout=60) as response, archive.open("wb") as output:
+                output.write(response.read())
+            connector_url = "https://github.com/owasp-modsecurity/ModSecurity-nginx/archive/refs/heads/master.tar.gz"
+            with urllib.request.urlopen(urllib.request.Request(connector_url, headers={"User-Agent": "Server-Engine-Control-Panel"}), timeout=60) as response, connector_archive.open("wb") as output:
+                output.write(response.read())
+            nginx_source_root = staging / "nginx-source"
+            connector_root = staging / "connector-source"
+            nginx_source_root.mkdir()
+            connector_root.mkdir()
+            with tarfile.open(archive, "r:gz") as package:
+                package.extractall(nginx_source_root, filter="data")
+            with tarfile.open(connector_archive, "r:gz") as package:
+                package.extractall(connector_root, filter="data")
+            nginx_source = next(item for item in nginx_source_root.iterdir() if item.is_dir())
+            connector_source = next(item for item in connector_root.iterdir() if item.is_dir())
+            dependencies = staging / "dependencies"
+            dependencies.mkdir()
+            self._update(job_id, progress=20, message="Staging ModSecurity development headers…", log=["$ apt download libmodsecurity-dev"])
+            dependency = subprocess.run([apt, "download", "libmodsecurity-dev"], cwd=dependencies, capture_output=True, text=True, check=False, timeout=180)
+            package = next(iter(sorted(dependencies.glob("libmodsecurity-dev_*.deb"))), None)
+            if dependency.returncode or not package:
+                raise RuntimeError((dependency.stderr or dependency.stdout).strip() or "The libmodsecurity development package is unavailable for this host.")
+            dependency_root = dependencies / "root"
+            extracted = subprocess.run([dpkg_deb, "-x", str(package), str(dependency_root)], capture_output=True, text=True, check=False)
+            if extracted.returncode:
+                raise RuntimeError((extracted.stderr or extracted.stdout).strip() or "Unable to extract ModSecurity development headers.")
+            # Ubuntu's -dev package deliberately depends on the runtime
+            # package and only contains a symlink to its soname. Download and
+            # extract that runtime package into the same staging tree; never
+            # install either package into the host system.
+            runtime_package = None
+            for runtime_name in ("libmodsecurity3t64", "libmodsecurity3"):
+                runtime_result = subprocess.run([apt, "download", runtime_name], cwd=dependencies, capture_output=True, text=True, check=False, timeout=180)
+                runtime_package = next(iter(sorted(dependencies.glob(f"{runtime_name}_*.deb"))), None)
+                if runtime_result.returncode == 0 and runtime_package:
+                    break
+            if runtime_package:
+                extracted_runtime = subprocess.run([dpkg_deb, "-x", str(runtime_package), str(dependency_root)], capture_output=True, text=True, check=False)
+                if extracted_runtime.returncode:
+                    raise RuntimeError((extracted_runtime.stderr or extracted_runtime.stdout).strip() or "Unable to stage the ModSecurity runtime library.")
+            # libmodsecurity links against these optional providers on Ubuntu
+            # builds. Stage their runtime and development names as well so
+            # the connector never depends on whatever happens to be installed
+            # globally on the host.
+            for support_name in (
+                "libgeoip1t64", "libgeoip-dev",
+                "liblua5.3-0", "liblua5.3-dev",
+                "libmaxminddb0", "libmaxminddb-dev",
+                "libyajl2", "libyajl-dev",
+                "libpcre2-8-0", "libpcre2-dev",
+            ):
+                support_result = subprocess.run([apt, "download", support_name], cwd=dependencies, capture_output=True, text=True, check=False, timeout=180)
+                support_package = next(iter(sorted(dependencies.glob(f"{support_name}_*.deb"))), None)
+                if support_result.returncode or not support_package:
+                    continue
+                extracted_support = subprocess.run([dpkg_deb, "-x", str(support_package), str(dependency_root)], capture_output=True, text=True, check=False)
+                if extracted_support.returncode:
+                    raise RuntimeError((extracted_support.stderr or extracted_support.stdout).strip() or f"Unable to stage the {support_name} library.")
+            # The connector includes <modsecurity/modsecurity.h>, therefore
+            # MODSECURITY_INC must be the include root, not the modsecurity
+            # subdirectory itself.
+            include = next((path.parent.parent for path in dependency_root.rglob("modsecurity/modsecurity.h")), None)
+            library = next((path.parent for path in dependency_root.rglob("libmodsecurity.so*")), None)
+            if not include or not library:
+                raise RuntimeError("The ModSecurity development package did not provide headers and a shared library.")
+            # Some distro packages expose only the soname (for example
+            # libmodsecurity.so.3.0.12).  The connector configure test links
+            # with -lmodsecurity, so provide the normal development name in
+            # the staged tree instead of relying on a host-wide -dev package.
+            linker_name = library / "libmodsecurity.so"
+            if not linker_name.exists():
+                candidates = sorted(library.glob("libmodsecurity.so.*"))
+                if candidates:
+                    linker_name.symlink_to(candidates[0].name)
+            if not linker_name.exists():
+                raise RuntimeError("The staged ModSecurity library has no linkable libmodsecurity.so file.")
+            library_dirs = sorted({path.parent for path in dependency_root.rglob("lib*.so*") if path.is_file() or path.is_symlink()})
+            library_flags = " ".join(f"-L{path}" for path in library_dirs)
+            runtime_paths = ":".join(str(path) for path in library_dirs)
+            include_root = dependency_root / "usr/include"
+            include_dirs = [include_root] + ([path for path in include_root.iterdir() if path.is_dir()] if include_root.exists() else [])
+            include_flags = " ".join(f"-I{path}" for path in include_dirs)
+            self._update(job_id, progress=35, message=f"Compiling the ModSecurity connector for Nginx {version}…", log=[])
+            # Read the exact profile from the installed binary. Nginx's
+            # --with-compat option is not retroactive: a module built with it
+            # is still incompatible with a target binary that was built
+            # without it. Reusing nginx -V also preserves distro/custom build
+            # options for older and newer managed runtimes.
+            profile = []
+            target_binary = root / "bin/nginx"
+            if target_binary.exists():
+                version_output = subprocess.run([str(target_binary), "-V"], capture_output=True, text=True, check=False, timeout=10)
+                configure_line = next((line for line in (version_output.stderr + version_output.stdout).splitlines() if "configure arguments:" in line), "")
+                if configure_line:
+                    profile = [argument for argument in shlex.split(configure_line.split("configure arguments:", 1)[1].strip()) if not argument.startswith("--add-module=") and not argument.startswith("--add-dynamic-module=")]
+            if not profile:
+                profile = [
+                    f"--prefix={root}", f"--sbin-path={root / 'bin/nginx'}",
+                    f"--conf-path={root / 'conf/nginx.conf'}", f"--pid-path={root / 'run/nginx.pid'}",
+                    f"--error-log-path={root / 'logs/error.log'}", f"--http-log-path={root / 'logs/access.log'}",
+                    f"--http-client-body-temp-path={root / 'data/client_temp'}", f"--http-proxy-temp-path={root / 'data/proxy_temp'}",
+                    f"--http-fastcgi-temp-path={root / 'data/fastcgi_temp'}", "--with-compat",
+                    "--with-http_ssl_module", "--with-http_v2_module", "--with-http_gzip_static_module",
+                    "--with-threads", "--with-stream",
+                ]
+            configure = [str(nginx_source / "configure"), *profile, f"--add-dynamic-module={connector_source}", f"--with-cc-opt={include_flags} -I{include}", f"--with-ld-opt={library_flags} -Wl,-rpath,{runtime_paths}"]
+            connector_env = {
+                **os.environ,
+                # ModSecurity-nginx's configure script uses these variables
+                # before it falls back to system paths. Set both historical
+                # spellings because connector releases differ here.
+                "MODSECURITY_INC": str(include),
+                "MODSECURITY_LIB": str(library),
+                "MOD_SECURITY_INC": str(include),
+                "MOD_SECURITY_LIB": str(library),
+                "LD_LIBRARY_PATH": f"{runtime_paths}:{os.environ.get('LD_LIBRARY_PATH', '')}",
+                "LIBRARY_PATH": f"{runtime_paths}:{os.environ.get('LIBRARY_PATH', '')}",
+                "PKG_CONFIG_PATH": f"{dependency_root / 'usr/lib/pkgconfig'}:{dependency_root / 'usr/share/pkgconfig'}:{os.environ.get('PKG_CONFIG_PATH', '')}",
+                "CFLAGS": f"{include_flags} -I{include} {os.environ.get('CFLAGS', '')}".strip(),
+                "CPPFLAGS": f"{include_flags} -I{include} {os.environ.get('CPPFLAGS', '')}".strip(),
+                "LDFLAGS": f"{library_flags} -Wl,-rpath,{runtime_paths} {os.environ.get('LDFLAGS', '')}".strip(),
+                "LIBS": f"-lmodsecurity {os.environ.get('LIBS', '')}".strip(),
+            }
+            configured = subprocess.run(configure, cwd=nginx_source, env=connector_env, capture_output=True, text=True, check=False, timeout=180)
+            self._update(job_id, progress=45, message=f"Configuring the Nginx {version} connector…", log=(configured.stdout + configured.stderr).splitlines()[-80:])
+            if configured.returncode:
+                raise RuntimeError((configured.stderr or configured.stdout).strip()[-1600:] or "Nginx connector configure failed.")
+            build = subprocess.run([make, "-j2", "modules"], cwd=nginx_source, capture_output=True, text=True, check=False, timeout=600)
+            self._update(job_id, progress=80, message=f"Finishing the Nginx {version} connector…", log=(build.stdout + build.stderr).splitlines()[-100:])
+            if build.returncode:
+                raise RuntimeError((build.stderr or build.stdout).strip()[-1600:] or "Nginx ModSecurity connector build failed.")
+            module = next(nginx_source.rglob("ngx_http_modsecurity_module.so"), None)
+            if not module:
+                raise RuntimeError("The connector build completed without producing ngx_http_modsecurity_module.so.")
+            target = root / "usr/lib/nginx/modules/ngx_http_modsecurity_module.so"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(module, target)
+            from app.services.application_shield_service import application_shield_service
+            application_shield_service.attach("nginx")
+            self._update(job_id, status="succeeded", progress=100, message=f"Nginx ModSecurity connector was compiled for Nginx {version} and attached successfully.", log=[str(target)])
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+
+    def _run_provider_shield_connector(self, job_id: str, provider: str):
+        try:
+            if provider in {"nginx", "apache", "openlitespeed", "caddy"}:
+                marker = service_root(provider) / ".serverengine-install-method"
+                method = marker.read_text(errors="replace").strip() if marker.exists() else "source"
+                if method != "prebuilt":
+                    raise RuntimeError(f"Application Shield currently supports prebuilt {provider.title()} runtimes only. Install or reinstall {provider.title()} using the Prebuilt package method, then attach Shield again.")
+            if provider == "nginx":
+                self._run_nginx_shield_connector(job_id)
+                return
+            from app.services.application_shield_service import application_shield_service
+            if provider == "apache":
+                self._stage_apache_runtime_libraries(job_id)
+                self._install_application_shield_apache_connector(job_id)
+            elif provider == "caddy":
+                root = service_root("caddy")
+                marker = root / ".serverengine-version"
+                version = marker.read_text(errors="replace").strip() if marker.exists() else "2.9.1"
+                method_marker = root / ".serverengine-install-method"
+                method = method_marker.read_text(errors="replace").strip() if method_marker.exists() else "source"
+                if method != "prebuilt":
+                    raise RuntimeError("Application Shield can currently attach to prebuilt Caddy only. Reinstall Caddy using the Prebuilt package method, then attach Shield again.")
+                if re.match(r"^2\.6\.2(?:$|[-+])", version):
+                    raise RuntimeError("Caddy 2.6.2 is prebuilt but too old for the available Go toolchain's Shield build. Install a newer prebuilt Caddy release, then attach Application Shield again.")
+                self._ensure_source_build_dependencies(job_id, "caddy")
+                self._run_caddy_binary(job_id, version)
+                with self._lock:
+                    current = self._jobs.get(job_id)
+                if not current or current.status != "succeeded":
+                    return
+            elif provider == "openlitespeed":
+                self._ensure_source_build_dependencies(job_id, "openlitespeed")
+                raise RuntimeError("OpenLiteSpeed is installed, but its ModSecurity connector is not available in this managed build yet.")
+            else:
+                raise RuntimeError(f"No Application Shield connector preparer exists for {provider}.")
+            application_shield_service.attach(provider)
+            self._update(job_id, status="succeeded", progress=100, message=f"{provider.title()} Application Shield connector prepared, validated, and attached.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+
+    def _merge_managed_tree(self, source: Path, target: Path):
+        """Merge extracted connector files without failing on existing links."""
+        if source.is_symlink():
+            if target.is_dir() and not target.is_symlink():
+                shutil.rmtree(target)
+            else:
+                target.unlink(missing_ok=True)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.symlink_to(os.readlink(source), target_is_directory=source.is_dir())
+            return
+        if source.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+            for child in source.iterdir():
+                self._merge_managed_tree(child, target / child.name)
+            return
+        if target.is_dir() and not target.is_symlink():
+            shutil.rmtree(target)
+        else:
+            target.unlink(missing_ok=True)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+
+    def _stage_apache_runtime_libraries(self, job_id: str):
+        """Stage Apache and ModSecurity runtime libraries without host installs."""
+        root = service_root("apache")
+        library_root = root / ".runtime-libraries"
+        apt = shutil.which("apt")
+        dpkg_deb = shutil.which("dpkg-deb")
+        if not apt or not dpkg_deb:
+            raise RuntimeError("Apache runtime libraries are missing, but the isolated package tools are unavailable.")
+        library_root.mkdir(parents=True, exist_ok=True)
+        required = {
+            "libpcre3": "libpcre.so.3",
+            "liblua5.1-0": "liblua5.1.so.0",
+            "libyajl2": "libyajl.so.2",
+            "libapr1t64": "libapr-1.so.0",
+            "libaprutil1t64": "libaprutil-1.so.0",
+        }
+        missing = [package for package, library in required.items() if not any(library_root.rglob(library)) and not any((root / "lib").rglob(library))]
+        if not missing:
+            return
+        self._update(job_id, progress=95, message="Preparing Apache and ModSecurity runtime libraries…", log=[f"$ apt download {' '.join(missing)}"])
+        for package_name in missing:
+            result = subprocess.run([apt, "download", package_name], cwd=library_root, capture_output=True, text=True, check=False, timeout=180)
+            archive = next(iter(sorted(library_root.glob(f"{package_name}_*.deb"))), None)
+            if result.returncode or not archive:
+                raise RuntimeError((result.stderr or result.stdout).strip() or f"Unable to download Apache runtime library package {package_name}.")
+            extracted = subprocess.run([dpkg_deb, "-x", str(archive), str(library_root)], capture_output=True, text=True, check=False)
+            archive.unlink(missing_ok=True)
+            if extracted.returncode or not any(library_root.rglob(required[package_name])):
+                raise RuntimeError((extracted.stderr or extracted.stdout).strip() or f"Unable to stage Apache runtime library {required[package_name]}.")
 
     def _install_application_shield_nginx_connector(self, job_id: str):
         apt = shutil.which("apt")
@@ -273,14 +672,7 @@ class JobStore:
                 if unpacked.returncode:
                     raise RuntimeError((unpacked.stderr or unpacked.stdout).strip() or "Nginx ModSecurity connector extraction failed")
             for item in extracted.iterdir():
-                target = provider_root / item.name
-                if item.is_symlink():
-                    target.unlink(missing_ok=True)
-                    target.symlink_to(os.readlink(item), target_is_directory=item.is_dir())
-                elif item.is_dir():
-                    shutil.copytree(item, target, dirs_exist_ok=True, symlinks=True)
-                else:
-                    shutil.copy2(item, target)
+                self._merge_managed_tree(item, provider_root / item.name)
         finally:
             shutil.rmtree(staging, ignore_errors=True)
 
@@ -291,8 +683,22 @@ class JobStore:
         if not apt or not dpkg_deb:
             raise RuntimeError("The isolated package tools are unavailable; cannot install the Apache Application Shield connector.")
         provider_root = service_root("apache")
+        # Older managed Apache installs generated this directive even though
+        # Ubuntu's Apache binary already contains unixd_module. Clean it
+        # before the connector validation/startup path reaches httpd.
+        apache_config = provider_root / "conf/httpd.conf"
+        if apache_config.exists():
+            current_config = apache_config.read_text(errors="replace")
+            sanitized_config = _sanitize_apache_configuration(current_config)
+            if sanitized_config != current_config:
+                apache_config.write_text(sanitized_config)
+        install_method = (provider_root / ".serverengine-install-method").read_text(errors="replace").strip() if (provider_root / ".serverengine-install-method").exists() else "source"
+        if install_method != "prebuilt":
+            self._build_application_shield_apache_connector(job_id)
+            return
         staging = provider_root.parent / f".apache-modsecurity-{job_id}"
         try:
+            self._stage_apache_runtime_libraries(job_id)
             packages = staging / "packages"
             extracted = staging / "root"
             packages.mkdir(parents=True, exist_ok=True)
@@ -307,14 +713,101 @@ class JobStore:
                 if unpacked.returncode:
                     raise RuntimeError((unpacked.stderr or unpacked.stdout).strip() or "Apache ModSecurity connector extraction failed")
             for item in extracted.iterdir():
-                target = provider_root / item.name
-                if item.is_symlink():
-                    target.unlink(missing_ok=True)
-                    target.symlink_to(os.readlink(item), target_is_directory=item.is_dir())
-                elif item.is_dir():
-                    shutil.copytree(item, target, dirs_exist_ok=True, symlinks=True)
-                else:
-                    shutil.copy2(item, target)
+                self._merge_managed_tree(item, provider_root / item.name)
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+
+    def _build_application_shield_apache_connector(self, job_id: str):
+        """Build ModSecurity 2.9 against this Apache installation's APXS."""
+        root = service_root("apache")
+        apxs = root / "bin/apxs"
+        if not apxs.exists():
+            apxs = root / "bin/apxs2"
+        if not apxs.exists():
+            raise RuntimeError(f"Apache's matching apxs tool was not found in {root / 'bin'}; the source Apache installation is incomplete.")
+        apr_config = root / "bin/apr-1-config"
+        apu_config = root / "bin/apu-1-config"
+        if not apr_config.exists() or not apu_config.exists():
+            raise RuntimeError(f"Apache's bundled APR/APR-util config tools were not found in {root / 'bin'}; rebuild Apache with its APR libraries first.")
+        version = (root / ".serverengine-version").read_text(errors="replace").strip() if (root / ".serverengine-version").exists() else "the installed version"
+        apache_match = re.match(r"^(\d+)\.(\d+)", version)
+        if apache_match and (int(apache_match.group(1)), int(apache_match.group(2))) < (2, 4):
+            raise RuntimeError(
+                f"Apache {version} is too old for the maintained ModSecurity Apache connector. "
+                "Apache 2.3 is an obsolete development branch and its module API is incompatible. "
+                "Install Apache 2.4.x, then attach Application Shield again."
+            )
+        source_version = "2.9.14"
+        source_url = f"https://github.com/SpiderLabs/ModSecurity/archive/refs/tags/v{source_version}.tar.gz"
+        staging = root.parent / f".apache-modsecurity-source-{job_id}"
+        archive = staging / f"modsecurity-{source_version}.tar.gz"
+        try:
+            self._ensure_source_build_dependencies(job_id, "apache")
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True, exist_ok=True)
+            self._update(job_id, progress=12, message=f"Downloading ModSecurity {source_version} for Apache {version}…", log=[f"$ curl -fL {source_url}"])
+            with urllib.request.urlopen(urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"}), timeout=180) as response, archive.open("wb") as output:
+                shutil.copyfileobj(response, output)
+            with tarfile.open(archive, "r:gz") as package:
+                package.extractall(staging)
+            source = next((item for item in staging.iterdir() if item.is_dir() and item.name.startswith("ModSecurity-")), None)
+            if source is None:
+                raise RuntimeError("The ModSecurity source archive did not contain its expected source directory.")
+            if not (source / "others/libinjection/src/libinjection_html5.c").exists():
+                git = shutil.which("git")
+                if not git:
+                    raise RuntimeError("ModSecurity requires git to fetch its libinjection submodule.")
+                git_source = staging / "ModSecurity-git"
+                self._update(job_id, progress=20, message="Fetching ModSecurity source dependencies…", log=[f"$ git clone --depth 1 --branch v{source_version} --recurse-submodules https://github.com/SpiderLabs/ModSecurity.git {git_source}"])
+                cloned = subprocess.run([git, "clone", "--depth", "1", "--branch", f"v{source_version}", "--recurse-submodules", "https://github.com/SpiderLabs/ModSecurity.git", str(git_source)], capture_output=True, text=True, check=False, timeout=600)
+                clone_log = (cloned.stdout + cloned.stderr).splitlines()
+                self._update(job_id, progress=22, message="Fetching ModSecurity source dependencies…", log=clone_log[-100:])
+                if cloned.returncode:
+                    raise RuntimeError((cloned.stderr or cloned.stdout).strip()[-1800:] or "Unable to fetch the ModSecurity libinjection submodule.")
+                source = git_source
+            autogen = source / "autogen.sh"
+            if autogen.exists():
+                self._update(job_id, progress=24, message="Preparing the Apache ModSecurity connector build…", log=[f"$ ./autogen.sh (cwd {source})"])
+                prepared = subprocess.run(["./autogen.sh"], cwd=source, capture_output=True, text=True, check=False, timeout=180)
+                prepared_log = (prepared.stdout + prepared.stderr).splitlines()
+                self._update(job_id, progress=28, message="Preparing the Apache ModSecurity connector build…", log=prepared_log[-100:])
+                if prepared.returncode:
+                    raise RuntimeError((prepared.stderr or prepared.stdout).strip()[-1800:] or "ModSecurity configure preparation failed.")
+            configure = [
+                "./configure",
+                f"--with-apxs={apxs}",
+                f"--with-apr={apr_config}",
+                f"--with-apu={apu_config}",
+                "--disable-mlogc",
+                "--without-ssdeep",
+            ]
+            self._update(job_id, progress=35, message=f"Configuring ModSecurity {source_version} for Apache {version}…", log=[f"$ {' '.join(configure)}"])
+            connector_env = {
+                **os.environ,
+                "PATH": f"{root / 'bin'}:{os.environ.get('PATH', '')}",
+                "CPPFLAGS": f"-I{root / 'include'} {os.environ.get('CPPFLAGS', '')}".strip(),
+                "LDFLAGS": f"-L{root / 'lib'} -Wl,-rpath,{root / 'lib'} {os.environ.get('LDFLAGS', '')}".strip(),
+                "LD_LIBRARY_PATH": f"{root / 'lib'}:{os.environ.get('LD_LIBRARY_PATH', '')}",
+            }
+            configured = subprocess.run(configure, cwd=source, env=connector_env, capture_output=True, text=True, check=False, timeout=300)
+            configured_log = (configured.stdout + configured.stderr).splitlines()
+            self._update(job_id, progress=48, message=f"Configuring ModSecurity {source_version} for Apache {version}…", log=configured_log[-120:])
+            if configured.returncode:
+                raise RuntimeError((configured.stderr or configured.stdout).strip()[-2200:] or "ModSecurity Apache connector configuration failed.")
+            self._update(job_id, progress=52, message=f"Compiling ModSecurity {source_version} against Apache {version}…", log=["$ make -j2"])
+            built = subprocess.run(["make", "-j2"], cwd=source, env=connector_env, capture_output=True, text=True, check=False, timeout=900)
+            build_log = (built.stdout + built.stderr).splitlines()
+            self._update(job_id, progress=82, message=f"Compiling ModSecurity {source_version} against Apache {version}…", log=build_log[-160:])
+            if built.returncode:
+                raise RuntimeError((built.stderr or built.stdout).strip()[-2400:] or "ModSecurity Apache connector compilation failed.")
+            module = next(source.rglob("mod_security2.so"), None)
+            if module is None:
+                raise RuntimeError("The ModSecurity Apache build completed without producing mod_security2.so.")
+            target = root / "modules/mod_security2.so"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(module, target)
+            (root / ".serverengine-apache-connector-method").write_text("source\n")
+            self._update(job_id, progress=94, message=f"ModSecurity connector compiled for Apache {version}; validating attachment…", log=[f"$ apxs: {apxs}", f"$ module: {target}"])
         finally:
             shutil.rmtree(staging, ignore_errors=True)
 
@@ -358,7 +851,47 @@ class JobStore:
         finally:
             shutil.rmtree(staging, ignore_errors=True)
 
+    def _run_docker_container_action(self, job_id: str, container_id: str, action: str):
+        docker = shutil.which("docker")
+        if not docker:
+            raise RuntimeError("Docker Engine is not installed or available.")
+        if action not in {"start", "stop", "restart", "pause", "delete"}:
+            raise RuntimeError(f"Unsupported Docker container action: {action}")
+        self._update(job_id, status="running", progress=20, message=f"{action.title()}ing Docker container {container_id[:12]}…", log=[])
+        command = [docker, "rm", "-f", container_id] if action == "delete" else [docker, action, container_id]
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        output = (result.stdout or result.stderr or "").strip()
+        if result.returncode != 0:
+            raise RuntimeError(output or f"Docker could not {action} the container.")
+        command_text = "$ " + " ".join(command)
+        self._update(job_id, status="succeeded", progress=100, message=f"Docker container {action} completed.", log=[command_text, output] if output else [command_text])
+
+    def _run_docker_compose(self, job_id: str, project_dir: Path, filename: str, content: str):
+        docker = shutil.which("docker")
+        if not docker:
+            raise RuntimeError("Docker Engine is not installed or available.")
+        project_dir.mkdir(parents=True, exist_ok=True)
+        compose_file = project_dir / filename
+        compose_file.write_text(content.rstrip() + "\n")
+        try:
+            serverengine = pwd.getpwnam("serverengine")
+            os.chown(project_dir, serverengine.pw_uid, serverengine.pw_gid)
+            os.chown(compose_file, serverengine.pw_uid, serverengine.pw_gid)
+        except (KeyError, PermissionError, OSError):
+            pass
+        command = [docker, "compose", "-f", filename, "up", "-d"]
+        self._update(job_id, status="running", progress=15, message=f"Creating Compose project {project_dir.name}…", log=[f"$ {' '.join(command)}", f"Project directory: {project_dir}"])
+        result = subprocess.run(command, cwd=project_dir, capture_output=True, text=True, check=False)
+        output = (result.stdout + result.stderr).strip()
+        log = output.splitlines()[-160:] if output else ["Compose returned no output."]
+        if result.returncode:
+            raise RuntimeError(output[-2000:] or "Docker Compose could not start the project.")
+        self._update(job_id, status="succeeded", progress=100, message=f"Compose project {project_dir.name} is running.", log=log)
+
     def _run_action(self, job_id: str, service_id: str, action: str, version: str | None = None):
+        if service_id == "docker":
+            self._run_docker_container_action(job_id, version or "", action)
+            return
         if service_id in {"mysql", "mariadb"}:
             self._run_mysql_action(job_id, action, service_id)
             return
@@ -408,6 +941,11 @@ class JobStore:
         apache_root = service_root("apache")
         apache_binary = binary_path("apache")
         apache_config = apache_root / "conf/httpd.conf"
+        if service_id == "apache" and apache_config.exists():
+            apache_content = apache_config.read_text(errors="replace")
+            sanitized = _sanitize_apache_configuration(apache_content)
+            if sanitized != apache_content:
+                apache_config.write_text(sanitized)
         commands = {
             "nginx": {"start": [str(nginx["binary"]), "-p", str(nginx["root"]), "-c", str(nginx["config"])], "stop": [str(nginx["binary"]), "-p", str(nginx["root"]), "-c", str(nginx["config"]), "-s", "stop"], "restart": [str(nginx["binary"]), "-p", str(nginx["root"]), "-c", str(nginx["config"]), "-s", "reload"]},
             "apache": {"start": [str(apache_binary), "-f", str(apache_config), "-k", "start"], "stop": [str(apache_binary), "-f", str(apache_config), "-k", "stop"], "restart": [str(apache_binary), "-f", str(apache_config), "-k", "graceful"]},
@@ -845,8 +1383,7 @@ class JobStore:
         try:
             if not binary.exists():
                 raise RuntimeError("Redis is not installed in the managed service root")
-            for path in (config_dir, data, log_file.parent, pid_file.parent):
-                path.mkdir(parents=True, exist_ok=True)
+            self._prepare_service_runtime(root, "conf", "data", "logs", "run")
             if not config.exists():
                 config.write_text(
                     f"bind 127.0.0.1 ::1\nprotected-mode yes\nport 6379\n"
@@ -859,12 +1396,20 @@ class JobStore:
                 self._update(job_id, status="succeeded", message="Redis stopped.", log=[])
                 return
             subprocess.run(["chown", "-R", f"{user}:{user}", str(data), str(log_file.parent), str(pid_file.parent)], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # Redis opens its configured logfile after dropping to the
+            # service account. Touch it before launch and transfer ownership;
+            # otherwise the panel can recreate it as root and Redis exits
+            # with a fatal "Can't open the log file" error.
+            log_file.touch(exist_ok=True)
+            if os.geteuid() == 0:
+                subprocess.run(["chown", f"{user}:{user}", str(log_file)], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             command = [str(binary), str(config)]
             if os.geteuid() == 0 and shutil.which("runuser"):
                 command = ["runuser", "-u", user, "--", *command]
             self._update(job_id, status="running", message=f"Starting Redis with {config}…", log=[])
+            runtime_env = managed_library_environment(root)
             with log_file.open("a") as stream:
-                process = subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True)
+                process = subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True, env=runtime_env)
             import time
             time.sleep(0.4)
             if process.poll() is not None:
@@ -953,8 +1498,17 @@ class JobStore:
         try:
             if not binary.exists():
                 raise RuntimeError(f"{label} is not installed in the managed service root")
-            for path in (data, logs, run, config.parent):
+            user = self._ensure_service_user()
+            # ``service_root`` keeps a compatibility link at <service>/logs,
+            # while the real files live under /server-engine/logs. Resolve the
+            # target before chowning it; chowning the symlink itself leaves the
+            # actual error.log owned by root and MySQL then aborts on startup.
+            log_directory = logs.resolve() if logs.is_symlink() else logs
+            for path in (data, log_directory, run, config.parent):
                 path.mkdir(parents=True, exist_ok=True)
+            subprocess.run(["chown", "-R", f"{user}:{user}", str(data), str(log_directory), str(run)], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            error_log.touch(exist_ok=True)
+            subprocess.run(["chown", f"{user}:{user}", str(error_log)], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             if not config.exists():
                 config.write_text("[mysqld]\nbind-address=127.0.0.1\nport=3306\ndatadir=" + str(data) + "\nlog-error=" + str(error_log) + "\nslow_query_log=ON\nmax_connections=151\ninnodb_numa_interleave=OFF\nmysqlx=OFF\nsql_mode=STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION\n\n[client]\nport=3306\n")
             else:
@@ -982,8 +1536,6 @@ class JobStore:
                 if initialize.returncode != 0:
                     details = (initialize.stderr or initialize.stdout).strip().splitlines()[-20:]
                 raise RuntimeError(f"{label} initialization failed: " + (" | ".join(details) if details else f"exit code {initialize.returncode}"))
-            user = self._ensure_service_user()
-            subprocess.run(["chown", "-R", f"{user}:{user}", str(data), str(logs), str(run)], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             command = [str(binary), f"--defaults-file={config}", "--mysqlx=OFF", "--innodb-numa-interleave=OFF", f"--basedir={root}", f"--datadir={data}", f"--pid-file={pid_file}", f"--socket={run / 'mysql.sock'}", f"--log-error={error_log}", f"--user={user}"]
             self._update(job_id, status="running", message=f"Starting {label} with {config}…", log=[])
             with error_log.open("a") as log_file:
@@ -1240,6 +1792,23 @@ class JobStore:
                     break
                 time.sleep(0.05)
 
+    def _force_stop_apache_runtime(self, job_id: str):
+        """Stop the active managed Apache before replacing or adding a version."""
+        root = service_root("apache")
+        binary = binary_path("apache")
+        pid_file = root / "run/httpd.pid"
+        if not binary.exists() and not _managed_process_alive(pid_file):
+            return
+        self._update(job_id, status="running", progress=1, message="Stopping the current Apache version before installation…", log=[f"$ {binary} -f {root / 'conf/httpd.conf'} -k stop"])
+        self._stop_process_by_binary(binary, pid_file)
+        if pid_file.exists():
+            try:
+                pid = int(pid_file.read_text().strip())
+                os.kill(pid, 9)
+            except (OSError, ValueError):
+                pass
+        pid_file.unlink(missing_ok=True)
+
     def _stop_mysql_process(self, binary: Path, pid_file: Path):
         self._stop_process_by_binary(binary, pid_file)
 
@@ -1292,6 +1861,12 @@ class JobStore:
             return
         if service_id == "openlitespeed" and install_method == "prebuilt":
             self._run_openlitespeed_prebuilt(job_id, requested_version)
+            return
+        if service_id == "caddy" and install_method == "prebuilt":
+            self._run_caddy_prebuilt(job_id, requested_version)
+            return
+        if service_id == "stalwart" and install_method == "prebuilt":
+            self._run_stalwart_prebuilt(job_id, requested_version)
             return
         if install_method == "prebuilt" and prebuilt_package_for(service_id):
             if service_id == "redis":
@@ -1478,7 +2053,6 @@ class JobStore:
                         f'PidFile "{root / "run/httpd.pid"}"\n'
                         f'ErrorLog "{root / "logs/error.log"}"\n'
                         f"LoadModule mpm_event_module {module_root / 'mod_mpm_event.so'}\n"
-                        f"LoadModule unixd_module {module_root / 'mod_unixd.so'}\n"
                         f"LoadModule authz_core_module {module_root / 'mod_authz_core.so'}\n"
                         f"LoadModule dir_module {module_root / 'mod_dir.so'}\n"
                         f"LoadModule mime_module {module_root / 'mod_mime.so'}\n"
@@ -1546,10 +2120,18 @@ class JobStore:
             "build-essential", "cmake", "pkg-config", "libssl-dev", "zlib1g-dev",
         }
         dependencies = {
-            "apache": base | {"automake", "libexpat1-dev", "libnghttp2-dev", "libpcre3-dev", "libpcre2-dev", "perl"},
+            "apache": base | {
+                "autoconf", "automake", "libtool", "libexpat1-dev", "libnghttp2-dev",
+                "libpcre3-dev", "libpcre2-dev", "libcurl4-openssl-dev", "libxml2-dev",
+                "libyajl-dev", "liblua5.1-0-dev", "zlib1g-dev", "perl", "git",
+            },
             "mariadb": base | {"bison", "libaio-dev", "libcurl4-openssl-dev", "libevent-dev", "libfmt-dev", "libgcrypt20-dev", "liblz4-dev", "libncurses-dev", "libnuma-dev", "libpcre2-dev", "libsnappy-dev", "liburing-dev", "libzstd-dev"},
             "php": base | {"autoconf", "bison", "re2c", "libxml2-dev", "libcurl4-openssl-dev", "libsqlite3-dev", "libonig-dev", "libzip-dev", "libreadline-dev", "libxslt1-dev", "libjpeg-dev", "libpng-dev", "libwebp-dev", "libfreetype6-dev", "libicu-dev", "libpq-dev"},
             "python": base | {"libbz2-dev", "libffi-dev", "liblzma-dev", "libncurses-dev", "libreadline-dev", "libsqlite3-dev", "libgdbm-dev", "libnss3-dev", "libuuid1", "uuid-dev", "tk-dev"},
+            # Stalwart 0.16+ uses Rust Edition 2024. The distro Cargo in
+            # older Ubuntu/Debian releases can be too old. rustup is
+            # bootstrapped into Server Engine's toolchain directory instead
+            # of installing the conflicting distro rustup package.
             "stalwart": base | {"cargo", "rustc"},
             # MongoDB's source bootstrap imports boto3 even when it falls back
             # to its requests-based downloader. Keep both modules available so
@@ -1563,6 +2145,7 @@ class JobStore:
             "postfix": base,
             "dovecot": base | {"autoconf", "automake", "libtool", "gettext", "libcap-dev", "libpam0g-dev"},
             "openlitespeed": base | {"git", "golang-go", "xz-utils", "libexpat1-dev", "libcap-dev", "libaio-dev", "autoconf", "automake", "libtool", "patch", "curl"},
+            "caddy": base | {"git", "golang-go", "ca-certificates"},
         }.get(service_id)
         if not dependencies:
             return
@@ -1711,7 +2294,7 @@ class JobStore:
             shutil.rmtree(staging, ignore_errors=True)
 
     def _run_isolated_package(self, job_id: str, service_id: str, requested_version: str, package_override: str | None = None):
-        if service_id in {"apache", "mariadb", "stalwart", "mongodb", "opensearch", "wp-cli", "postfix", "dovecot", "rspamd", "bind9", "unbound", "clamav", "supervisor", "lynis", "openlitespeed"}:
+        if service_id in {"apache", "mariadb", "stalwart", "mongodb", "opensearch", "wp-cli", "postfix", "dovecot", "rspamd", "bind9", "unbound", "clamav", "supervisor", "lynis", "openlitespeed", "caddy"}:
             self._ensure_source_build_dependencies(job_id, service_id)
         if service_id == "mysql":
             self._run_mysql_binary(job_id, requested_version)
@@ -3042,49 +3625,122 @@ class JobStore:
 
     def _run_redis_prebuilt(self, job_id: str, requested_version: str):
         """Extract the distro Redis package without registering a host service."""
-        apt = shutil.which("apt-get")
+        # Use apt for downloads when available. apt-get is fine for package
+        # installation, but apt's download command has more consistent
+        # behavior across Ubuntu/Debian releases.
+        apt = shutil.which("apt") or shutil.which("apt-get")
         dpkg_deb = shutil.which("dpkg-deb")
         if not apt or not dpkg_deb:
             self._update(job_id, status="failed", message="The prebuilt Redis option requires apt-get and dpkg-deb. Choose source build on this host.")
             return
-        root = service_root("redis")
+        root = service_root("redis", requested_version)
         staging = root.parent / f".redis-{job_id}-prebuilt"
         package_dir = staging / "packages"
         try:
             shutil.rmtree(staging, ignore_errors=True)
             package_dir.mkdir(parents=True, exist_ok=True)
             exact_version = self._resolve_apt_version("redis-server", requested_version)
-            self._update(job_id, status="running", progress=5, message=f"Downloading prebuilt Redis {requested_version}…", log=[f"$ apt-get download redis-server={exact_version}"])
-            result = subprocess.run([apt, "download", f"redis-server={exact_version}"], cwd=package_dir, capture_output=True, text=True, check=False)
+            tools_version = self._resolve_apt_version("redis-tools", exact_version)
+            package_names = ["redis-server", "redis-tools"]
+            apt_cache = shutil.which("apt-cache")
+            if apt_cache:
+                pending = list(package_names)
+                seen = set()
+                while pending:
+                    dependency_package = pending.pop(0)
+                    if dependency_package in seen:
+                        continue
+                    seen.add(dependency_package)
+                    dependency_output = subprocess.run(
+                        [apt_cache, "depends", "--no-recommends", "--no-suggests", dependency_package],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=10,
+                    ).stdout
+                    for line in dependency_output.splitlines():
+                        match = re.match(r"\s+\|?(?:Depends|PreDepends):\s+([\w.+-]+)", line)
+                        if match and match.group(1) not in seen and match.group(1) not in package_names:
+                            package_names.append(match.group(1))
+                            pending.append(match.group(1))
+            package_requests = [f"redis-server={exact_version}", f"redis-tools={tools_version}", *package_names[2:]]
+            self._update(
+                job_id,
+                status="running",
+                progress=5,
+                message=f"Downloading prebuilt Redis {requested_version} and its command-line tools…",
+                log=[f"$ apt download {' '.join(package_requests)}"],
+            )
+            result = subprocess.run([apt, "download", *package_requests], cwd=package_dir, capture_output=True, text=True, check=False)
             download_log = (result.stdout + result.stderr).strip().splitlines()
             if download_log:
                 self._update(job_id, progress=35, message="Redis package download output received.", log=download_log[-80:])
             if result.returncode != 0:
                 raise RuntimeError((result.stderr or result.stdout).strip() or "The compatible Redis package could not be downloaded")
-            archives = sorted(package_dir.glob("redis-server_*.deb"))
+            archives = sorted(package_dir.glob("*.deb"))
             if not archives:
-                raise RuntimeError("The package provider returned no Redis archive for this OS and architecture")
+                raise RuntimeError("The package provider returned no Redis runtime archives for this OS and architecture")
             extracted = staging / "root"
             extracted.mkdir()
             self._update(job_id, progress=55, message="Extracting Redis into the Server Engine service area…")
-            unpacked = subprocess.run([dpkg_deb, "-x", str(archives[-1]), str(extracted)], capture_output=True, text=True, check=False)
-            if unpacked.returncode != 0:
-                raise RuntimeError((unpacked.stderr or unpacked.stdout).strip() or "Redis package extraction failed")
+            for index, archive in enumerate(archives, start=1):
+                self._update(
+                    job_id,
+                    progress=55 + round(index * 12 / len(archives)),
+                    message=f"Extracting Redis package {index} of {len(archives)}…",
+                    log=[f"$ dpkg-deb -x {archive.name} {extracted}"],
+                )
+                unpacked = subprocess.run([dpkg_deb, "-x", str(archive), str(extracted)], capture_output=True, text=True, check=False)
+                if unpacked.returncode != 0:
+                    raise RuntimeError((unpacked.stderr or unpacked.stdout).strip() or f"Redis package extraction failed for {archive.name}")
+            # The executable path is not identical on every Debian-family
+            # package build. Inspect the extracted tree instead of assuming
+            # that every architecture puts it in usr/bin.
+            redis_candidates = sorted(
+                candidate
+                for candidate in extracted.rglob("redis-server")
+                if candidate.is_file() or candidate.is_symlink()
+            )
+            redis_binary = next(
+                (
+                    candidate
+                    for candidate in redis_candidates
+                    if not candidate.is_symlink() or candidate.resolve().exists()
+                ),
+                None,
+            )
+            if redis_binary is None:
+                listing = subprocess.run([dpkg_deb, "-c", str(archives[-1])], capture_output=True, text=True, check=False)
+                package_files = [line.strip() for line in listing.stdout.splitlines() if "redis-server" in line][-20:]
+                detail = f" Package contents: {'; '.join(package_files)}" if package_files else ""
+                raise RuntimeError("The Redis package was extracted, but it did not contain a usable redis-server executable." + detail)
             if root.exists():
                 shutil.rmtree(root)
             root.mkdir(parents=True, exist_ok=True)
             for item in extracted.iterdir():
-                target = root / item.name
-                if item.is_dir():
-                    shutil.copytree(item, target, dirs_exist_ok=True)
-                else:
-                    shutil.copy2(item, target)
+                # Debian packages frequently contain links between the
+                # package's usr/bin and usr/lib trees.  A plain copytree/copy2
+                # follows those links and can report missing source files
+                # (especially documentation links and redis-server aliases).
+                # Merge the extracted tree while preserving links exactly.
+                self._merge_managed_tree(item, root / item.name)
+            managed_binary = root / "usr/bin/redis-server"
+            if not managed_binary.exists():
+                managed_binary.parent.mkdir(parents=True, exist_ok=True)
+                relative_binary = os.path.relpath(root / redis_binary.relative_to(extracted), managed_binary.parent)
+                managed_binary.symlink_to(relative_binary)
+            if not managed_binary.exists():
+                raise RuntimeError("Redis was extracted, but its managed usr/bin/redis-server launcher is unusable")
             (root / ".serverengine-version").write_text(requested_version + "\n")
+            (root / ".serverengine-install-method").write_text("prebuilt\n")
             for directory in (root / "conf", root / "data", root / "logs", root / "run"):
                 directory.mkdir(parents=True, exist_ok=True)
             config = root / "conf/redis.conf"
             if not config.exists():
                 config.write_text(f"bind 127.0.0.1 ::1\nprotected-mode yes\nport 6379\ndir {root / 'data'}\nlogfile {root / 'logs/redis.log'}\npidfile {root / 'run/redis.pid'}\ndaemonize no\n")
+            base = service_root("redis")
+            base.mkdir(parents=True, exist_ok=True)
+            (base / ".serverengine-active-version").write_text(requested_version + "\n")
             self._update(job_id, status="succeeded", progress=100, message=f"Redis {requested_version} was installed from a compatible prebuilt package in {root}; no host Redis service was registered.")
         except Exception as error:
             self._update(job_id, status="failed", message=str(error))
@@ -3112,7 +3768,7 @@ class JobStore:
         if not make or not compiler:
             self._update(job_id, status="failed", message="Redis needs a compiler and make to build its isolated binary. Install the host build tools, then retry; no Redis system package is required.")
             return
-        root = service_root("redis")
+        root = service_root("redis", requested_version)
         staging = root.parent / f".redis-{job_id}-staging"
         archive = root.parent / f"redis-{requested_version}.tar.gz"
         try:
@@ -3157,11 +3813,15 @@ class JobStore:
             if install.returncode != 0:
                 raise RuntimeError((install.stderr or install.stdout).strip() or "Redis installation into the managed directory failed")
             (root / ".serverengine-version").write_text(requested_version)
+            (root / ".serverengine-install-method").write_text("source\n")
             for directory in (root / "conf", root / "data", root / "logs", root / "run"):
                 directory.mkdir(parents=True, exist_ok=True)
             config = root / "conf/redis.conf"
             if not config.exists():
                 config.write_text(f"bind 127.0.0.1 ::1\nprotected-mode yes\nport 6379\ndir {root / 'data'}\nlogfile {root / 'logs/redis.log'}\npidfile {root / 'run/redis.pid'}\ndaemonize no\n")
+            base = service_root("redis")
+            base.mkdir(parents=True, exist_ok=True)
+            (base / ".serverengine-active-version").write_text(requested_version + "\n")
             self._update(job_id, status="succeeded", progress=100, message=f"Redis {requested_version} is installed in {root}; the host Redis package and service were not changed.")
         except Exception as error:
             self._update(job_id, status="failed", message=str(error))
@@ -3246,19 +3906,91 @@ class JobStore:
             archive.unlink(missing_ok=True)
             shutil.rmtree(staging, ignore_errors=True)
 
+    def _run_caddy_prebuilt(self, job_id: str, requested_version: str):
+        """Install Caddy's official architecture-specific binary archive."""
+        source_match = re.match(r"(\d+\.\d+\.\d+)", requested_version)
+        version = source_match.group(1) if source_match else requested_version
+        machine = platform.machine().lower()
+        architecture = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}.get(machine)
+        if not architecture:
+            self._update(job_id, status="failed", message=f"Caddy does not publish a prebuilt Linux binary for {machine}. Choose Build from source instead.")
+            return
+        archive_url = f"https://github.com/caddyserver/caddy/releases/download/v{version}/caddy_{version}_linux_{architecture}.tar.gz"
+        base = service_root("caddy")
+        root = service_root("caddy", requested_version)
+        staging = base.parent / f".caddy-{job_id}-prebuilt"
+        archive = staging / "caddy.tar.gz"
+        try:
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True, exist_ok=True)
+            self._update(job_id, status="running", progress=5, message=f"Downloading prebuilt Caddy {requested_version}…", log=[f"$ curl -fL {archive_url}"])
+            with urllib.request.urlopen(urllib.request.Request(archive_url, headers={"User-Agent": "Server-Engine-Control-Panel"}), timeout=180) as response, archive.open("wb") as output:
+                shutil.copyfileobj(response, output)
+            extracted = staging / "root"
+            extracted.mkdir()
+            with tarfile.open(archive, "r:gz") as package:
+                package.extractall(extracted, filter="data")
+            binary = extracted / "caddy"
+            if not binary.exists():
+                raise RuntimeError("The Caddy prebuilt archive did not contain its caddy executable.")
+            if root.exists():
+                shutil.rmtree(root)
+            root.mkdir(parents=True, exist_ok=True)
+            (root / "bin").mkdir(parents=True, exist_ok=True)
+            shutil.copy2(binary, root / "bin/caddy")
+            (root / "bin/caddy").chmod((root / "bin/caddy").stat().st_mode | 0o111)
+            for directory in (root / "conf", root / "data", root / "www", root / "logs", root / "run"):
+                directory.mkdir(parents=True, exist_ok=True)
+            config = root / "conf/Caddyfile"
+            config.write_text(f"{{\n    admin 127.0.0.1:2019\n    storage file-system {root / 'data'}\n}}\n\n:80 {{\n    root * {root / 'www'}\n    encode zstd gzip\n    file_server\n    log {{ output file {root / 'logs/access.log'} }}\n}}\n")
+            self._prepare_service_runtime(root, "conf", "data", "www", "logs", "run")
+            (root / ".serverengine-version").write_text(requested_version + "\n")
+            (root / ".serverengine-install-method").write_text("prebuilt\n")
+            base.mkdir(parents=True, exist_ok=True)
+            (base / ".serverengine-active-version").write_text(requested_version + "\n")
+            self._update(job_id, status="succeeded", progress=100, message=f"Caddy {requested_version} was installed from the official prebuilt archive in {root}; the host Caddy package was not changed.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+        finally:
+            archive.unlink(missing_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+
     def _run_caddy_binary(self, job_id: str, requested_version: str):
-        source_url = caddy_source_for(requested_version)
+        # Ubuntu package versions append a distro revision, for example
+        # 2.6.2-6ubuntu0.24.04.3. Caddy's upstream source tag is only
+        # 2.6.2, so use the upstream semantic version for the Coraza build.
+        source_match = re.match(r"(\d+\.\d+\.\d+)", requested_version)
+        source_version = source_match.group(1) if source_match else requested_version
+        source_url = caddy_source_for(requested_version) or caddy_source_for(source_version)
         if not source_url:
             try:
                 definition, _, _ = refresh_service_versions("caddy")
-                source_url = caddy_source_for(requested_version) if any(item.version == requested_version for item in definition.versions) else None
+                source_url = caddy_source_for(requested_version) or caddy_source_for(source_version)
             except Exception:
                 source_url = None
+        # Older installed distro packages may no longer be in the rolling
+        # catalog, but their official upstream tag can still be built.
+        if not source_url and source_match:
+            source_url = f"https://github.com/caddyserver/caddy/archive/refs/tags/v{source_version}.tar.gz"
         go = shutil.which("go")
-        if not source_url or not go:
-            self._update(job_id, status="failed", message="Caddy source or Go 1.20+ is unavailable. Install the isolated build toolchain, then refresh and retry.")
+        if not source_url:
+            self._update(job_id, status="failed", message=f"Caddy {source_version} source could not be found upstream. Choose a compatible Caddy release and retry.")
             return
-        root = service_root("caddy")
+        if not go:
+            self._update(job_id, status="failed", message="The Go build toolchain is unavailable. Retry after the Caddy build dependencies finish installing.")
+            return
+        caddy_build_version = source_version if source_version.startswith("v") else f"v{source_version}"
+        # Coraza's current v2 module requires a much newer Caddy release. The
+        # Ubuntu 24.04 package currently shipped as Caddy 2.6.2 must use the
+        # last compatible v1 module instead of letting Go silently upgrade
+        # Caddy and then rejecting the requested version.
+        caddy_semver = tuple(int(part) for part in source_version.split(".")[:3])
+        if caddy_semver <= (2, 6, 2):
+            coraza_module = "github.com/corazawaf/coraza-caddy@v1.2.2"
+        else:
+            coraza_module = "github.com/corazawaf/coraza-caddy/v2"
+        base = service_root("caddy")
+        root = service_root("caddy", requested_version)
         staging = root.parent / f".caddy-{job_id}-staging"
         archive = root.parent / f"caddy-{requested_version}.tar.gz"
         try:
@@ -3276,9 +4008,9 @@ class JobStore:
             (root / "bin").mkdir(parents=True, exist_ok=True)
             xcaddy = shutil.which("xcaddy")
             if xcaddy:
-                command = [xcaddy, "build", requested_version, "--with", "github.com/corazawaf/coraza-caddy/v2", "--output", str(root / "bin/caddy")]
+                command = [xcaddy, "build", caddy_build_version, "--with", coraza_module, "--output", str(root / "bin/caddy")]
             else:
-                command = [go, "run", "github.com/caddyserver/xcaddy/cmd/xcaddy@latest", "build", requested_version, "--with", "github.com/corazawaf/coraza-caddy/v2", "--output", str(root / "bin/caddy")]
+                command = [go, "run", "github.com/caddyserver/xcaddy/cmd/xcaddy@latest", "build", caddy_build_version, "--with", coraza_module, "--output", str(root / "bin/caddy")]
             self._update(job_id, progress=35, message=f"Building Caddy {requested_version} with the Coraza Application Shield adapter…", log=[f"$ {' '.join(command)}"])
             build = subprocess.Popen(command, cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
             output = []
@@ -3295,6 +4027,9 @@ class JobStore:
             if not config.exists():
                 config.write_text(f"{{\n    storage file-system {root / 'data'}\n}}\n\n:80 {{\n    root * {root / 'www'}\n    encode zstd gzip\n    file_server\n    log {{ output file {root / 'logs/access.log'} }}\n}}\n")
             (root / ".serverengine-version").write_text(requested_version)
+            (root / ".serverengine-install-method").write_text("source\n")
+            base.mkdir(parents=True, exist_ok=True)
+            (base / ".serverengine-active-version").write_text(requested_version + "\n")
             self._update(job_id, status="succeeded", progress=100, message=f"Caddy {requested_version} was built from source in {root}; the host Caddy package was not changed.")
         except Exception as error:
             self._update(job_id, status="failed", message=str(error))
@@ -4055,6 +4790,86 @@ class JobStore:
         except Exception as error: self._update(job_id, status="failed", message=str(error))
         finally: archive.unlink(missing_ok=True); shutil.rmtree(staging, ignore_errors=True)
 
+    def _run_stalwart_prebuilt(self, job_id: str, requested_version: str):
+        """Install Stalwart's official Linux binary without touching host mail packages."""
+        archive_url = stalwart_prebuilt_for(requested_version)
+        if not archive_url:
+            try:
+                definition, _, _ = refresh_service_versions("stalwart", force=True, install_method="prebuilt")
+                if any(item.version == requested_version for item in definition.versions):
+                    archive_url = stalwart_prebuilt_for(requested_version)
+            except Exception:
+                archive_url = None
+        if not archive_url:
+            self._update(
+                job_id,
+                status="failed",
+                message=f"Stalwart {requested_version} has no compatible prebuilt binary for this OS and architecture. Choose source build instead.",
+            )
+            return
+        root = service_root("stalwart")
+        staging = root.parent / f".stalwart-{job_id}-prebuilt"
+        archive = staging / "stalwart.tar.gz"
+        try:
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True, exist_ok=True)
+            self._update(
+                job_id,
+                status="running",
+                progress=5,
+                message=f"Downloading prebuilt Stalwart {requested_version}…",
+                log=[f"$ curl -fL {archive_url}"],
+            )
+            request = urllib.request.Request(archive_url, headers={"User-Agent": "Server-Engine-Control-Panel"})
+            with urllib.request.urlopen(request, timeout=180) as response, archive.open("wb") as output:
+                total = int(response.headers.get("Content-Length", "0") or 0)
+                downloaded = 0
+                while True:
+                    self._raise_if_cancelled(job_id)
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    output.write(chunk)
+                    downloaded += len(chunk)
+                    progress = 5 + round(downloaded * 35 / total) if total else 20
+                    self._update(job_id, progress=min(40, progress), message=f"Downloading prebuilt Stalwart {requested_version}…")
+            self._update(job_id, progress=45, message=f"Extracting Stalwart {requested_version}…")
+            extracted = staging / "root"
+            extracted.mkdir()
+            with tarfile.open(archive, "r:gz") as package:
+                members = package.getmembers()
+                if any(member.name.startswith("/") or ".." in Path(member.name).parts for member in members):
+                    raise RuntimeError("The Stalwart archive contains an unsafe path")
+                package.extractall(extracted)
+            binary = next((item for item in extracted.rglob("stalwart") if item.is_file()), None)
+            if binary is None:
+                raise RuntimeError("The Stalwart archive did not contain a stalwart executable")
+            if root.exists():
+                shutil.rmtree(root)
+            root.mkdir(parents=True, exist_ok=True)
+            (root / "bin").mkdir(parents=True, exist_ok=True)
+            shutil.copy2(binary, root / "bin/stalwart")
+            (root / "bin/stalwart").chmod(0o755)
+            for directory in (root / "conf", root / "data", root / "logs", root / "run"):
+                directory.mkdir(parents=True, exist_ok=True)
+            storage_path = root / "conf/storage.json"
+            if not storage_path.exists():
+                storage_path.write_text(json.dumps({"data_store": "RocksDB", "data_directory": str(root / "data")}, indent=2) + "\n")
+            (root / ".serverengine-version").write_text(requested_version + "\n")
+            (root / ".serverengine-install-method").write_text("prebuilt\n")
+            self._prepare_service_runtime(root, "conf", "data", "logs", "run")
+            self._update(
+                job_id,
+                status="succeeded",
+                progress=100,
+                message=f"Stalwart {requested_version} was installed from the official prebuilt archive in {root}; no host mail package was changed.",
+            )
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+        finally:
+            archive.unlink(missing_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+
     def _run_stalwart_binary(self, job_id: str, requested_version: str):
         """Build Stalwart Mail Server from its official Rust source tree."""
         source_url = stalwart_source_for(requested_version)
@@ -4074,7 +4889,7 @@ class JobStore:
         cargo = shutil.which("cargo")
         rustc = shutil.which("rustc")
         if not cargo or not rustc:
-            self._update(job_id, status="failed", message="Stalwart needs the Rust compiler and Cargo to build its isolated binary. Install the Server Engine build dependencies, then retry; no host mail package is required.")
+            self._update(job_id, status="failed", message="Stalwart needs Rust 1.85+ and Cargo for Edition 2024. Install the Server Engine Rust build dependencies, then retry.")
             return
         root = service_root("stalwart")
         staging = root.parent / f".stalwart-{job_id}-staging"
@@ -4105,9 +4920,48 @@ class JobStore:
                     raise RuntimeError("The Stalwart archive contains an unsafe path")
                 package.extractall(staging)
             source = next((item for item in staging.iterdir() if item.is_dir()), staging)
-            command = [cargo, "build", "--release", "--locked", "--bin", "stalwart"]
+            build_env = os.environ.copy()
+            rust_version = subprocess.run([rustc, "--version"], capture_output=True, text=True, check=False, timeout=10)
+            match = re.search(r"rustc (\d+)\.(\d+)", rust_version.stdout or "")
+            modern_rust = bool(match and (int(match.group(1)), int(match.group(2))) >= (1, 85))
+            rustup = shutil.which("rustup")
+            if not modern_rust:
+                # Do not install Ubuntu's rustup package: it conflicts with
+                # Ubuntu's cargo/rustc packages. Download rustup-init directly
+                # and keep its toolchain and crate cache inside Server Engine.
+                toolchain_root = root.parent.parent / "toolchains" / "rust"
+                rustup_home = toolchain_root / "rustup"
+                cargo_home = toolchain_root / "cargo"
+                rustup_home.mkdir(parents=True, exist_ok=True)
+                cargo_home.mkdir(parents=True, exist_ok=True)
+                build_env["RUSTUP_HOME"] = str(rustup_home)
+                build_env["CARGO_HOME"] = str(cargo_home)
+                isolated_rustup = cargo_home / "bin/rustup"
+                if not isolated_rustup.exists():
+                    machine = os.uname().machine
+                    target = {"x86_64": "x86_64-unknown-linux-gnu", "aarch64": "aarch64-unknown-linux-gnu", "arm64": "aarch64-unknown-linux-gnu"}.get(machine)
+                    if not target:
+                        raise RuntimeError(f"Automatic Rust toolchain setup is not available for architecture {machine}")
+                    installer = toolchain_root / "rustup-init"
+                    self._update(job_id, progress=38, message="Downloading a current Rust toolchain for Stalwart Edition 2024…", log=[f"$ download rustup-init ({target})"])
+                    request = urllib.request.Request(f"https://static.rust-lang.org/rustup/dist/{target}/rustup-init", headers={"User-Agent": "Server-Engine-Control-Panel"})
+                    with urllib.request.urlopen(request, timeout=120) as response, installer.open("wb") as output:
+                        shutil.copyfileobj(response, output)
+                    installer.chmod(0o755)
+                    setup = subprocess.run([str(installer), "-y", "--no-modify-path", "--profile", "minimal", "--default-toolchain", "stable"], env=build_env, capture_output=True, text=True, check=False, timeout=900)
+                    if setup.returncode != 0:
+                        detail = (setup.stderr or setup.stdout).strip()
+                        raise RuntimeError(f"Unable to prepare the Rust Edition 2024 toolchain: {detail[-1200:]}")
+                rustup = str(isolated_rustup)
+                toolchain = subprocess.run([rustup, "toolchain", "install", "stable", "--profile", "minimal", "--no-self-update"], env=build_env, capture_output=True, text=True, check=False, timeout=900)
+                if toolchain.returncode != 0:
+                    detail = (toolchain.stderr or toolchain.stdout).strip()
+                    raise RuntimeError(f"Unable to prepare the Rust Edition 2024 toolchain: {detail[-1200:]}")
+                command = [rustup, "run", "stable", "cargo", "build", "--release", "--locked", "--bin", "stalwart"]
+            else:
+                command = [cargo, "build", "--release", "--locked", "--bin", "stalwart"]
             self._update(job_id, progress=40, message=f"Compiling Stalwart {requested_version} with Cargo…", log=[f"$ {' '.join(command)}"])
-            build = subprocess.Popen(command, cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            build = subprocess.Popen(command, cwd=source, env=build_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
             output = []
             for line in build.stdout or []:
                 if line.strip():
@@ -4126,6 +4980,9 @@ class JobStore:
             (root / "bin/stalwart").chmod(0o755)
             for directory in (root / "conf", root / "data", root / "logs", root / "run"):
                 directory.mkdir(parents=True, exist_ok=True)
+            storage_path = root / "conf/storage.json"
+            if not storage_path.exists():
+                storage_path.write_text(json.dumps({"data_store": "RocksDB", "data_directory": str(root / "data")}, indent=2) + "\n")
             (root / ".serverengine-version").write_text(requested_version + "\n")
             self._update(job_id, status="succeeded", progress=100, message=f"Stalwart {requested_version} was built from source in {root}; no host mail package was changed.")
         except Exception as error:
@@ -4369,7 +5226,7 @@ class JobStore:
                 f"--conf-path={root / 'conf/nginx.conf'}", f"--pid-path={root / 'run/nginx.pid'}",
                 f"--error-log-path={root / 'logs/error.log'}", f"--http-log-path={root / 'logs/access.log'}",
                 f"--http-client-body-temp-path={root / 'data/client_temp'}", f"--http-proxy-temp-path={root / 'data/proxy_temp'}",
-                f"--http-fastcgi-temp-path={root / 'data/fastcgi_temp'}", "--with-http_ssl_module", "--with-http_v2_module",
+                f"--http-fastcgi-temp-path={root / 'data/fastcgi_temp'}", "--with-compat", "--with-http_ssl_module", "--with-http_v2_module",
                 "--with-http_gzip_static_module", "--with-threads", "--with-stream",
             ]
             self._update(job_id, progress=40, message=f"Preparing Nginx {requested_version} build…", log=[f"$ {' '.join(configure)}"])
@@ -4438,9 +5295,11 @@ class JobStore:
         if not make or not compiler:
             self._update(job_id, status="failed", message="Apache needs a compiler and make to build its isolated binary. Install the host build tools, then retry; no Apache system package is required.")
             return
-        root = service_root("apache")
-        staging = root.parent / f".apache-{job_id}-staging"
-        archive = root.parent / f"apache-{requested_version}.tar.gz"
+        self._force_stop_apache_runtime(job_id)
+        apache_base = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / "apache"
+        root = service_root("apache", requested_version)
+        staging = apache_base / f".apache-{job_id}-staging"
+        archive = apache_base / f"apache-{requested_version}.tar.gz"
         try:
             root.parent.mkdir(parents=True, exist_ok=True)
             shutil.rmtree(staging, ignore_errors=True)
@@ -4556,6 +5415,10 @@ class JobStore:
             if install.wait() != 0:
                 raise RuntimeError("Apache installation into the managed directory failed: " + (output[-1] if output else "make install returned a non-zero exit code"))
             (root / ".serverengine-version").write_text(requested_version)
+            (root / ".serverengine-install-method").write_text("source\n")
+            active_root = service_root("apache")
+            active_root.mkdir(parents=True, exist_ok=True)
+            (active_root / ".serverengine-active-version").write_text(requested_version + "\n")
             self._update(job_id, status="succeeded", progress=100, message=f"Apache {requested_version} is installed in {root}; the host Apache package and service were not changed.")
         except Exception as error:
             self._update(job_id, status="failed", message=str(error))

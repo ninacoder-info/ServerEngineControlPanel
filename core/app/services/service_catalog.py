@@ -86,6 +86,7 @@ _OPENLITESPEED_PREBUILTS: dict[str, str] = {}
 _NGINX_SOURCES: dict[str, str] = {}
 _APACHE_SOURCES: dict[str, str] = {}
 _STALWART_SOURCES: dict[str, str] = {}
+_STALWART_PREBUILTS: dict[str, str] = {}
 _MONGODB_SOURCES: dict[str, str] = {}
 _MONGODB_PREBUILTS: dict[str, str] = {}
 _OPENSEARCH_SOURCES: dict[str, str] = {}
@@ -1297,6 +1298,60 @@ def stalwart_source_for(version: str) -> str | None:
     return _STALWART_SOURCES.get(version)
 
 
+def _refresh_stalwart_prebuilt_versions(definition: ServiceDefinition):
+    """Fetch official Stalwart binaries compatible with this CPU architecture."""
+    cached_at = _VERSION_REFRESHED_AT.get("stalwart-prebuilt", 0)
+    if _STALWART_PREBUILTS and time.monotonic() - cached_at < 300:
+        return len(_STALWART_PREBUILTS)
+    target = {
+        "x86_64": "x86_64-unknown-linux-gnu",
+        "amd64": "x86_64-unknown-linux-gnu",
+        "aarch64": "aarch64-unknown-linux-gnu",
+        "arm64": "aarch64-unknown-linux-gnu",
+    }.get(platform.machine().lower())
+    if not target:
+        return None
+    request = urllib.request.Request(
+        "https://api.github.com/repos/stalwartlabs/stalwart/releases?per_page=30",
+        headers={"Accept": "application/vnd.github+json", "User-Agent": "Server-Engine-Control-Panel"},
+    )
+    with urllib.request.urlopen(request, timeout=20) as response:
+        releases = json.loads(response.read().decode("utf-8", "replace"))
+    available: dict[str, str] = {}
+    for release in releases:
+        if release.get("draft") or release.get("prerelease"):
+            continue
+        tag = str(release.get("tag_name", "")).removeprefix("v")
+        if not re.fullmatch(r"\d+\.\d+(?:\.\d+)?", tag):
+            continue
+        asset = next(
+            (
+                item
+                for item in release.get("assets", [])
+                if item.get("name") == f"stalwart-{target}.tar.gz"
+            ),
+            None,
+        )
+        if asset and asset.get("browser_download_url"):
+            available[tag] = asset["browser_download_url"]
+    if not available:
+        return None
+    selected = sorted(available, key=lambda item: tuple(int(part) for part in item.split(".")), reverse=True)
+    _STALWART_PREBUILTS.clear()
+    _STALWART_PREBUILTS.update({version: available[version] for version in selected[:12]})
+    _VERSION_REFRESHED_AT["stalwart-prebuilt"] = time.monotonic()
+    latest_minor = selected[0].rsplit(".", 1)[0]
+    definition.versions = [
+        v(version, "stable" if version.rsplit(".", 1)[0] == latest_minor else "security")
+        for version in selected[:12]
+    ]
+    return len(_STALWART_PREBUILTS)
+
+
+def stalwart_prebuilt_for(version: str) -> str | None:
+    return _STALWART_PREBUILTS.get(version)
+
+
 def _refresh_mongodb_versions(definition: ServiceDefinition):
     cached_at = _VERSION_REFRESHED_AT.get("mongodb", 0)
     if _MONGODB_SOURCES and time.monotonic() - cached_at < 300:
@@ -1691,7 +1746,7 @@ for _service in CATALOG:
         _service.install_methods = ["prebuilt", "source"]
     elif _service.id == "python":
         _service.install_methods = ["prebuilt", "source"]
-    elif _service.id == "openlitespeed":
+    elif _service.id in {"openlitespeed", "caddy", "stalwart"}:
         _service.install_methods = ["prebuilt", "source"]
 
 
@@ -1729,6 +1784,9 @@ def refresh_service_versions(service_id: str, force: bool = False, install_metho
         if service_id == "mariadb":
             _VERSION_REFRESHED_AT.pop("mariadb-prebuilt", None)
             _MARIADB_PREBUILTS.clear()
+        if service_id == "stalwart":
+            _VERSION_REFRESHED_AT.pop("stalwart-prebuilt", None)
+            _STALWART_PREBUILTS.clear()
         definition.versions = []
     if install_method == "prebuilt" and service_id == "mariadb":
         count = _refresh_apt_versions(definition, "mariadb-server")
@@ -2028,6 +2086,14 @@ def refresh_service_versions(service_id: str, force: bool = False, install_metho
         return definition, "catalog", "The Apache release catalog could not be reached. The saved compatibility list is still available."
 
     if service_id == "stalwart":
+        if install_method == "prebuilt":
+            try:
+                count = _refresh_stalwart_prebuilt_versions(definition)
+                if count:
+                    return definition, "stalwart-releases", f"Fetched {count} official Stalwart binaries for this host architecture."
+            except Exception:
+                pass
+            return definition, "stalwart-releases", "No compatible prebuilt Stalwart binaries were found for this OS and architecture. Choose source build instead."
         try:
             count = _refresh_stalwart_versions(definition)
             if count:

@@ -54,7 +54,7 @@ const sections = [
       ["Services", "/services", Package],
       ["PHP runtimes", "/services/php", FileCog],
       ["Node.js runtimes", "/services/nodejs", FileCog],
-      ["Containers", "/docker", Container],
+      ["Docker", "/docker", Container],
       ["Server health", "/health", Gauge],
     ],
   ],

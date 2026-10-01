@@ -10,10 +10,11 @@ export default function ServiceNotInstalledState({
   title,
   description,
   installLabel,
+  compact = false,
 }) {
   if (state.loading) {
     return (
-      <div className="flex min-h-[calc(100vh-12rem)] items-center justify-center text-sm text-slate-500 dark:text-slate-400">
+      <div className={`${compact ? "py-14" : "min-h-[calc(100vh-12rem)]"} flex items-center justify-center text-sm text-slate-500 dark:text-slate-400`}>
         Checking service status…
       </div>
     );
@@ -22,8 +23,8 @@ export default function ServiceNotInstalledState({
   return (
     <>
       <Toast message={state.error} type="error" onClose={() => state.setError("")} />
-      <div className="flex min-h-[calc(100vh-12rem)] items-center justify-center">
-        <section className="w-full max-w-xl rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div className={`${compact ? "py-14" : "min-h-[calc(100vh-12rem)]"} flex items-center justify-center`}>
+        <section className={`${compact ? "w-full max-w-xl text-center" : "w-full max-w-xl rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm dark:border-slate-800 dark:bg-slate-900"}`}>
           <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300">
             <Icon size={26} />
           </div>

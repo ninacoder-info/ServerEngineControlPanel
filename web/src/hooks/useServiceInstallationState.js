@@ -46,9 +46,26 @@ export function useServiceInstallationState(serviceId) {
 
   React.useEffect(() => {
     loadStatus();
-    const refresh = () => loadStatus();
-    window.addEventListener("serverengine:jobs-updated", refresh);
-    return () => window.removeEventListener("serverengine:jobs-updated", refresh);
+    const updateFromSocket = (event) => {
+      const detail = event.detail || {};
+      if (!serviceIds.includes(detail.serviceId)) return;
+      if (["queued", "running"].includes(detail.status)) {
+        if (detail.action === "install") setInstallJob(detail.job || { status: detail.status });
+        return;
+      }
+      if (detail.status !== "succeeded") return;
+      if (detail.action === "install") {
+        setInstalled(true);
+        setInstallJob(null);
+      } else if (detail.action === "uninstall") {
+        setInstalled(false);
+        setInstallJob(null);
+      } else if (["stop", "start", "restart"].includes(detail.action)) {
+        setInstallJob(null);
+      }
+    };
+    window.addEventListener("serverengine:service-status", updateFromSocket);
+    return () => window.removeEventListener("serverengine:service-status", updateFromSocket);
   }, [loadStatus]);
 
   const openInstaller = React.useCallback(async () => {

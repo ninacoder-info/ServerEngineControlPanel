@@ -194,18 +194,44 @@ class CronService:
                 return
             started = _now().isoformat(timespec="seconds")
             try:
-                command = ["/bin/sh", "-lc", job["command"]]
-                if job["owner"] != "root":
-                    command = ["/usr/sbin/runuser", "-u", job["owner"], "--", *command]
-                process = subprocess.run(command, capture_output=True, text=True, timeout=3600, check=False)
-                output = (process.stdout + process.stderr).strip()[-12000:]
-                result = "success" if process.returncode == 0 else "warning"
+                from app.services.backup_service import backup_service
+
+                backup_config = backup_service.schedule_config(job["command"])
+                if backup_config is None and job.get("group") == "Backup" and job.get("name", "").startswith("Backup database: "):
+                    # Migrate schedules created before database backups used
+                    # the panel backup engine. Those shell commands could
+                    # hide a failed mysqldump behind a successful chown.
+                    database_name = job["name"][len("Backup database: "):]
+                    backup_config = {
+                        "scope": "database",
+                        "destination": "local",
+                        "compression": "balanced",
+                        "target_type": "database",
+                        "target_id": database_name,
+                    }
+                if backup_config is not None:
+                    backup = backup_service.run_scheduled(backup_config)
+                    output = "\n".join(backup.get("logs", []))[-12000:]
+                    if backup.get("error"):
+                        output = f"{output}\n{backup['error']}".strip()
+                    process = None
+                    exit_code = 0 if backup.get("status") == "Verified" else 1
+                    result = "success" if exit_code == 0 else "warning"
+                else:
+                    command = ["/bin/sh", "-lc", job["command"]]
+                    if job["owner"] != "root":
+                        command = ["/usr/sbin/runuser", "-u", job["owner"], "--", *command]
+                    process = subprocess.run(command, capture_output=True, text=True, timeout=3600, check=False)
+                    output = (process.stdout + process.stderr).strip()[-12000:]
+                    exit_code = process.returncode
+                    result = "success" if exit_code == 0 else "warning"
             except Exception as error:
                 output = str(error)
                 result = "warning"
+                exit_code = None
             with self.connection() as db:
                 db.execute("UPDATE cron_jobs SET last_run_at=?, result=?, last_output=? WHERE id=?", (started, result, output, job_id))
-                db.execute("INSERT INTO cron_job_logs(job_id, started_at, finished_at, status, exit_code, output) VALUES (?, ?, ?, ?, ?, ?)", (job_id, started, _now().isoformat(timespec="seconds"), result, process.returncode if 'process' in locals() else None, output))
+                db.execute("INSERT INTO cron_job_logs(job_id, started_at, finished_at, status, exit_code, output) VALUES (?, ?, ?, ?, ?, ?)", (job_id, started, _now().isoformat(timespec="seconds"), result, exit_code, output))
 
     def start(self):
         if self._thread and self._thread.is_alive():

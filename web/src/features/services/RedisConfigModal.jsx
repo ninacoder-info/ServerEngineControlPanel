@@ -5,6 +5,7 @@ import {
   FileCog,
   Gauge,
   HardDrive,
+  PackageOpen,
   RefreshCw,
   ShieldCheck,
   Workflow,
@@ -13,6 +14,7 @@ import {
 import { apiRequest, readApiError } from "../../lib/api";
 import ConfigEditor from "./ConfigEditor";
 import StartupPolicyToggle from "./StartupPolicyToggle";
+import InstallServiceModal from "./InstallServiceModal";
 
 const tabs = [
   ["settings", "Server settings", Database],
@@ -20,6 +22,7 @@ const tabs = [
   ["persistence", "Persistence", HardDrive],
   ["security", "Security", ShieldCheck],
   ["replication", "Replication", Workflow],
+  ["versions", "Versions", PackageOpen],
   ["runtime", "Runtime", Activity],
   ["logs", "Log", RefreshCw],
   ["configuration", "redis.conf", FileCog],
@@ -440,7 +443,7 @@ function Runtime({ current, action, onAction, configPath }) {
   );
 }
 
-export default function RedisConfigModal({ installed, onClose }) {
+export default function RedisConfigModal({ service, installed, onClose }) {
   const current = Array.isArray(installed)
     ? installed.find((item) => item.status === "running") || installed[0]
     : installed;
@@ -451,7 +454,21 @@ export default function RedisConfigModal({ installed, onClose }) {
   const [busy, setBusy] = React.useState(false);
   const [action, setAction] = React.useState("");
   const [message, setMessage] = React.useState("");
+  const [runtimeStatus, setRuntimeStatus] = React.useState(current?.status || "stopped");
+  const [runtimeVersion, setRuntimeVersion] = React.useState(current?.version || "");
   const [logs, setLogs] = React.useState(null);
+  const [redisVersions, setRedisVersions] = React.useState([]);
+  const [activeRedisVersion, setActiveRedisVersion] = React.useState("");
+  const [showInstaller, setShowInstaller] = React.useState(false);
+  const loadRedisVersions = React.useCallback(() => {
+    apiRequest("/api/v1/services/redis/versions")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((value) => {
+        setRedisVersions(value?.versions || []);
+        setActiveRedisVersion(value?.active_version || "");
+      })
+      .catch(() => {});
+  }, []);
   const loadConfig = React.useCallback(
     () =>
       apiRequest("/api/v1/services/redis/configuration")
@@ -471,6 +488,41 @@ export default function RedisConfigModal({ installed, onClose }) {
   React.useEffect(() => {
     loadConfig();
   }, [loadConfig]);
+  React.useEffect(() => {
+    setRuntimeStatus(current?.status || "stopped");
+    setRuntimeVersion(current?.version || "");
+  }, [current?.status, current?.version]);
+  React.useEffect(() => {
+    const update = (event) => {
+      const detail = event.detail || {};
+      if (detail.serviceId !== "redis") return;
+      if (!["start", "restart", "stop"].includes(detail.action)) return;
+      if (["queued", "running"].includes(detail.status)) {
+        setAction(detail.action);
+        return;
+      }
+      if (!["succeeded", "failed", "cancelled"].includes(detail.status)) return;
+      if (detail.status === "succeeded") {
+        setRuntimeStatus(detail.action === "stop" ? "stopped" : "running");
+      }
+      setAction("");
+      setMessage("");
+    };
+    window.addEventListener("serverengine:service-status", update);
+    return () => window.removeEventListener("serverengine:service-status", update);
+  }, []);
+  React.useEffect(() => {
+    if (tab === "versions") loadRedisVersions();
+  }, [tab, loadRedisVersions]);
+  async function makeDefault(version) {
+    const response = await apiRequest("/api/v1/services/redis/default", {
+      method: "PUT",
+      body: JSON.stringify({ version }),
+    });
+    const body = response.ok ? await response.json() : { message: await readApiError(response) };
+    setMessage(body.message || "Unable to change the Redis default version.");
+    if (response.ok) loadRedisVersions();
+  }
   React.useEffect(() => {
     if (tab !== "logs") return undefined;
     const load = () =>
@@ -518,22 +570,10 @@ export default function RedisConfigModal({ installed, onClose }) {
       setAction("");
       return;
     }
-    let finalJob;
-    for (let attempt = 0; attempt < 30; attempt += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 500));
-      const jobs = await apiRequest("/api/v1/jobs").then((result) =>
-        result.ok ? result.json() : [],
-      );
-      finalJob = jobs.find((job) => job.id === body.job_id);
-      if (
-        finalJob &&
-        ["succeeded", "failed", "cancelled"].includes(finalJob.status)
-      )
-        break;
-    }
-    setMessage(finalJob?.message || `Redis ${actionName} request finished.`);
-    setAction("");
+    // Topbar owns the authenticated jobs WebSocket. It will clear the action
+    // and update the live status when this job reaches a final state.
   };
+  const liveCurrent = { ...(current || {}), status: runtimeStatus, version: runtimeVersion };
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/60 p-4 sm:p-8">
       <section
@@ -552,10 +592,10 @@ export default function RedisConfigModal({ installed, onClose }) {
             </h2>
             <p className="mt-1 flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
               <span
-                className={`h-2 w-2 rounded-full ${current?.status === "running" ? "bg-emerald-500" : "bg-amber-500"}`}
+                className={`h-2 w-2 rounded-full ${liveCurrent.status === "running" ? "bg-emerald-500" : "bg-amber-500"}`}
               />
-              {current?.status || "stopped"}
-              {current?.version && ` · v${current.version}`}
+              {liveCurrent.status || "stopped"}
+              {liveCurrent.version && ` · v${liveCurrent.version}`}
             </p>
           </div>
           <button
@@ -621,9 +661,52 @@ export default function RedisConfigModal({ installed, onClose }) {
               busy={busy}
             />
           )}
+          {tab === "versions" && (
+            <div className="space-y-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                    Redis versions
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                    Install multiple Redis releases in separate service directories. Only the selected default runtime is started.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className={`${buttonClass} bg-blue-600 text-white hover:bg-blue-700`}
+                  onClick={() => setShowInstaller(true)}
+                >
+                  <PackageOpen size={15} />
+                  Install version
+                </button>
+              </div>
+              <div className="divide-y divide-slate-200 border-y border-slate-200 dark:divide-slate-800 dark:border-slate-800">
+                {redisVersions.length ? redisVersions.map((item) => (
+                  <div key={`${item.version}-${item.path}`} className="flex items-center justify-between gap-4 py-4">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-medium text-slate-900 dark:text-slate-100">Redis {item.version}</p>
+                        {item.active && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">Default</span>}
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">{item.install_method === "source" ? "Build from source" : "Prebuilt package"}</span>
+                      </div>
+                      <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">{item.path}</p>
+                    </div>
+                    {!item.active && (
+                      <button type="button" className="shrink-0 cursor-pointer text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400" onClick={() => makeDefault(item.version)}>
+                        Make default
+                      </button>
+                    )}
+                  </div>
+                )) : (
+                  <p className="py-6 text-sm text-slate-500 dark:text-slate-400">No managed Redis versions are available yet.</p>
+                )}
+              </div>
+            </div>
+          )}
           {tab === "runtime" && (
             <Runtime
-              current={current}
+              current={liveCurrent}
               action={action}
               onAction={serviceAction}
               configPath={
@@ -709,6 +792,15 @@ export default function RedisConfigModal({ installed, onClose }) {
           </p>
         )}
       </section>
+      {showInstaller && (
+        <InstallServiceModal
+          service={service}
+          onClose={() => {
+            setShowInstaller(false);
+            loadRedisVersions();
+          }}
+        />
+      )}
     </div>
   );
 }

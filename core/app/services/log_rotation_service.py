@@ -10,6 +10,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from app.services.settings_service import settings_service
+from app.services.service_runtime import service_root
 
 
 SERVICE_LOGS = (
@@ -42,11 +43,22 @@ SERVICE_LOGS = (
 class LogRotationService:
     def __init__(self):
         self.service_root = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services"))
+        self.log_root = Path(os.getenv("SE_LOG_ROOT", "/server-engine/logs"))
         self.state_dir = Path(os.getenv("SE_STATE_DIR", "/var/lib/server-engine"))
         self.state_path = self.state_dir / "log-rotation.json"
         self.stop_event = threading.Event()
         self.thread = threading.Thread(target=self._run, name="server-engine-log-rotation", daemon=True)
         self.lock = threading.Lock()
+        self._prepare_service_log_links()
+
+    def _prepare_service_log_links(self):
+        for service_id in SERVICE_LOGS:
+            service_root(service_id)
+        versions = self.service_root / "php" / "versions"
+        if versions.exists():
+            for version in versions.iterdir():
+                if version.is_dir():
+                    service_root("php", version.name)
 
     def start(self):
         if not self.thread.is_alive():

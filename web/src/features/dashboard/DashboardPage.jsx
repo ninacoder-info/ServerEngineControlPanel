@@ -32,6 +32,8 @@ import SupervisorWorkspace from "../services/SupervisorWorkspace";
 import WebProtectionPage from "../waf/WebProtectionPage";
 import MalwareScannerPage from "../malware/MalwareScannerPage";
 import DockerPage from "../docker/DockerPage";
+import DockerContainerDetailsPage from "../docker/DockerContainerDetailsPage";
+import DockerImageDetailsPage from "../docker/DockerImageDetailsPage";
 import PlansPage from "../plans/PlansPage";
 import { useTranslation } from "../../lib/i18n";
 import { apiRequest } from "../../lib/api";
@@ -39,26 +41,121 @@ import {
   applyPanelPreferences,
   readPanelPreferences,
 } from "../../lib/panelPreferences";
+
+function OverviewSkeleton() {
+  return (
+    <div className="animate-pulse space-y-8" aria-label="Loading overview">
+      <header className="space-y-3">
+        <div className="h-4 w-28 rounded bg-slate-200 dark:bg-slate-800" />
+        <div className="h-9 w-36 rounded bg-slate-200 dark:bg-slate-800" />
+        <div className="h-4 w-80 max-w-full rounded bg-slate-100 dark:bg-slate-800/70" />
+      </header>
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <div
+            key={index}
+            className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900"
+          >
+            <div className="h-4 w-24 rounded bg-slate-100 dark:bg-slate-800/70" />
+            <div className="mt-5 h-8 w-24 rounded bg-slate-200 dark:bg-slate-800" />
+            <div className="mt-2 h-3 w-32 rounded bg-slate-100 dark:bg-slate-800/70" />
+            <div className="mt-4 h-10 rounded bg-slate-100 dark:bg-slate-800/70" />
+          </div>
+        ))}
+      </section>
+      <section className="grid gap-5 xl:grid-cols-[1.15fr_.85fr]">
+        {Array.from({ length: 2 }).map((_, index) => (
+          <div
+            key={index}
+            className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900"
+          >
+            <div className="space-y-2">
+              <div className="h-4 w-28 rounded bg-slate-100 dark:bg-slate-800/70" />
+              <div className="h-5 w-40 rounded bg-slate-200 dark:bg-slate-800" />
+              <div className="h-3 w-64 rounded bg-slate-100 dark:bg-slate-800/70" />
+            </div>
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              {Array.from({ length: index ? 3 : 4 }).map((__, item) => (
+                <div
+                  key={item}
+                  className="h-20 rounded-lg border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-800/40"
+                />
+              ))}
+            </div>
+          </div>
+        ))}
+      </section>
+      <section className="grid gap-5 xl:grid-cols-2">
+        {Array.from({ length: 2 }).map((_, index) => (
+          <div
+            key={index}
+            className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900"
+          >
+            <div className="h-5 w-40 rounded bg-slate-200 dark:bg-slate-800" />
+            <div className="mt-5 space-y-4">
+              {Array.from({ length: 3 }).map((__, row) => (
+                <div key={row} className="flex items-center gap-3">
+                  <div className="h-8 w-8 rounded bg-slate-100 dark:bg-slate-800/70" />
+                  <div className="h-4 flex-1 rounded bg-slate-100 dark:bg-slate-800/70" />
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </section>
+    </div>
+  );
+}
+
 export default function DashboardPage({ user, onLogout }) {
   const [menuOpen, setMenuOpen] = React.useState(false);
-  const [panelPreferences, setPanelPreferences] = React.useState(readPanelPreferences);
+  const [panelPreferences, setPanelPreferences] =
+    React.useState(readPanelPreferences);
+  const [overviewLoading, setOverviewLoading] = React.useState(true);
   const location = useLocation();
   const navigate = useNavigate();
   const theme = useTheme();
   const { t } = useTranslation();
   React.useEffect(() => {
-    const update = (event) => setPanelPreferences(event.detail || readPanelPreferences());
+    const update = (event) =>
+      setPanelPreferences(event.detail || readPanelPreferences());
     window.addEventListener("serverengine:panel-settings-change", update);
-    return () => window.removeEventListener("serverengine:panel-settings-change", update);
+    return () =>
+      window.removeEventListener("serverengine:panel-settings-change", update);
   }, []);
+  React.useEffect(() => {
+    if (location.pathname !== "/") {
+      setOverviewLoading(false);
+      return undefined;
+    }
+    let active = true;
+    apiRequest("/api/v1/metrics")
+      .catch(() => null)
+      .finally(() => {
+        if (active) setOverviewLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [location.pathname]);
   React.useEffect(() => {
     let active = true;
     apiRequest("/api/v1/settings/panel")
       .then((response) => (response.ok ? response.json() : null))
       .then((body) => {
         if (active && body?.values) {
-          setPanelPreferences(body.values);
-          applyPanelPreferences(body.values);
+          // A top-bar theme toggle is local to this browser. Do not let an
+          // older server-side `system` value overwrite it during boot.
+          const local = readPanelPreferences();
+          const values = {
+            ...body.values,
+            ...(body.values.panel_theme === "system" &&
+            (local.panel_theme === "dark" || local.panel_theme === "light")
+              ? { panel_theme: local.panel_theme }
+              : {}),
+          };
+          setPanelPreferences(values);
+          applyPanelPreferences(values);
         }
       })
       .catch(() => {});
@@ -75,9 +172,9 @@ export default function DashboardPage({ user, onLogout }) {
   const active = location.pathname.startsWith("/websites")
     ? "Websites"
     : location.pathname === "/services/nodejs"
-        ? "Node.js runtimes"
-        : location.pathname === "/services/php"
-          ? "PHP runtimes"
+      ? "Node.js runtimes"
+      : location.pathname === "/services/php"
+        ? "PHP runtimes"
         : location.pathname.startsWith("/services")
           ? "Services"
           : location.pathname === "/file-manager"
@@ -94,39 +191,44 @@ export default function DashboardPage({ user, onLogout }) {
                       ? "Cron jobs"
                       : location.pathname === "/supervisor"
                         ? "Supervisor"
-                      : location.pathname === "/docker"
-                        ? "Containers"
-                    : location.pathname === "/health"
-                      ? "Server health"
-                      : location.pathname === "/settings"
-                        ? "Settings"
-                        : location.pathname === "/account"
-                          ? "Account settings"
-                          : location.pathname === "/terminal"
-                            ? "Terminal"
-                            : location.pathname === "/logs"
-                              ? "Logs"
-                              : location.pathname === "/users"
-                                ? "Accounts"
-                                : location.pathname === "/plans"
-                                  ? "Hosting plans"
-                                  : location.pathname === "/firewall"
-                                  ? "Firewall"
-                                  : location.pathname === "/malware-scanner"
-                                    ? "Malware Scanner"
-                                  : location.pathname === "/application-shield"
-                                    ? "Application Shield"
-                                  : location.pathname === "/backups"
-                                    ? "Backups"
-                                    : location.pathname === "/databases"
-                                      ? "Databases"
-                                      : location.pathname === "/"
-                                        ? "Overview"
-                                        : location.pathname
-                                            .slice(1)
-                                            .replace(/^[a-z]/, (letter) =>
-                                              letter.toUpperCase(),
-                                            );
+                        : location.pathname.startsWith("/docker")
+                          ? "Docker"
+                          : location.pathname === "/health"
+                            ? "Server health"
+                            : location.pathname === "/settings"
+                              ? "Settings"
+                              : location.pathname === "/account"
+                                ? "Account settings"
+                                : location.pathname === "/terminal"
+                                  ? "Terminal"
+                                  : location.pathname === "/logs"
+                                    ? "Logs"
+                                    : location.pathname === "/users"
+                                      ? "Accounts"
+                                      : location.pathname === "/plans"
+                                        ? "Hosting plans"
+                                        : location.pathname === "/firewall"
+                                          ? "Firewall"
+                                          : location.pathname ===
+                                              "/malware-scanner"
+                                            ? "Malware Scanner"
+                                            : location.pathname ===
+                                                "/application-shield"
+                                              ? "Application Shield"
+                                              : location.pathname === "/backups"
+                                                ? "Backups"
+                                                : location.pathname ===
+                                                    "/databases"
+                                                  ? "Databases"
+                                                  : location.pathname === "/"
+                                                    ? "Overview"
+                                                    : location.pathname
+                                                        .slice(1)
+                                                        .replace(
+                                                          /^[a-z]/,
+                                                          (letter) =>
+                                                            letter.toUpperCase(),
+                                                        );
   const content = location.pathname.startsWith("/websites") ? (
     <WebsitesPage />
   ) : location.pathname === "/activity" ? (
@@ -135,7 +237,11 @@ export default function DashboardPage({ user, onLogout }) {
     <CronJobsPage />
   ) : location.pathname === "/supervisor" ? (
     <SupervisorWorkspace />
-  ) : location.pathname === "/docker" ? (
+  ) : location.pathname.startsWith("/docker/images/") ? (
+    <DockerImageDetailsPage />
+  ) : location.pathname.startsWith("/docker/containers/") ? (
+    <DockerContainerDetailsPage />
+  ) : location.pathname.startsWith("/docker") ? (
     <DockerPage />
   ) : location.pathname === "/services/nodejs" ? (
     <NodeRuntimesPage />
@@ -173,14 +279,16 @@ export default function DashboardPage({ user, onLogout }) {
     <AccountSettingsPage user={user} />
   ) : location.pathname === "/terminal" ? null : active === "Services" ? (
     <ServicesPage />
+  ) : location.pathname === "/" && overviewLoading ? (
+    <OverviewSkeleton />
   ) : (
     <>
       <div>
         <p className="text-sm text-cyan-300">{t("dashboard.greeting")}</p>
-        <h2 className="mt-1 text-3xl font-semibold tracking-tight">{location.pathname === "/" ? t("nav.overview") : active}</h2>
-        <p className="mt-2 text-slate-400">
-          {t("dashboard.apiOnline")}
-        </p>
+        <h2 className="mt-1 text-3xl font-semibold tracking-tight">
+          {location.pathname === "/" ? t("nav.overview") : active}
+        </h2>
+        <p className="mt-2 text-slate-400">{t("dashboard.apiOnline")}</p>
       </div>
       <ResourceMetricCards />
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
