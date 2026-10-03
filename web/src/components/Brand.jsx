@@ -38,7 +38,7 @@ export default function Brand() {
       />
       <div>
         <p className="font-semibold">{name}</p>
-        <p className="text-xs text-slate-500">Version {version ? `v${version}` : "—"}</p>
+        <p className="text-xs text-neutral-500">Version {version ? `v${version}` : "—"}</p>
       </div>
     </div>
   );

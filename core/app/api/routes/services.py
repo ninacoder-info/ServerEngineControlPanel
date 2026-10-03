@@ -479,6 +479,48 @@ def apache_versions(user=Depends(require_user)):
     return {"active_version": active or (values[0]["version"] if values else None), "versions": values}
 
 
+@router.get("/nginx/versions")
+def nginx_versions(user=Depends(require_user)):
+    """List every managed Nginx version and identify the active default."""
+    base = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / "nginx"
+    active_marker = base / ".serverengine-active-version"
+    active = active_marker.read_text(errors="replace").strip() if active_marker.exists() else None
+    values = []
+    versions_root = base / "versions"
+    if versions_root.exists():
+        for version_root in sorted((item for item in versions_root.iterdir() if item.is_dir()), key=lambda item: version_sort_key(item.name), reverse=True):
+            binary = next((candidate for candidate in (version_root / "bin/nginx", version_root / "usr/sbin/nginx") if candidate.exists()), None)
+            if not binary:
+                continue
+            marker = version_root / ".serverengine-version"
+            version = marker.read_text(errors="replace").strip() if marker.exists() else version_root.name
+            method_marker = version_root / ".serverengine-install-method"
+            method = method_marker.read_text(errors="replace").strip() if method_marker.exists() else "source"
+            values.append({"version": version, "path": str(version_root), "install_method": method, "active": active == version, "status": "running" if active == version and _process_running("nginx") else "stopped"})
+    legacy_binary = next((candidate for candidate in (base / "bin/nginx", base / "usr/sbin/nginx") if candidate.exists()), None)
+    if legacy_binary and not values:
+        marker = base / ".serverengine-version"
+        version = marker.read_text(errors="replace").strip() if marker.exists() else "unknown"
+        method_marker = base / ".serverengine-install-method"
+        method = method_marker.read_text(errors="replace").strip() if method_marker.exists() else "source"
+        values.append({"version": version, "path": str(base), "install_method": method, "active": True, "status": "running" if _process_running("nginx") else "stopped"})
+    return {"active_version": active or (values[0]["version"] if values else None), "versions": values}
+
+
+@router.put("/nginx/default")
+def set_nginx_default(payload: dict, user=Depends(require_user)):
+    version = str(payload.get("version") or "").strip()
+    base = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / "nginx"
+    target = base / "versions" / version
+    if not any((target / candidate).exists() for candidate in ("bin/nginx", "usr/sbin/nginx")):
+        raise HTTPException(status_code=404, detail="That Nginx version is not installed")
+    current = service_root("nginx")
+    if current != target and _process_running("nginx"):
+        raise HTTPException(status_code=409, detail="Stop the running Nginx version before changing the default version.")
+    (base / ".serverengine-active-version").write_text(version + "\n")
+    return {"active_version": version, "message": f"Nginx {version} is now the default runtime."}
+
+
 @router.put("/apache/default")
 def set_apache_default(payload: dict, user=Depends(require_user)):
     version = str(payload.get("version") or "").strip()

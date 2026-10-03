@@ -1,4 +1,5 @@
 import React from "react";
+import { z } from "zod";
 import {
   Activity,
   AlertTriangle,
@@ -6,6 +7,7 @@ import {
   FileCog,
   FolderOpen,
   History,
+  Info,
   KeyRound,
   LockKeyhole,
   MoreHorizontal,
@@ -23,11 +25,22 @@ import {
 import { apiRequest, readApiError } from "../../lib/api";
 import ServiceNotInstalledState from "../../components/ServiceNotInstalledState";
 import { useServiceInstallationState } from "../../hooks/useServiceInstallationState";
+import SecurePasswordInput from "../../components/SecurePasswordInput";
+import FormField from "../../components/FormField";
 
 const field =
-  "mt-2 block min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100";
+  "mt-2 block min-h-11 w-full rounded-md border border-neutral-300 bg-white px-3 py-2.5 text-sm text-neutral-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100";
 const card =
-  "rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900";
+  "rounded-xl border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900";
+
+const ftpAccountSchema = (editing) => z.object({
+  username: z.string().trim().min(3, "Username must be at least 3 characters.").max(32, "Username cannot exceed 32 characters.").regex(/^[a-z][a-z0-9_-]*$/, "Username format is invalid."),
+  password: editing ? z.string().max(256, "Password is too long.") : z.string().min(8, "Password is too short.").max(256, "Password is too long."),
+  root: z.string().trim().min(1, "Choose an account root folder."),
+  access: z.enum(["read-write", "read-only"]),
+  quota_mb: z.union([z.literal(""), z.coerce.number().int().positive("Quota must be greater than zero.")]),
+  enabled: z.boolean(),
+});
 
 export function VsftpdConfigModal({
   service,
@@ -43,7 +56,7 @@ export function VsftpdConfigModal({
   const statusClass = service.status === "running"
     ? "text-emerald-600 dark:text-emerald-400"
     : service.status === "not-installed"
-      ? "text-slate-500 dark:text-slate-400"
+      ? "text-neutral-500 dark:text-neutral-400"
       : "text-amber-600 dark:text-amber-400";
   const [form, setForm] = React.useState({
     control_port: settings.control_port || 21,
@@ -117,17 +130,17 @@ export function VsftpdConfigModal({
     setVersionBusy(false);
   };
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4">
+    <div className="fixed inset-0 z-50 grid place-items-center bg-neutral-950/50 p-4">
       <form
         onSubmit={save}
-        className="max-h-[calc(100vh-2rem)] w-full max-w-3xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl dark:bg-slate-900"
+        className="max-h-[calc(100vh-2rem)] w-full max-w-3xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl dark:bg-neutral-900"
       >
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
+            <h2 className="text-xl font-semibold text-neutral-900 dark:text-neutral-100">
               vsftpd configuration
             </h2>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
               <span
                 className={statusClass}
               >
@@ -135,7 +148,7 @@ export function VsftpdConfigModal({
               </span>
               {" · "}v{service.version || "3.0.5"}
             </p>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
               Configure transfer ports, access policy, and connection limits.
             </p>
           </div>
@@ -143,18 +156,18 @@ export function VsftpdConfigModal({
             type="button"
             onClick={onClose}
             aria-label="Close vsftpd configuration"
-            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-lg text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
           >
             ×
           </button>
         </div>
-        <div className="mt-6 flex gap-5 overflow-x-auto border-b border-slate-200 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:border-slate-800">
+        <div className="mt-6 flex gap-5 overflow-x-auto border-b border-neutral-200 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:border-neutral-800">
           {tabs.map(([value, label, Icon]) => (
             <button
               type="button"
               key={value}
               onClick={() => setTab(value)}
-              className={`whitespace-nowrap border-b-2 px-1 pb-3 text-sm font-medium ${tab === value ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"}`}
+              className={`whitespace-nowrap border-b-2 px-1 pb-3 text-sm font-medium ${tab === value ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200"}`}
             >
               <span className="inline-flex items-center gap-1.5">
                 <Icon size={14} />
@@ -165,7 +178,7 @@ export function VsftpdConfigModal({
         </div>
         {tab === "configuration" && (
           <div className="mt-6 grid gap-5 sm:grid-cols-2">
-            <label className="text-sm font-medium text-slate-800 dark:text-slate-200">
+            <label className="text-sm font-medium text-neutral-800 dark:text-neutral-200">
               FTP control port
               <input
                 className={field}
@@ -177,11 +190,11 @@ export function VsftpdConfigModal({
                   update("control_port", Number(event.target.value))
                 }
               />
-              <span className="mt-1 block text-xs font-normal text-slate-500">
+              <span className="mt-1 block text-xs font-normal text-neutral-500">
                 Used by FTP and FTPS. SFTP uses SSH and is managed separately.
               </span>
             </label>
-            <label className="text-sm font-medium text-slate-800 dark:text-slate-200">
+            <label className="text-sm font-medium text-neutral-800 dark:text-neutral-200">
               Passive port start
               <input
                 className={field}
@@ -193,11 +206,11 @@ export function VsftpdConfigModal({
                   update("passive_min", Number(event.target.value))
                 }
               />
-              <span className="mt-1 block text-xs font-normal text-slate-500">
+              <span className="mt-1 block text-xs font-normal text-neutral-500">
                 First port used for file transfers and directory listings.
               </span>
             </label>
-            <label className="text-sm font-medium text-slate-800 dark:text-slate-200">
+            <label className="text-sm font-medium text-neutral-800 dark:text-neutral-200">
               Passive port end
               <input
                 className={field}
@@ -209,11 +222,11 @@ export function VsftpdConfigModal({
                   update("passive_max", Number(event.target.value))
                 }
               />
-              <span className="mt-1 block text-xs font-normal text-slate-500">
+              <span className="mt-1 block text-xs font-normal text-neutral-500">
                 Last port in the passive transfer range.
               </span>
             </label>
-            <label className="text-sm font-medium text-slate-800 dark:text-slate-200">
+            <label className="text-sm font-medium text-neutral-800 dark:text-neutral-200">
               Maximum connections
               <input
                 className={field}
@@ -227,10 +240,10 @@ export function VsftpdConfigModal({
               />
             </label>
             <div className="space-y-4 pt-3">
-              <label className="flex items-center gap-3 text-sm font-medium text-slate-800 dark:text-slate-200">
+              <label className="flex items-center gap-3 text-sm font-medium text-neutral-800 dark:text-neutral-200">
                 <input
                   type="checkbox"
-                  className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                  className="h-4 w-4 rounded border-neutral-300 text-blue-600"
                   checked={form.tls_required}
                   onChange={(event) =>
                     update("tls_required", event.target.checked)
@@ -238,10 +251,10 @@ export function VsftpdConfigModal({
                 />
                 Require FTPS
               </label>
-              <label className="flex items-center gap-3 text-sm font-medium text-slate-800 dark:text-slate-200">
+              <label className="flex items-center gap-3 text-sm font-medium text-neutral-800 dark:text-neutral-200">
                 <input
                   type="checkbox"
-                  className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                  className="h-4 w-4 rounded border-neutral-300 text-blue-600"
                   checked={form.anonymous_enabled}
                   onChange={(event) =>
                     update("anonymous_enabled", event.target.checked)
@@ -255,17 +268,17 @@ export function VsftpdConfigModal({
         {tab === "versions" && (
           <div className="mt-6 space-y-4">
             <div>
-              <h3 className="font-semibold text-slate-900 dark:text-slate-100">
+              <h3 className="font-semibold text-neutral-900 dark:text-neutral-100">
                 Available vsftpd versions
               </h3>
-              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
                 Manage the FTP server version provided by Server Engine.
               </p>
             </div>
-            <label className="block text-sm font-medium text-slate-800 dark:text-slate-200">
+            <label className="block text-sm font-medium text-neutral-800 dark:text-neutral-200">
               vsftpd version
               <select
-                className={`${field} bg-white dark:bg-slate-950`}
+                className={`${field} bg-white dark:bg-neutral-950`}
                 value={version}
                 onChange={(event) => setVersion(event.target.value)}
               >
@@ -276,10 +289,10 @@ export function VsftpdConfigModal({
                 ))}
               </select>
             </label>
-            <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+            <label className="flex items-center gap-2 text-sm text-neutral-700 dark:text-neutral-300">
               <input
                 type="checkbox"
-                className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                className="h-4 w-4 rounded border-neutral-300 text-blue-600"
                 checked={confirmed}
                 onChange={(event) => setConfirmed(event.target.checked)}
               />
@@ -297,7 +310,7 @@ export function VsftpdConfigModal({
               </button>
             </div>
             {versionMessage && (
-              <p className="text-sm text-slate-600 dark:text-slate-300">
+              <p className="text-sm text-neutral-600 dark:text-neutral-300">
                 {versionMessage}
               </p>
             )}
@@ -306,29 +319,29 @@ export function VsftpdConfigModal({
         {tab === "runtime" && (
           <div className="mt-6 space-y-4">
             <div>
-              <h3 className="font-semibold text-slate-900 dark:text-slate-100">
+              <h3 className="font-semibold text-neutral-900 dark:text-neutral-100">
                 Runtime status
               </h3>
-              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
                 Check the current FTP service process and runtime paths.
               </p>
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
-              <div className="rounded-lg border border-slate-200 p-4 dark:border-slate-800">
-                <p className="text-xs text-slate-500">Service state</p>
+              <div className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+                <p className="text-xs text-neutral-500">Service state</p>
                 <p className={`mt-1 font-semibold ${statusClass}`}>
                   {statusLabel}
                 </p>
               </div>
-              <div className="rounded-lg border border-slate-200 p-4 dark:border-slate-800">
-                <p className="text-xs text-slate-500">Control port</p>
-                <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">
+              <div className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+                <p className="text-xs text-neutral-500">Control port</p>
+                <p className="mt-1 font-semibold text-neutral-900 dark:text-neutral-100">
                   21
                 </p>
               </div>
             </div>
             {!installed ? (
-              <div className="rounded-md border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400">
+              <div className="rounded-md border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-600 dark:border-neutral-800 dark:bg-neutral-950 dark:text-neutral-400">
                 Install vsftpd from the Services page before starting it or managing its runtime.
               </div>
             ) : <div className="flex flex-wrap gap-3">
@@ -337,7 +350,7 @@ export function VsftpdConfigModal({
                   type="button"
                   disabled={actionBusy}
                   onClick={() => runAction("stop")}
-                  className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                  className="inline-flex items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
                 >
                   <Square size={14} /> Stop
                 </button>
@@ -356,7 +369,7 @@ export function VsftpdConfigModal({
                   type="button"
                   disabled={actionBusy}
                   onClick={() => runAction("restart")}
-                  className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                  className="inline-flex items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
                 >
                   <RotateCw size={14} /> Restart
                 </button>
@@ -366,13 +379,13 @@ export function VsftpdConfigModal({
         )}
         {tab === "error-log" && (
           <div className="mt-6">
-            <h3 className="font-semibold text-slate-900 dark:text-slate-100">
+            <h3 className="font-semibold text-neutral-900 dark:text-neutral-100">
               vsftpd error log
             </h3>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
               Service errors will appear here after vsftpd starts.
             </p>
-            <pre className="mt-4 min-h-32 overflow-auto rounded-lg bg-slate-950 p-4 text-xs text-slate-300">
+            <pre className="mt-4 min-h-32 overflow-auto rounded-lg bg-neutral-950 p-4 text-xs text-neutral-300">
               No log entries available.
             </pre>
           </div>
@@ -387,7 +400,7 @@ export function VsftpdConfigModal({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-md px-4 py-2 text-sm text-slate-600 dark:text-slate-300"
+              className="rounded-md px-4 py-2 text-sm text-neutral-600 dark:text-neutral-300"
             >
               Cancel
             </button>
@@ -408,28 +421,28 @@ export function VsftpdConfigModal({
 function FolderPicker({ browser, busy, browse, onSelect, onClose }) {
   const current = browser.path || "/server-engine/www";
   return (
-    <div className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-slate-950/60 p-4 sm:p-8">
-      <section className="w-full max-w-xl rounded-xl bg-white shadow-xl dark:bg-slate-900">
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+    <div className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8">
+      <section className="w-full max-w-xl rounded-xl bg-white shadow-xl dark:bg-neutral-900">
+        <div className="flex items-center justify-between border-b border-neutral-200 px-5 py-4 dark:border-neutral-800">
           <div>
-            <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+            <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
               Choose account root folder
             </h3>
-            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
               The FTP account can access this folder and its subfolders only.
             </p>
           </div>
           <button
             type="button"
             aria-label="Close folder browser"
-            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
             onClick={onClose}
           >
             ×
           </button>
         </div>
         <div className="space-y-4 px-5 py-5">
-          <div className="flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:text-slate-300">
+          <div className="flex items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm text-neutral-700 dark:border-neutral-700 dark:text-neutral-300">
             <FolderOpen size={16} className="text-blue-600" />
             <span className="min-w-0 flex-1 truncate">{current}</span>
             {browser.path && (
@@ -445,23 +458,23 @@ function FolderPicker({ browser, busy, browse, onSelect, onClose }) {
           {browser.parent && (
             <button
               type="button"
-              className="cursor-pointer text-sm font-medium text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
+              className="cursor-pointer text-sm font-medium text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
               onClick={() => browse(browser.parent)}
             >
               ← Parent folder
             </button>
           )}
           {busy ? (
-            <p className="py-5 text-sm text-slate-500 dark:text-slate-400">
+            <p className="py-5 text-sm text-neutral-500 dark:text-neutral-400">
               Loading folders…
             </p>
           ) : !browser.path ? (
-            <div className="divide-y divide-slate-200 border-y border-slate-200 dark:divide-slate-800 dark:border-slate-800">
+            <div className="divide-y divide-neutral-200 border-y border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
               {browser.roots.map((root) => (
                 <button
                   type="button"
                   key={root.path}
-                  className="flex w-full cursor-pointer items-center gap-3 py-3 text-left text-sm text-slate-700 hover:text-blue-600 dark:text-slate-300 dark:hover:text-blue-400"
+                  className="flex w-full cursor-pointer items-center gap-3 py-3 text-left text-sm text-neutral-700 hover:text-blue-600 dark:text-neutral-300 dark:hover:text-blue-400"
                   onClick={() => browse(root.path)}
                 >
                   <FolderOpen size={16} />
@@ -469,18 +482,18 @@ function FolderPicker({ browser, busy, browse, onSelect, onClose }) {
                 </button>
               ))}
               {!browser.roots.length && (
-                <p className="py-5 text-sm text-slate-500 dark:text-slate-400">
+                <p className="py-5 text-sm text-neutral-500 dark:text-neutral-400">
                   No allowed website roots are available yet.
                 </p>
               )}
             </div>
           ) : (
-            <div className="divide-y divide-slate-200 border-y border-slate-200 dark:divide-slate-800 dark:border-slate-800">
+            <div className="divide-y divide-neutral-200 border-y border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
               {browser.directories.map((directory) => (
                 <button
                   type="button"
                   key={directory.path}
-                  className="flex w-full cursor-pointer items-center gap-3 py-3 text-left text-sm text-slate-700 hover:text-blue-600 dark:text-slate-300 dark:hover:text-blue-400"
+                  className="flex w-full cursor-pointer items-center gap-3 py-3 text-left text-sm text-neutral-700 hover:text-blue-600 dark:text-neutral-300 dark:hover:text-blue-400"
                   onClick={() => browse(directory.path)}
                 >
                   <FolderOpen size={16} />
@@ -488,7 +501,7 @@ function FolderPicker({ browser, busy, browse, onSelect, onClose }) {
                 </button>
               ))}
               {!browser.directories.length && (
-                <p className="py-5 text-sm text-slate-500 dark:text-slate-400">
+                <p className="py-5 text-sm text-neutral-500 dark:text-neutral-400">
                   No subfolders in this directory.
                 </p>
               )}
@@ -511,6 +524,7 @@ function AccountModal({ account, onClose, onSaved }) {
     enabled: account?.enabled ?? true,
   });
   const [error, setError] = React.useState("");
+  const [fieldErrors, setFieldErrors] = React.useState({});
   const [busy, setBusy] = React.useState(false);
   const [browser, setBrowser] = React.useState({
     path: null,
@@ -536,8 +550,16 @@ function AccountModal({ account, onClose, onSaved }) {
   }, [account, browse]);
   const save = async (event) => {
     event.preventDefault();
+    const validation = ftpAccountSchema(editing).safeParse(form);
+    if (!validation.success) {
+      const nextErrors = Object.fromEntries(validation.error.issues.map((issue) => [issue.path[0], issue.message]));
+      setFieldErrors(nextErrors);
+      setError("");
+      return;
+    }
     setBusy(true);
     setError("");
+    setFieldErrors({});
     const response = await apiRequest(
       editing
         ? `/api/v1/ftp/accounts/${account.username}`
@@ -558,60 +580,59 @@ function AccountModal({ account, onClose, onSaved }) {
     onSaved();
   };
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4">
+    <div className="fixed inset-0 z-50 grid place-items-center bg-neutral-950/50 p-4">
       <form
         onSubmit={save}
-        className="max-h-[calc(100vh-2rem)] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl dark:bg-slate-900"
+        noValidate
+        className="max-h-[calc(100vh-2rem)] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl dark:bg-neutral-900"
       >
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
+            <h2 className="text-xl font-semibold text-neutral-900 dark:text-neutral-100">
               {editing ? "Edit FTP account" : "Create FTP account"}
             </h2>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
               Restrict this account to one website or deployment directory.
             </p>
           </div>
-          <button type="button" onClick={onClose} className="text-slate-400">
+          <button type="button" onClick={onClose} className="text-neutral-400">
             ×
           </button>
         </div>
         <div className="mt-6 grid gap-5 md:grid-cols-2">
-          <label className="text-sm font-medium text-slate-800 dark:text-slate-200">
-            Username
+          <FormField label="Username" tooltip="Use lowercase letters, numbers, underscores, or hyphens only." error={fieldErrors.username} showError={false}>
             <input
               className={field}
               value={form.username}
               disabled={editing}
-              onChange={(event) =>
-                setForm({ ...form, username: event.target.value })
-              }
+              onChange={(event) => {
+                setForm({ ...form, username: event.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, "") });
+                setFieldErrors((current) => ({ ...current, username: undefined }));
+              }}
               placeholder="website_deploy"
             />
-          </label>
-          <label className="text-sm font-medium text-slate-800 dark:text-slate-200">
-            {editing ? "New password (optional)" : "Password"}
-            <input
+          </FormField>
+          <FormField label={editing ? "New password (optional)" : "Password"} tooltip="Use at least 8 characters." error={fieldErrors.password} showError={false}>
+            <SecurePasswordInput
               className={field}
-              type="password"
               value={form.password}
-              required={!editing}
-              onChange={(event) =>
-                setForm({ ...form, password: event.target.value })
-              }
+              onChange={(event) => {
+                setForm({ ...form, password: event.target.value });
+                setFieldErrors((current) => ({ ...current, password: undefined }));
+              }}
               placeholder="At least 8 characters"
             />
-          </label>
-          <label className="text-sm font-medium text-slate-800 dark:text-slate-200 md:col-span-2">
+          </FormField>
+          <label className={`text-sm font-medium md:col-span-2 ${fieldErrors.root ? "text-rose-600 dark:text-rose-400" : "text-neutral-800 dark:text-neutral-200"}`}>
             Account root folder
             <div className="mt-2 flex gap-2">
               <div className="relative min-w-0 flex-1">
                 <FolderOpen
                   size={16}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400"
                 />
                 <input
-                  className={`${field} mt-0 pl-9`}
+                  className={`${field} mt-0 pl-9 ${fieldErrors.root ? "border-rose-500 focus:border-rose-500 focus:ring-rose-500" : ""}`}
                   value={form.root}
                   readOnly
                   placeholder="Choose a folder"
@@ -619,18 +640,22 @@ function AccountModal({ account, onClose, onSaved }) {
               </div>
               <button
                 type="button"
-                className="mt-2 inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-md border border-slate-300 px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                className="mt-2 inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-md border border-neutral-300 px-3 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
                 onClick={() => setBrowserOpen(true)}
               >
                 <FolderOpen size={15} />
                 Browse
               </button>
             </div>
-            <span className="mt-1 block text-xs font-normal text-slate-500">
-              The FTP account cannot browse above this directory.
+            <span className="group/root relative mt-1 inline-flex cursor-help items-center text-neutral-400 dark:text-neutral-500">
+              <Info size={14} aria-label="FTP account root folder information" />
+              <span className="pointer-events-none absolute left-0 top-full z-20 mt-1 w-64 rounded-md bg-neutral-900 px-2.5 py-2 text-xs font-normal leading-5 text-white opacity-0 shadow-lg transition-opacity group-hover/root:opacity-100 dark:bg-white dark:text-neutral-900">
+                The FTP account cannot browse above this directory.
+              </span>
             </span>
+            {fieldErrors.root && <span className="mt-1 block text-xs font-normal text-rose-600 dark:text-rose-400">{fieldErrors.root}</span>}
           </label>
-          <label className="text-sm font-medium text-slate-800 dark:text-slate-200">
+          <label className="text-sm font-medium text-neutral-800 dark:text-neutral-200">
             Access
             <select
               className={field}
@@ -643,23 +668,25 @@ function AccountModal({ account, onClose, onSaved }) {
               <option value="read-only">Read only</option>
             </select>
           </label>
-          <label className="text-sm font-medium text-slate-800 dark:text-slate-200">
+          <label className={`text-sm font-medium ${fieldErrors.quota_mb ? "text-rose-600 dark:text-rose-400" : "text-neutral-800 dark:text-neutral-200"}`}>
             Storage quota (MB)
             <input
-              className={field}
+              className={fieldErrors.quota_mb ? `${field} border-rose-500 focus:border-rose-500 focus:ring-rose-500` : field}
               type="number"
               min="1"
               value={form.quota_mb}
-              onChange={(event) =>
-                setForm({ ...form, quota_mb: event.target.value })
-              }
+              onChange={(event) => {
+                setForm({ ...form, quota_mb: event.target.value });
+                setFieldErrors((current) => ({ ...current, quota_mb: undefined }));
+              }}
               placeholder="Unlimited"
             />
+            {fieldErrors.quota_mb && <span className="mt-1 block text-xs font-normal text-rose-600 dark:text-rose-400">{fieldErrors.quota_mb}</span>}
           </label>
-          <label className="flex items-center gap-3 text-sm font-medium text-slate-800 dark:text-slate-200 md:col-span-2">
+          <label className="flex items-center gap-3 text-sm font-medium text-neutral-800 dark:text-neutral-200 md:col-span-2">
             <input
               type="checkbox"
-              className="h-4 w-4 rounded border-slate-300 text-blue-600"
+              className="h-4 w-4 rounded border-neutral-300 text-blue-600"
               checked={form.enabled}
               onChange={(event) =>
                 setForm({ ...form, enabled: event.target.checked })
@@ -677,7 +704,7 @@ function AccountModal({ account, onClose, onSaved }) {
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md px-4 py-2 text-sm text-slate-600 dark:text-slate-300"
+            className="rounded-md px-4 py-2 text-sm text-neutral-600 dark:text-neutral-300"
           >
             Cancel
           </button>
@@ -697,6 +724,7 @@ function AccountModal({ account, onClose, onSaved }) {
           browse={browse}
           onSelect={(path) => {
             setForm((current) => ({ ...current, root: path }));
+            setFieldErrors((current) => ({ ...current, root: undefined }));
             setBrowserOpen(false);
           }}
           onClose={() => setBrowserOpen(false)}
@@ -711,21 +739,21 @@ function FTPPageSkeleton() {
     <div className="animate-pulse space-y-7" aria-label="Loading FTP accounts">
       <header className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
         <div className="space-y-3">
-          <div className="h-4 w-36 rounded bg-slate-200 dark:bg-slate-800" />
-          <div className="h-9 w-44 rounded bg-slate-200 dark:bg-slate-800" />
-          <div className="h-4 w-[30rem] max-w-full rounded bg-slate-100 dark:bg-slate-800/70" />
+          <div className="h-4 w-36 rounded bg-neutral-200 dark:bg-neutral-800" />
+          <div className="h-9 w-44 rounded bg-neutral-200 dark:bg-neutral-800" />
+          <div className="h-4 w-[30rem] max-w-full rounded bg-neutral-100 dark:bg-neutral-800/70" />
         </div>
-        <div className="h-10 w-40 rounded-md bg-slate-200 dark:bg-slate-800" />
+        <div className="h-10 w-40 rounded-md bg-neutral-200 dark:bg-neutral-800" />
       </header>
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {Array.from({ length: 4 }).map((_, index) => (
           <div key={index} className={`${card} space-y-4`}>
             <div className="flex items-center gap-3">
-              <div className="h-5 w-5 rounded bg-slate-200 dark:bg-slate-800" />
+              <div className="h-5 w-5 rounded bg-neutral-200 dark:bg-neutral-800" />
               <div className="space-y-2">
-                <div className="h-3 w-20 rounded bg-slate-100 dark:bg-slate-800/70" />
-                <div className="h-6 w-24 rounded bg-slate-200 dark:bg-slate-800" />
+                <div className="h-3 w-20 rounded bg-neutral-100 dark:bg-neutral-800/70" />
+                <div className="h-6 w-24 rounded bg-neutral-200 dark:bg-neutral-800" />
               </div>
             </div>
           </div>
@@ -735,24 +763,24 @@ function FTPPageSkeleton() {
       <section className={card}>
         <div className="flex items-center justify-between gap-4">
           <div className="space-y-2">
-            <div className="h-5 w-32 rounded bg-slate-200 dark:bg-slate-800" />
-            <div className="h-3 w-64 rounded bg-slate-100 dark:bg-slate-800/70" />
+            <div className="h-5 w-32 rounded bg-neutral-200 dark:bg-neutral-800" />
+            <div className="h-3 w-64 rounded bg-neutral-100 dark:bg-neutral-800/70" />
           </div>
-          <div className="h-5 w-20 rounded bg-slate-100 dark:bg-slate-800/70" />
+          <div className="h-5 w-20 rounded bg-neutral-100 dark:bg-neutral-800/70" />
         </div>
         <div className="mt-5 overflow-hidden">
-          <div className="grid grid-cols-6 gap-4 border-b border-slate-200 px-3 py-3 dark:border-slate-800">
-            {Array.from({ length: 6 }).map((_, index) => <div key={index} className="h-3 rounded bg-slate-100 dark:bg-slate-800/70" />)}
+          <div className="grid grid-cols-6 gap-4 border-b border-neutral-200 px-3 py-3 dark:border-neutral-800">
+            {Array.from({ length: 6 }).map((_, index) => <div key={index} className="h-3 rounded bg-neutral-100 dark:bg-neutral-800/70" />)}
           </div>
-          <div className="divide-y divide-slate-100 dark:divide-slate-800">
+          <div className="divide-y divide-neutral-100 dark:divide-neutral-800">
             {Array.from({ length: 5 }).map((_, index) => (
               <div key={index} className="grid grid-cols-6 items-center gap-4 px-3 py-5">
-                <div className="h-4 w-24 rounded bg-slate-200 dark:bg-slate-800" />
-                <div className="h-3 w-40 rounded bg-slate-100 dark:bg-slate-800/70" />
-                <div className="h-3 w-16 rounded bg-slate-100 dark:bg-slate-800/70" />
-                <div className="h-3 w-20 rounded bg-slate-100 dark:bg-slate-800/70" />
-                <div className="h-5 w-20 rounded-full bg-slate-100 dark:bg-slate-800/70" />
-                <div className="ml-auto h-7 w-16 rounded bg-slate-100 dark:bg-slate-800/70" />
+                <div className="h-4 w-24 rounded bg-neutral-200 dark:bg-neutral-800" />
+                <div className="h-3 w-40 rounded bg-neutral-100 dark:bg-neutral-800/70" />
+                <div className="h-3 w-16 rounded bg-neutral-100 dark:bg-neutral-800/70" />
+                <div className="h-3 w-20 rounded bg-neutral-100 dark:bg-neutral-800/70" />
+                <div className="h-5 w-20 rounded-full bg-neutral-100 dark:bg-neutral-800/70" />
+                <div className="ml-auto h-7 w-16 rounded bg-neutral-100 dark:bg-neutral-800/70" />
               </div>
             ))}
           </div>
@@ -865,10 +893,10 @@ export default function FTPPage() {
           <p className="text-sm font-medium text-blue-600 dark:text-blue-400">
             Hosting / File transfer
           </p>
-          <h1 className="mt-1 text-3xl font-semibold text-slate-900 dark:text-slate-100">
+          <h1 className="mt-1 text-3xl font-semibold text-neutral-900 dark:text-neutral-100">
             FTP Accounts
           </h1>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500 dark:text-slate-400">
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-500 dark:text-neutral-400">
             Manage restricted FTP and FTPS users, website roots, access
             permissions, quotas, and passive transfer settings.
           </p>
@@ -887,10 +915,10 @@ export default function FTPPage() {
           <div className="flex items-start gap-3">
             <Server className="mt-0.5 text-amber-500" size={20} />
             <div>
-              <h2 className="font-semibold text-slate-900 dark:text-slate-100">
+              <h2 className="font-semibold text-neutral-900 dark:text-neutral-100">
                 vsftpd is not installed
               </h2>
-              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
                 Install vsftpd from Services before creating FTP accounts.
               </p>
               <a
@@ -923,10 +951,10 @@ export default function FTPPage() {
               <div className="flex items-center gap-3">
                 <Icon size={20} className="text-blue-500" />
                 <span>
-                  <small className="block text-xs text-slate-500 dark:text-slate-400">
+                  <small className="block text-xs text-neutral-500 dark:text-neutral-400">
                     {label}
                   </small>
-                  <strong className="mt-1 block text-xl text-slate-900 dark:text-slate-100">
+                  <strong className="mt-1 block text-xl text-neutral-900 dark:text-neutral-100">
                     {value}
                   </strong>
                 </span>
@@ -937,7 +965,7 @@ export default function FTPPage() {
                   title="Configure vsftpd"
                   aria-label="Configure vsftpd"
                   onClick={() => setConfigOpen(true)}
-                  className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                  className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
                 >
                   <Settings2 size={16} />
                 </button>
@@ -949,10 +977,10 @@ export default function FTPPage() {
       <section className={card}>
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+            <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">
               FTP accounts
             </h2>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
               Every account is jailed to its configured root folder.
             </p>
           </div>
@@ -967,7 +995,7 @@ export default function FTPPage() {
         <div className="mt-5 overflow-x-auto">
           <table className="w-full min-w-[850px] text-left text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-800">
+              <tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800">
                 <th className="px-3 py-3">Account</th>
                 <th className="px-3 py-3">Root folder</th>
                 <th className="px-3 py-3">Access</th>
@@ -980,23 +1008,23 @@ export default function FTPPage() {
               {data.accounts.map((account) => (
                 <tr
                   key={account.username}
-                  className="border-b border-slate-100 dark:border-slate-800"
+                  className="border-b border-neutral-100 dark:border-neutral-800"
                 >
-                  <td className="px-3 py-4 font-semibold text-slate-900 dark:text-slate-100">
+                  <td className="px-3 py-4 font-semibold text-neutral-900 dark:text-neutral-100">
                     {account.username}
                   </td>
-                  <td className="px-3 py-4 font-mono text-xs text-slate-500 dark:text-slate-400">
+                  <td className="px-3 py-4 font-mono text-xs text-neutral-500 dark:text-neutral-400">
                     {account.root}
                   </td>
-                  <td className="px-3 py-4 capitalize text-slate-600 dark:text-slate-400">
+                  <td className="px-3 py-4 capitalize text-neutral-600 dark:text-neutral-400">
                     {account.access}
                   </td>
-                  <td className="px-3 py-4 text-slate-600 dark:text-slate-400">
+                  <td className="px-3 py-4 text-neutral-600 dark:text-neutral-400">
                     {account.quota_mb ? `${account.quota_mb} MB` : "Unlimited"}
                   </td>
                   <td className="px-3 py-4">
                     <span
-                      className={`inline-flex items-center gap-1.5 text-xs font-semibold ${account.enabled ? "text-emerald-600 dark:text-emerald-400" : "text-slate-400"}`}
+                      className={`inline-flex items-center gap-1.5 text-xs font-semibold ${account.enabled ? "text-emerald-600 dark:text-emerald-400" : "text-neutral-400"}`}
                     >
                       <CheckCircle2 size={14} />
                       {account.enabled ? "Enabled" : "Disabled"}
@@ -1006,7 +1034,7 @@ export default function FTPPage() {
                     <button
                       type="button"
                       onClick={() => setModal(account)}
-                      className="rounded-md p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                      className="rounded-md p-2 text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
                     >
                       <MoreHorizontal size={17} />
                     </button>
@@ -1023,14 +1051,14 @@ export default function FTPPage() {
             </tbody>
           </table>
           {!data.accounts.length && (
-            <div className="py-14 text-center text-sm text-slate-500 dark:text-slate-400">
+            <div className="py-14 text-center text-sm text-neutral-500 dark:text-neutral-400">
               No FTP accounts yet.
             </div>
           )}
         </div>
       </section>
       {notice && (
-        <p className="text-sm text-slate-600 dark:text-slate-300">{notice}</p>
+        <p className="text-sm text-neutral-600 dark:text-neutral-300">{notice}</p>
       )}
       {modal !== null && (
         <AccountModal

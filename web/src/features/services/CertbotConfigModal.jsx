@@ -24,7 +24,7 @@ const tabs = [
 ];
 
 const inputClass =
-  "mt-1.5 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100";
+  "mt-1.5 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100";
 const buttonClass =
   "inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60";
 
@@ -43,11 +43,11 @@ const defaults = {
 
 function Field({ label, children, hint }) {
   return (
-    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+    <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
       {label}
       {children}
       {hint && (
-        <span className="mt-1 block text-xs font-normal leading-5 text-slate-500 dark:text-slate-400">
+        <span className="mt-1 block text-xs font-normal leading-5 text-neutral-500 dark:text-neutral-400">
           {hint}
         </span>
       )}
@@ -65,10 +65,10 @@ function Toggle({ label, description, checked, onChange }) {
         className="mt-1 h-4 w-4 cursor-pointer accent-blue-600"
       />
       <span>
-        <span className="block text-sm font-medium text-slate-900 dark:text-slate-100">
+        <span className="block text-sm font-medium text-neutral-900 dark:text-neutral-100">
           {label}
         </span>
-        <span className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">
+        <span className="mt-1 block text-xs leading-5 text-neutral-500 dark:text-neutral-400">
           {description}
         </span>
       </span>
@@ -78,11 +78,11 @@ function Toggle({ label, description, checked, onChange }) {
 
 function Row({ label, value }) {
   return (
-    <div className="flex flex-col gap-1 border-b border-slate-200 py-3 last:border-b-0 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-      <span className="text-sm text-slate-500 dark:text-slate-400">
+    <div className="flex flex-col gap-1 border-b border-neutral-200 py-3 last:border-b-0 dark:border-neutral-800 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+      <span className="text-sm text-neutral-500 dark:text-neutral-400">
         {label}
       </span>
-      <code className="break-all text-xs text-slate-700 dark:text-slate-300 sm:text-right">
+      <code className="break-all text-xs text-neutral-700 dark:text-neutral-300 sm:text-right">
         {value}
       </code>
     </div>
@@ -222,9 +222,9 @@ export default function CertbotConfigModal({ installed, onClose }) {
   const installedLabel = current?.version ? `v${current.version}` : "installed";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/60 p-4 sm:p-8">
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8">
       <section
-        className="w-full max-w-3xl rounded-xl bg-white p-6 shadow-xl dark:bg-slate-900"
+        className="w-full max-w-3xl rounded-xl bg-white p-6 shadow-xl dark:bg-neutral-900"
         role="dialog"
         aria-modal="true"
         aria-labelledby="certbot-title"
@@ -233,11 +233,11 @@ export default function CertbotConfigModal({ installed, onClose }) {
           <div>
             <h2
               id="certbot-title"
-              className="text-xl font-semibold text-slate-900 dark:text-slate-100"
+              className="text-xl font-semibold text-neutral-900 dark:text-neutral-100"
             >
               Certbot
             </h2>
-            <p className="mt-1 flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+            <p className="mt-1 flex items-center gap-2 text-sm text-neutral-500 dark:text-neutral-400">
               <span className="h-2 w-2 rounded-full bg-emerald-500" />
               {installedLabel} · on-demand ACME client
             </p>
@@ -245,20 +245,20 @@ export default function CertbotConfigModal({ installed, onClose }) {
           <button
             type="button"
             aria-label="Close Certbot configuration"
-            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
             onClick={onClose}
           >
             <X size={18} />
           </button>
         </div>
 
-        <div className="mt-6 flex gap-5 overflow-x-auto border-b border-slate-200 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:border-slate-800">
+        <div className="mt-6 flex gap-5 overflow-x-auto border-b border-neutral-200 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:border-neutral-800">
           {tabs.map(([id, label, Icon]) => (
             <button
               type="button"
               key={id}
               onClick={() => setTab(id)}
-              className={`inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap border-b-2 px-1 pb-3 text-sm font-medium ${tab === id ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"}`}
+              className={`inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap border-b-2 px-1 pb-3 text-sm font-medium ${tab === id ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200"}`}
             >
               <Icon size={15} />
               {label}
@@ -270,23 +270,23 @@ export default function CertbotConfigModal({ installed, onClose }) {
           {tab === "certificates" && (
             <div className="space-y-5">
               <div>
-                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
                   Certificate management
                 </h3>
-                <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                <p className="mt-1 text-sm leading-6 text-neutral-500 dark:text-neutral-400">
                   Certbot requests and renews certificates for websites
                   configured in Server Engine. Choose the website and
                   certificate action from its SSL settings.
                 </p>
               </div>
-              <div className="rounded-md border border-slate-200 p-4 dark:border-slate-800">
+              <div className="rounded-md border border-neutral-200 p-4 dark:border-neutral-800">
                 <div className="flex items-start gap-3">
                   <CheckCircle2 className="mt-0.5 text-emerald-600" size={18} />
                   <div>
-                    <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                    <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
                       ACME client ready
                     </p>
-                    <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                    <p className="mt-1 text-xs leading-5 text-neutral-500 dark:text-neutral-400">
                       HTTP-01 is the safe default for normal websites. DNS-01 is
                       required for wildcard certificates.
                     </p>
@@ -313,10 +313,10 @@ export default function CertbotConfigModal({ installed, onClose }) {
           {tab === "account" && (
             <div className="space-y-5">
               <div>
-                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
                   ACME account
                 </h3>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
                   Use a monitored address for expiry notices and agree to the
                   certificate authority terms once.
                 </p>
@@ -348,10 +348,10 @@ export default function CertbotConfigModal({ installed, onClose }) {
           {tab === "issuance" && (
             <div className="space-y-5">
               <div>
-                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
                   Certificate issuance
                 </h3>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
                   Set the default ACME challenge for new website certificates.
                 </p>
               </div>
@@ -415,10 +415,10 @@ export default function CertbotConfigModal({ installed, onClose }) {
           {tab === "renewal" && (
             <div className="space-y-5">
               <div>
-                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
                   Renewal policy
                 </h3>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
                   Certbot renewal is safe to run repeatedly; it only renews
                   certificates that are close to expiry.
                 </p>
@@ -469,10 +469,10 @@ export default function CertbotConfigModal({ installed, onClose }) {
           {tab === "runtime" && (
             <div className="space-y-5">
               <div>
-                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
                   Certbot runtime
                 </h3>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
                   Certbot runs only when issuing or renewing a certificate.
                   There is no persistent service to start or stop.
                 </p>
@@ -502,16 +502,16 @@ export default function CertbotConfigModal({ installed, onClose }) {
             <div className="space-y-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                  <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
                     Certbot activity log
                   </h3>
-                  <p className="mt-1 break-all text-xs text-slate-500 dark:text-slate-400">
+                  <p className="mt-1 break-all text-xs text-neutral-500 dark:text-neutral-400">
                     {logs?.path || `${root}/logs/letsencrypt.log`}
                   </p>
                 </div>
                 <button
                   type="button"
-                  className={`${buttonClass} border border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300`}
+                  className={`${buttonClass} border border-neutral-300 text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300`}
                   onClick={() =>
                     apiRequest("/api/v1/services/certbot/logs?page_size=50")
                       .then((response) =>
@@ -524,7 +524,7 @@ export default function CertbotConfigModal({ installed, onClose }) {
                   Reload
                 </button>
               </div>
-              <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-md bg-slate-950 p-4 text-xs leading-5 text-slate-300">
+              <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-md bg-neutral-950 p-4 text-xs leading-5 text-neutral-300">
                 {logs?.available
                   ? logs.lines.join("\n") || "No Certbot activity recorded."
                   : logs
@@ -537,14 +537,14 @@ export default function CertbotConfigModal({ installed, onClose }) {
           {tab === "configuration" && (
             <div className="space-y-4">
               <div>
-                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
                   cli.ini
                 </h3>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
                   Advanced Certbot defaults. Website-specific certificate
                   settings remain attached to the website.
                 </p>
-                <code className="mt-2 block break-all text-xs text-slate-500 dark:text-slate-400">
+                <code className="mt-2 block break-all text-xs text-neutral-500 dark:text-neutral-400">
                   {config?.config_path || `${root}/conf/cli.ini`}
                 </code>
               </div>
@@ -552,7 +552,7 @@ export default function CertbotConfigModal({ installed, onClose }) {
               <div className="flex justify-end gap-3">
                 <button
                   type="button"
-                  className={`${buttonClass} border border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300`}
+                  className={`${buttonClass} border border-neutral-300 text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300`}
                   onClick={loadConfig}
                 >
                   Reset edits
@@ -571,7 +571,7 @@ export default function CertbotConfigModal({ installed, onClose }) {
         </div>
 
         {message && (
-          <p className="mt-5 text-sm text-slate-600 dark:text-slate-300">
+          <p className="mt-5 text-sm text-neutral-600 dark:text-neutral-300">
             {message}
           </p>
         )}

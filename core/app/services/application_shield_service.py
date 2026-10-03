@@ -23,7 +23,7 @@ from app.models.application_shield import (
 from app.models.application_shield_rule import ApplicationShieldRule, ApplicationShieldRuleRequest
 from app.models.application_shield_ip import ApplicationShieldIpEntry, ApplicationShieldIpRequest
 from app.models.application_shield_geo import ApplicationShieldGeoEntry, ApplicationShieldGeoRequest, ApplicationShieldGeoOverview
-from app.services.service_runtime import binary_path, managed_library_environment
+from app.services.service_runtime import binary_path, managed_library_environment, nginx_paths
 from app.services.website_service import website_service
 from app.services.geoip_service import geoip_service
 
@@ -340,23 +340,78 @@ class ApplicationShieldService:
             return None
         target = root / "conf/geo-rules.conf"
         lines = ["# Managed by Server Engine Application Shield. Geo policies are edited in the panel."]
+
+        def collect_networks(source_files: list[Path]) -> tuple[list[ipaddress._BaseNetwork], list[ipaddress._BaseNetwork]]:
+            values: set[ipaddress._BaseNetwork] = set()
+            for source_file in source_files:
+                for line in source_file.read_text(errors="replace").splitlines():
+                    value = line.strip()
+                    if not value or value.startswith("#"):
+                        continue
+                    try:
+                        values.add(ipaddress.ip_network(value, strict=False))
+                    except ValueError:
+                        continue
+            ipv4_values = [network for network in values if network.version == 4]
+            ipv6_values = [network for network in values if network.version == 6]
+            return (
+                list(ipaddress.collapse_addresses(ipv4_values)),
+                list(ipaddress.collapse_addresses(ipv6_values)),
+            )
+
+        def write_family_files(prefix: str, source_files: list[Path]) -> tuple[Path | None, Path | None]:
+            ipv4, ipv6 = collect_networks(source_files)
+            result: list[Path | None] = []
+            for suffix, networks in (("v4", ipv4), ("v6", ipv6)):
+                path = root / "geo" / f"{prefix}-{suffix}.cidr"
+                if not networks:
+                    path.unlink(missing_ok=True)
+                    result.append(None)
+                    continue
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(
+                    "".join(
+                        f"{network.network_address if network.prefixlen == network.max_prefixlen else network}\n"
+                        for network in networks
+                    )
+                )
+                result.append(path)
+            return result[0], result[1]
+
         allow_entries = [entry for entry in entries if entry.decision == "Allow"]
         block_entries = [entry for entry in entries if entry.decision == "Block"]
         if allow_entries:
-            allowed_file = root / "geo/allowed.cidr"
-            allowed_file.parent.mkdir(parents=True, exist_ok=True)
-            temporary = allowed_file.with_suffix(".tmp")
-            with temporary.open("w") as output:
-                for entry in allow_entries:
-                    output.write(geoip_service.country_network_file(entry.country_code).read_text())
-            os.replace(temporary, allowed_file)
-            rule_id = 2100000 + (uuid.uuid5(uuid.NAMESPACE_URL, "server-engine:shield-geo-allow").int % 899999)
-            lines.append(f"SecRule REMOTE_ADDR \"!@ipMatchFromFile {allowed_file}\" \"id:{rule_id},phase:1,deny,status:403,log,auditlog,msg:'Geo policy denied country'\"")
+            sources = [geoip_service.country_network_file(entry.country_code) for entry in allow_entries]
+            allowed_v4, allowed_v6 = write_family_files("allowed", sources)
+            (root / "geo/allowed.cidr").unlink(missing_ok=True)
+            if allowed_v4:
+                rule_id = 2100000 + (uuid.uuid5(uuid.NAMESPACE_URL, "server-engine:shield-geo-allow-v4").int % 899999)
+                lines.extend([
+                    f"SecRule REMOTE_ADDR \"!@rx :\" \"id:{rule_id},phase:1,deny,status:403,log,auditlog,msg:'Geo policy denied country',chain\"",
+                    f"SecRule REMOTE_ADDR \"!@ipMatchFromFile {allowed_v4}\" \"t:none\"",
+                ])
+            if allowed_v6:
+                rule_id = 2100000 + (uuid.uuid5(uuid.NAMESPACE_URL, "server-engine:shield-geo-allow-v6").int % 899999)
+                lines.extend([
+                    f"SecRule REMOTE_ADDR \"@rx :\" \"id:{rule_id},phase:1,deny,status:403,log,auditlog,msg:'Geo policy denied country',chain\"",
+                    f"SecRule REMOTE_ADDR \"!@ipMatchFromFile {allowed_v6}\" \"t:none\"",
+                ])
         for entry in block_entries:
             country_file = geoip_service.country_network_file(entry.country_code)
-            rule_id = 2200000 + (uuid.uuid5(uuid.NAMESPACE_URL, f"server-engine:shield-geo-block:{entry.country_code}").int % 799999)
+            block_v4, block_v6 = write_family_files(f"blocked-{entry.country_code.lower()}", [country_file])
             message = entry.country_name.replace("'", "")
-            lines.append(f"SecRule REMOTE_ADDR \"@ipMatchFromFile {country_file}\" \"id:{rule_id},phase:1,deny,status:403,log,auditlog,msg:'Geo blocked {message}'\"")
+            if block_v4:
+                rule_id = 2200000 + (uuid.uuid5(uuid.NAMESPACE_URL, f"server-engine:shield-geo-block:{entry.country_code}:v4").int % 799999)
+                lines.extend([
+                    f"SecRule REMOTE_ADDR \"!@rx :\" \"id:{rule_id},phase:1,deny,status:403,log,auditlog,msg:'Geo blocked {message}',chain\"",
+                    f"SecRule REMOTE_ADDR \"@ipMatchFromFile {block_v4}\" \"t:none\"",
+                ])
+            if block_v6:
+                rule_id = 2200000 + (uuid.uuid5(uuid.NAMESPACE_URL, f"server-engine:shield-geo-block:{entry.country_code}:v6").int % 799999)
+                lines.extend([
+                    f"SecRule REMOTE_ADDR \"@rx :\" \"id:{rule_id},phase:1,deny,status:403,log,auditlog,msg:'Geo blocked {message}',chain\"",
+                    f"SecRule REMOTE_ADDR \"@ipMatchFromFile {block_v6}\" \"t:none\"",
+                ])
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("\n".join(lines) + "\n")
         return target
@@ -454,7 +509,10 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
         for path in candidates:
             if path.exists() and path.is_file():
                 try:
-                    return {"path": str(path), "lines": path.read_text(errors="replace").splitlines()[-max(1, min(lines, 1000)):], "available": True}
+                    output = path.read_text(errors="replace").splitlines()[-max(1, min(lines, 1000)):]
+                    if output:
+                        return {"path": str(path), "lines": output, "available": True}
+                    return {"path": str(path), "lines": [], "available": False, "message": "No Application Shield audit events have been recorded yet."}
                 except OSError:
                     pass
         return {"path": str(candidates[0]), "lines": [], "available": False, "message": "No Application Shield audit events have been recorded yet."}
@@ -678,7 +736,7 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
 
     def _provider_main_config(self, provider: str, root: Path) -> Path:
         return {
-            "nginx": root / "conf/nginx.conf",
+            "nginx": nginx_paths()["config"],
             "apache": root / "conf/httpd.conf",
             "openlitespeed": root / "conf/httpd_config.conf",
         }.get(provider, root / "conf/Caddyfile")
@@ -692,6 +750,20 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
         marker = f"# server-engine-application-shield: {config}"
         lines = content.splitlines()
         lines = [line for line in lines if marker not in line and str(config) not in line]
+        if provider == "apache":
+            # Older attach attempts could leave a differently formatted
+            # IncludeOptional for the same managed file. Loading the engine
+            # twice makes ModSecurity report an innocent CIDR as a duplicate
+            # on the second parse. Remove every managed-looking entry before
+            # adding exactly one below.
+            lines = [
+                line
+                for line in lines
+                if not (
+                    "modsecurity.conf" in line.lower()
+                    and line.strip().lower().startswith(("include ", "includeoptional "))
+                )
+            ]
         if active:
             if provider == "nginx":
                 module = self._connector_module(provider, root)
@@ -739,7 +811,7 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
                     version = (root / ".serverengine-version").read_text(errors="replace").strip() if (root / ".serverengine-version").exists() else "the installed version"
                     raise ValueError(f"This managed Nginx {version} needs a custom ModSecurity connector compiled for its exact Nginx version before it can be attached.")
                 raise ValueError(f"No compatible native connector is available for {provider} in this managed installation.")
-            config = root / relative_config
+            config = nginx_paths()["shared_root"] / relative_config if provider == "nginx" else root / relative_config
             config.parent.mkdir(parents=True, exist_ok=True)
             previous = config.read_bytes() if config.exists() else None
             engine = self.service_root / "modsecurity"
@@ -788,13 +860,14 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
         runtime_env = managed_library_environment(root, self.service_root / "modsecurity")
         running = self._provider_running(provider, root)
         if provider == "nginx":
-            command = [str(binary), "-p", str(root), "-c", str(root / "conf/nginx.conf"), "-t"]
+            paths = nginx_paths()
+            command = [str(binary), "-p", str(paths["root"]), "-c", str(paths["config"]), "-t"]
             check = subprocess.run(command, capture_output=True, text=True, check=False, timeout=20, env=runtime_env)
             if check.returncode:
                 raise RuntimeError((check.stdout + check.stderr).strip()[-1200:] or "Nginx configuration validation failed.")
             if not running:
                 return
-            reload_result = subprocess.run([str(binary), "-p", str(root), "-c", str(root / "conf/nginx.conf"), "-s", "reload"], capture_output=True, text=True, check=False, timeout=20, env=runtime_env)
+            reload_result = subprocess.run([str(binary), "-p", str(paths["root"]), "-c", str(paths["config"]), "-s", "reload"], capture_output=True, text=True, check=False, timeout=20, env=runtime_env)
         elif provider == "apache":
             config = root / "conf/httpd.conf"
             check = subprocess.run([str(binary), "-f", str(config), "-t"], capture_output=True, text=True, check=False, timeout=20, env=runtime_env)
@@ -824,6 +897,14 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
             raise RuntimeError((reload_result.stdout + reload_result.stderr).strip()[-1200:] or f"{provider} reload failed.")
 
     def _provider_running(self, provider: str, root: Path) -> bool:
+        if provider == "nginx":
+            pid_file = nginx_paths()["pid"]
+            try:
+                pid = int(pid_file.read_text().strip())
+                os.kill(pid, 0)
+                return True
+            except (OSError, ValueError):
+                return False
         pid_files = {
             "nginx": root / "run/nginx.pid",
             "apache": root / "run/httpd.pid",
@@ -844,7 +925,7 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
         with self._lock:
             _, _, relative_config = self._provider(provider)
             root = self.service_root / provider
-            config = root / relative_config
+            config = nginx_paths()["shared_root"] / relative_config if provider == "nginx" else root / relative_config
             previous = config.read_bytes() if config.exists() else None
             main, previous_main = self._set_provider_include(provider, root, config, False)
             (root / ".serverengine-application-shield-attached").unlink(missing_ok=True)
@@ -876,7 +957,7 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
         for provider, name, relative_config in self.providers:
             root = self.service_root / provider
             installed = (root / ".serverengine-version").exists() or binary_path(provider).exists()
-            config = root / relative_config
+            config = nginx_paths()["shared_root"] / relative_config if provider == "nginx" else root / relative_config
             connector_ready = installed and (
                 (root / ".serverengine-application-shield-ready").exists()
                 or provider in {"nginx", "apache", "openlitespeed", "caddy"}

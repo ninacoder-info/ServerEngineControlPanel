@@ -58,24 +58,24 @@ function Sparkline({
 function Metric({ icon: Icon, label, value, detail, values, color, fill }) {
   const { t } = useTranslation();
   return (
-    <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <article className="rounded-xl border border-neutral-200 bg-white p-5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-sm font-medium text-slate-500 dark:text-slate-400">
-          <span className="grid h-8 w-8 place-items-center rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+        <div className="flex items-center gap-2 text-sm font-medium text-neutral-500 dark:text-neutral-400">
+          <span className="grid h-8 w-8 place-items-center rounded-lg bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
             <Icon size={17} />
           </span>
           {label}
         </div>
-        <span className="text-xs font-medium text-slate-400 dark:text-slate-500">
+        <span className="text-xs font-medium text-neutral-400 dark:text-neutral-500">
           {t("dashboard.liveFiveMinutes")}
         </span>
       </div>
       <div className="mt-5 flex items-end justify-between gap-3">
         <div>
-          <p className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
+          <p className="text-2xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-100">
             {value}
           </p>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+          <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
             {detail}
           </p>
         </div>
@@ -115,10 +115,16 @@ export default function ResourceMetricCards() {
       }));
     };
     load();
-    const timer = window.setInterval(load, 5000);
+    // Metrics are loaded once for the initial view. Live updates must come
+    // through the shared event bridge instead of a page-owned polling loop.
+    const onMetrics = () => load();
+    const onJobs = () => load();
+    window.addEventListener("serverengine:metrics-updated", onMetrics);
+    window.addEventListener("serverengine:jobs-updated", onJobs);
     return () => {
       active = false;
-      window.clearInterval(timer);
+      window.removeEventListener("serverengine:metrics-updated", onMetrics);
+      window.removeEventListener("serverengine:jobs-updated", onJobs);
     };
   }, []);
 

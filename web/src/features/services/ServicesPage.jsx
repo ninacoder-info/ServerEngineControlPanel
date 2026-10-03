@@ -67,24 +67,47 @@ export default function ServicesPage() {
       return Promise.all([
         apiRequest("/api/v1/services/catalog").then((r) => r.json()),
         apiRequest("/api/v1/services/installed").then((r) => r.json()),
-        apiRequest("/api/v1/jobs").then((r) => (r.ok ? r.json() : [])),
       ])
-        .then(([services, detected, activeJobs]) => {
+        .then(([services, detected]) => {
           if (alive) {
             setCatalog(services);
             setInstalled(detected);
-            setJobs(activeJobs);
           }
         })
         .catch(() => {})
         .finally(() => alive && setLoading(false));
     };
     load();
-    const refreshAfterJob = () => load();
-    window.addEventListener("serverengine:jobs-updated", refreshAfterJob);
+    const updateFromSocket = (event) => {
+      const detail = event.detail || {};
+      if (!detail.serviceId) return;
+      setInstalled((current) => current.map((item) => {
+        if (item.id !== detail.serviceId && !item.id.startsWith(`${detail.serviceId}@`)) return item;
+        if (detail.status !== "succeeded") return item;
+        if (detail.action === "uninstall") return { ...item, installed: false, running: false, status: "not-installed" };
+        if (["start", "restart", "stop"].includes(detail.action)) {
+          const running = detail.action !== "stop";
+          return { ...item, running, status: running ? "running" : "stopped" };
+        }
+        if (detail.action === "install") return { ...item, installed: true, running: false, status: "stopped" };
+        return item;
+      }));
+      if (detail.job) setJobs((current) => [detail.job, ...current.filter((job) => job.id !== detail.job.id)]);
+    };
+    window.addEventListener("serverengine:service-status", updateFromSocket);
+    const updateJobsFromSocket = (event) => setJobs(event.detail?.jobs || []);
+    const updateJobFromSocket = (event) => {
+      const job = event.detail?.job;
+      if (!job) return;
+      setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)]);
+    };
+    window.addEventListener("serverengine:jobs-snapshot", updateJobsFromSocket);
+    window.addEventListener("serverengine:jobs-updated", updateJobFromSocket);
     return () => {
       alive = false;
-      window.removeEventListener("serverengine:jobs-updated", refreshAfterJob);
+      window.removeEventListener("serverengine:service-status", updateFromSocket);
+      window.removeEventListener("serverengine:jobs-snapshot", updateJobsFromSocket);
+      window.removeEventListener("serverengine:jobs-updated", updateJobFromSocket);
     };
   }, []);
   React.useEffect(() => {
@@ -167,15 +190,15 @@ export default function ServicesPage() {
     <div className="space-y-7">
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
         <div>
-          <p className="text-sm text-cyan-300">Infrastructure</p>
+          <p className="text-sm text-neutral-500 dark:text-neutral-400">Infrastructure</p>
           <h2 className="mt-1 text-3xl font-semibold tracking-tight">
             Services
           </h2>
-          <p className="mt-2 text-slate-400">
+          <p className="mt-2 text-neutral-400">
             Inspect installed software or add a supported service provider.
           </p>
         </div>
-        <div className="service-summary">
+        <div className="inline-flex items-center gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-600 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300">
           <Server size={17} />
           <span>
             {loading ? "Loading…" : installed.filter((item) => item.status === "running").length}{" "}
@@ -185,16 +208,18 @@ export default function ServicesPage() {
           <span>{loading ? "Checking services…" : `${installed.length} detected`}</span>
         </div>
       </div>
-      <div className="service-toolbar">
-        <div className="search-box">
+      <div className="flex flex-wrap gap-3">
+        <div className="flex min-w-[16rem] flex-1 items-center gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2 dark:border-neutral-800 dark:bg-neutral-900">
           <Search size={16} />
           <input
+            className="min-w-0 flex-1 bg-transparent text-sm text-neutral-900 outline-none placeholder:text-neutral-400 dark:text-neutral-100"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search services…"
           />
         </div>
         <select
+          className="rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-800 outline-none dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-100"
           value={category}
           onChange={(event) => setCategory(event.target.value)}
         >
@@ -208,23 +233,23 @@ export default function ServicesPage() {
       {window.location.hash === "#docker" && <DockerWorkspace />}
       {window.location.hash === "#wp-cli" && <WpCliWorkspace />}
       {loading ? (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3" aria-label="Loading services" aria-busy="true">
+        <div className="grid gap-4 md:grid-cols-2" aria-label="Loading services" aria-busy="true">
           {[1, 2, 3, 4, 5, 6].map((item) => (
-            <div key={item} className="animate-pulse rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+            <div key={item} className="animate-pulse rounded-xl border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-lg bg-slate-200 dark:bg-slate-800" />
-                  <div className="space-y-2"><div className="h-4 w-32 rounded bg-slate-200 dark:bg-slate-800" /><div className="h-3 w-20 rounded bg-slate-200 dark:bg-slate-800" /></div>
+                  <div className="h-10 w-10 rounded-lg bg-neutral-200 dark:bg-neutral-800" />
+                  <div className="space-y-2"><div className="h-4 w-32 rounded bg-neutral-200 dark:bg-neutral-800" /><div className="h-3 w-20 rounded bg-neutral-200 dark:bg-neutral-800" /></div>
                 </div>
-                <div className="h-8 w-8 rounded-full bg-slate-200 dark:bg-slate-800" />
+                <div className="h-8 w-8 rounded-full bg-neutral-200 dark:bg-neutral-800" />
               </div>
-              <div className="mt-5 h-3 w-full rounded bg-slate-200 dark:bg-slate-800" />
-              <div className="mt-2 h-3 w-4/5 rounded bg-slate-200 dark:bg-slate-800" />
-              <div className="mt-6 h-9 w-24 rounded-md bg-slate-200 dark:bg-slate-800" />
+              <div className="mt-5 h-3 w-full rounded bg-neutral-200 dark:bg-neutral-800" />
+              <div className="mt-2 h-3 w-4/5 rounded bg-neutral-200 dark:bg-neutral-800" />
+              <div className="mt-6 h-9 w-24 rounded-md bg-neutral-200 dark:bg-neutral-800" />
             </div>
           ))}
         </div>
-      ) : <div className="service-grid">
+      ) : <div className="grid gap-4 md:grid-cols-2">
         {visible.map((service) => {
           const matches = matchesFor(service);
           if (service.id === "php")
@@ -331,25 +356,7 @@ export default function ServicesPage() {
                 );
               }
               const body = await response.json();
-              let finalJob;
-              for (let attempt = 0; attempt < 30; attempt += 1) {
-                await new Promise((resolve) => window.setTimeout(resolve, 700));
-                const jobs = await apiRequest("/api/v1/jobs").then((result) =>
-                  result.ok ? result.json() : [],
-                );
-                finalJob = jobs.find((job) => job.id === body.job_id);
-                if (
-                  finalJob &&
-                  ["succeeded", "failed", "cancelled"].includes(finalJob.status)
-                )
-                  break;
-              }
-              if (!finalJob || finalJob.status !== "succeeded")
-                throw new Error(
-                  finalJob?.message || `Unable to ${action} vsftpd.`,
-                );
-              const refreshed = await apiRequest("/api/v1/ftp");
-              if (refreshed.ok) setFtpConfig(await refreshed.json());
+              if (!body.job_id) throw new Error(`Unable to ${action} vsftpd.`);
             }}
             onSaved={(settings) => {
               setFtpConfig((current) => ({ ...current, settings }));

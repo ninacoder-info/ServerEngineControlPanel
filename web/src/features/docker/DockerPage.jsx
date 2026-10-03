@@ -88,18 +88,18 @@ const volumes = [
 ];
 
 const input =
-  "mt-1.5 block min-h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100";
+  "mt-1.5 block min-h-10 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100";
 
 function Section({ title, description, actions, children }) {
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+    <section className="rounded-lg border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
         <div>
-          <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+          <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
             {title}
           </h3>
           {description && (
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
               {description}
             </p>
           )}
@@ -120,7 +120,7 @@ function Stat({
   valueClassName = "text-2xl",
 }) {
   const tones = {
-    slate: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
+    slate: "bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300",
     blue: "bg-blue-50 text-blue-600 dark:bg-blue-950/30 dark:text-blue-400",
     emerald:
       "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-400",
@@ -128,7 +128,7 @@ function Stat({
       "bg-amber-50 text-amber-600 dark:bg-amber-950/30 dark:text-amber-400",
   };
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+    <div className="rounded-lg border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
       <div className="flex items-start justify-between gap-3">
         <span
           className={`grid h-9 w-9 place-items-center rounded-md ${tones[tone]}`}
@@ -136,15 +136,15 @@ function Stat({
           <Icon size={18} />
         </span>
         <strong
-          className={`${valueClassName} font-semibold text-slate-900 dark:text-slate-100`}
+          className={`${valueClassName} font-semibold text-neutral-900 dark:text-neutral-100`}
         >
           {value}
         </strong>
       </div>
-      <p className="mt-3 text-sm font-medium text-slate-700 dark:text-slate-300">
+      <p className="mt-3 text-sm font-medium text-neutral-700 dark:text-neutral-300">
         {label}
       </p>
-      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+      <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
         {detail}
       </p>
     </div>
@@ -183,24 +183,24 @@ function ContainerModal({ container, onClose, onSave }) {
   const set = (key, value) =>
     setForm((current) => ({ ...current, [key]: value }));
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/60 p-4 sm:p-8">
-      <section className="w-full max-w-2xl rounded-xl bg-white shadow-xl dark:bg-slate-900">
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8">
+      <section className="w-full max-w-2xl rounded-xl bg-white shadow-xl dark:bg-neutral-900">
+        <div className="flex items-start justify-between gap-4 border-b border-neutral-200 px-5 py-4 dark:border-neutral-800">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">
               Docker workload
             </p>
-            <h2 className="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">
+            <h2 className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">
               {editing ? "Edit container" : "Create container"}
             </h2>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
               Define the image, ports, restart behavior, and command.
             </p>
           </div>
           <button
             type="button"
             aria-label="Close container form"
-            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
             onClick={onClose}
           >
             <X size={17} />
@@ -214,7 +214,7 @@ function ContainerModal({ container, onClose, onSave }) {
           }}
         >
           <div className="grid gap-4 sm:grid-cols-2">
-            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+            <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
               Container name
               <input
                 required
@@ -224,7 +224,7 @@ function ContainerModal({ container, onClose, onSave }) {
                 placeholder="my-app"
               />
             </label>
-            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+            <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
               Image
               <input
                 required
@@ -234,7 +234,7 @@ function ContainerModal({ container, onClose, onSave }) {
                 placeholder="nginx:1.27-alpine"
               />
             </label>
-            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+            <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
               Published ports
               <input
                 className={input}
@@ -243,7 +243,7 @@ function ContainerModal({ container, onClose, onSave }) {
                 placeholder="8080:80, 8443:443"
               />
             </label>
-            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+            <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
               Restart policy
               <select
                 className={input}
@@ -257,7 +257,7 @@ function ContainerModal({ container, onClose, onSave }) {
               </select>
             </label>
           </div>
-          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+          <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
             Start command
             <input
               className={`${input} font-mono`}
@@ -266,10 +266,10 @@ function ContainerModal({ container, onClose, onSave }) {
               placeholder="Optional command override"
             />
           </label>
-          <div className="flex justify-end gap-3 border-t border-slate-200 pt-4 dark:border-slate-800">
+          <div className="flex justify-end gap-3 border-t border-neutral-200 pt-4 dark:border-neutral-800">
             <button
               type="button"
-              className="cursor-pointer rounded-md px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"
+              className="cursor-pointer rounded-md px-4 py-2 text-sm text-neutral-600 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800"
               onClick={onClose}
             >
               Cancel
@@ -353,12 +353,12 @@ export function ContainerInspectModal({
   };
   return (
     <div className="space-y-6">
-      <div className="flex flex-col justify-between gap-4 border-b border-slate-200 pb-5 dark:border-slate-800 sm:flex-row sm:items-center">
+      <div className="flex flex-col justify-between gap-4 border-b border-neutral-200 pb-5 dark:border-neutral-800 sm:flex-row sm:items-center">
         <div className="flex min-w-0 items-center gap-3">
           <button
             type="button"
             aria-label="Back to containers"
-            className="inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+            className="inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
             onClick={onClose}
           >
             <ArrowLeft size={18} />
@@ -368,7 +368,7 @@ export function ContainerInspectModal({
               <Container size={22} />
             </span>
           ) : (
-            <span className="h-11 w-11 shrink-0 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800" />
+            <span className="h-11 w-11 shrink-0 animate-pulse rounded-lg bg-neutral-100 dark:bg-neutral-800" />
           )}
           <div className="min-w-0">
             {detailsReady ? (
@@ -376,18 +376,18 @@ export function ContainerInspectModal({
                 <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">
                   Docker container
                 </p>
-                <h2 className="truncate text-xl font-semibold text-slate-900 dark:text-slate-100">
+                <h2 className="truncate text-xl font-semibold text-neutral-900 dark:text-neutral-100">
                   {name}
                 </h2>
-                <p className="truncate font-mono text-xs text-slate-500 dark:text-slate-400">
+                <p className="truncate font-mono text-xs text-neutral-500 dark:text-neutral-400">
                   {path}
                 </p>
               </>
             ) : (
               <div className="animate-pulse space-y-2">
-                <div className="h-3 w-28 rounded bg-slate-100 dark:bg-slate-800" />
-                <div className="h-6 w-56 rounded bg-slate-200 dark:bg-slate-700" />
-                <div className="h-3 w-72 max-w-full rounded bg-slate-100 dark:bg-slate-800" />
+                <div className="h-3 w-28 rounded bg-neutral-100 dark:bg-neutral-800" />
+                <div className="h-6 w-56 rounded bg-neutral-200 dark:bg-neutral-700" />
+                <div className="h-3 w-72 max-w-full rounded bg-neutral-100 dark:bg-neutral-800" />
               </div>
             )}
           </div>
@@ -406,13 +406,13 @@ export function ContainerInspectModal({
                   type="button"
                   title={label}
                   aria-label={label}
-                  className={`inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md border ${panel === key ? "border-blue-600 bg-blue-600 text-white" : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"}`}
+                  className={`inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md border ${panel === key ? "border-blue-600 bg-blue-600 text-white" : "border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"}`}
                   onClick={() => setPanel(key)}
                 >
                   <Icon size={16} />
                 </button>
               ))}
-              <span className="mx-1 h-6 w-px bg-slate-200 dark:bg-slate-800" />
+              <span className="mx-1 h-6 w-px bg-neutral-200 dark:bg-neutral-800" />
               <button
                 type="button"
                 title={running ? "Stop container" : "Start container"}
@@ -426,7 +426,7 @@ export function ContainerInspectModal({
                 type="button"
                 title="Restart container"
                 aria-label="Restart container"
-                className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+                className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md border border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
                 onClick={() => runAction("restart")}
               >
                 <RotateCw size={16} />
@@ -454,7 +454,7 @@ export function ContainerInspectModal({
               {[1, 2, 3, 4, 5, 6].map((item) => (
                 <span
                   key={item}
-                  className="h-9 w-9 rounded-md bg-slate-100 dark:bg-slate-800"
+                  className="h-9 w-9 rounded-md bg-neutral-100 dark:bg-neutral-800"
                 />
               ))}
             </div>
@@ -463,7 +463,7 @@ export function ContainerInspectModal({
             type="button"
             title="Refresh container details"
             aria-label="Refresh container details"
-            className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+            className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
             onClick={load}
           >
             <RefreshCw size={16} />
@@ -503,7 +503,7 @@ export function ContainerInspectModal({
         }
       >
         {loading ? (
-          <div className="h-[32rem] animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800" />
+          <div className="h-[32rem] animate-pulse rounded-lg bg-neutral-100 dark:bg-neutral-800" />
         ) : details && panel === "logs" ? (
           <pre
             ref={logRef}
@@ -514,7 +514,7 @@ export function ContainerInspectModal({
                 24;
               setFollowLogs(atBottom);
             }}
-            className="docker-console-output h-[32rem] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-slate-950 p-5 font-mono text-xs leading-5 text-slate-200"
+            className="h-[32rem] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-neutral-950 p-5 font-mono text-xs leading-5 text-neutral-200"
           >
             {details.logs || "No logs available."}
           </pre>
@@ -534,7 +534,7 @@ export function ContainerInspectModal({
             onControls={() => {}}
           />
         ) : details && panel === "config" ? (
-          <pre className="docker-console-output h-[32rem] overflow-auto rounded-lg bg-slate-950 p-5 font-mono text-xs leading-5 text-slate-200">
+          <pre className="h-[32rem] overflow-auto rounded-lg bg-neutral-950 p-5 font-mono text-xs leading-5 text-neutral-200">
             {JSON.stringify(
               {
                 name: details.name,
@@ -553,24 +553,24 @@ export function ContainerInspectModal({
               details.mounts.map((mount) => (
                 <div
                   key={`${mount.source}-${mount.destination}`}
-                  className="flex flex-col gap-1 rounded-md border border-slate-200 p-3 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between"
+                  className="flex flex-col gap-1 rounded-md border border-neutral-200 p-3 dark:border-neutral-800 sm:flex-row sm:items-center sm:justify-between"
                 >
-                  <code className="text-xs text-slate-700 dark:text-slate-300">
+                  <code className="text-xs text-neutral-700 dark:text-neutral-300">
                     {mount.source || "Docker volume"}
                   </code>
-                  <code className="text-xs text-slate-500 dark:text-slate-400">
+                  <code className="text-xs text-neutral-500 dark:text-neutral-400">
                     → {mount.destination}
                   </code>
                 </div>
               ))
             ) : (
-              <p className="py-12 text-center text-sm text-slate-500">
+              <p className="py-12 text-center text-sm text-neutral-500">
                 No mounted files or folders.
               </p>
             )}
           </div>
         ) : (
-          <p className="py-12 text-center text-sm text-slate-500">
+          <p className="py-12 text-center text-sm text-neutral-500">
             Unable to load container logs.
           </p>
         )}
@@ -626,10 +626,10 @@ function ContainersTab({
       description="Run, inspect, restart, and troubleshoot Docker workloads."
       actions={
         <div className="flex items-center gap-2">
-          <label className="flex min-w-0 items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-slate-400 dark:border-slate-700">
+          <label className="flex min-w-0 items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-neutral-400 dark:border-neutral-700">
             <Search size={15} />
             <input
-              className="w-40 bg-transparent text-sm text-slate-900 outline-none dark:text-slate-100"
+              className="w-40 bg-transparent text-sm text-neutral-900 outline-none dark:text-neutral-100"
               value={searchValue}
               onChange={(event) => onSearch(event.target.value)}
               placeholder="Search containers"
@@ -649,7 +649,7 @@ function ContainersTab({
       <div className="overflow-x-auto">
         <table className="w-full min-w-[980px] text-left">
           <thead>
-            <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:text-slate-400">
+            <tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
               <th className="px-3 py-3">Container</th>
               <th className="px-3 py-3">Image</th>
               <th className="px-3 py-3">Status</th>
@@ -662,39 +662,39 @@ function ContainersTab({
             {containers.map((item) => (
               <tr
                 key={item.id}
-                className="border-b border-slate-100 dark:border-slate-800"
+                className="border-b border-neutral-100 dark:border-neutral-800"
               >
                 <td className="px-3 py-4">
-                  <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                  <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
                     {item.name}
                   </p>
                   <p
-                    className="mt-1 max-w-[24rem] truncate font-mono text-xs text-slate-500 dark:text-slate-400"
+                    className="mt-1 max-w-[24rem] truncate font-mono text-xs text-neutral-500 dark:text-neutral-400"
                     title={item.path || "No host path mounted"}
                   >
                     {middleEllipsis(item.path || "No host path mounted")}
                   </p>
                 </td>
-                <td className="px-3 py-4 font-mono text-xs text-slate-600 dark:text-slate-400">
+                <td className="px-3 py-4 font-mono text-xs text-neutral-600 dark:text-neutral-400">
                   {item.image}
                 </td>
                 <td className="px-3 py-4">
                   <span
-                    className={`inline-flex items-center gap-1.5 text-xs font-semibold ${item.status === "Running" ? "text-emerald-600 dark:text-emerald-400" : "text-slate-500"}`}
+                    className={`inline-flex items-center gap-1.5 text-xs font-semibold ${item.status === "Running" ? "text-emerald-600 dark:text-emerald-400" : "text-neutral-500"}`}
                   >
                     <span
-                      className={`h-2 w-2 rounded-full ${item.status === "Running" ? "bg-emerald-500" : "bg-slate-400"}`}
+                      className={`h-2 w-2 rounded-full ${item.status === "Running" ? "bg-emerald-500" : "bg-neutral-400"}`}
                     />
                     {item.status}
                   </span>
-                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
                     {item.status_detail || "—"}
                   </p>
                 </td>
-                <td className="px-3 py-4 text-sm text-slate-600 dark:text-slate-400">
+                <td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">
                   {item.ports}
                 </td>
-                <td className="px-3 py-4 font-mono text-xs text-slate-600 dark:text-slate-400">
+                <td className="px-3 py-4 font-mono text-xs text-neutral-600 dark:text-neutral-400">
                   {item.id || "—"}
                 </td>
                 <td className="w-32 min-w-32 px-3 py-4 text-right">
@@ -731,7 +731,7 @@ function ContainersTab({
                           <Play size={15} />
                         )}
                       </button>
-                      <span className="pointer-events-none absolute bottom-full right-0 z-20 mb-2 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-xs text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100 dark:bg-white dark:text-slate-900">
+                      <span className="pointer-events-none absolute bottom-full right-0 z-20 mb-2 whitespace-nowrap rounded-md bg-neutral-900 px-2 py-1 text-xs text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100 dark:bg-white dark:text-neutral-900">
                         {item.status === "Running"
                           ? "Stop container"
                           : "Start container"}
@@ -742,7 +742,7 @@ function ContainersTab({
                         type="button"
                         aria-label={`More actions for ${item.name}`}
                         aria-expanded={menuId === item.id}
-                        className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                        className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
                         onClick={() =>
                           setMenuId(menuId === item.id ? null : item.id)
                         }
@@ -750,7 +750,7 @@ function ContainersTab({
                         <MoreHorizontal size={17} />
                       </button>
                       {menuId === item.id && (
-                        <div className="absolute right-0 top-9 z-50 w-60 rounded-lg border border-slate-200 bg-white p-1 text-left shadow-xl dark:border-slate-700 dark:bg-slate-900">
+                        <div className="absolute right-0 top-9 z-50 w-60 rounded-lg border border-neutral-200 bg-white p-1 text-left shadow-xl dark:border-neutral-700 dark:bg-neutral-900">
                           {[
                             ["details", "View details", Settings2],
                             ["copy", "Copy docker run", Copy],
@@ -763,7 +763,7 @@ function ContainersTab({
                               <Link
                                 key={action}
                                 to={`/docker/containers/${encodeURIComponent(item.id)}`}
-                                className="flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"
+                                className="flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800"
                               >
                                 <Icon size={15} />
                                 {label}
@@ -772,7 +772,7 @@ function ContainersTab({
                               <button
                                 key={action}
                                 type="button"
-                                className="flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"
+                                className="flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800"
                                 onClick={() => menuAction(item, action)}
                               >
                                 <Icon size={15} />
@@ -791,7 +791,7 @@ function ContainersTab({
         </table>
       </div>
       {!containers.length && (
-        <p className="py-10 text-center text-sm text-slate-500">
+        <p className="py-10 text-center text-sm text-neutral-500">
           No containers found.
         </p>
       )}
@@ -818,7 +818,7 @@ function ResourcesTab({
       actions={
         <button
           type="button"
-          className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+          className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
         >
           {action || "Refresh"}
         </button>
@@ -827,7 +827,7 @@ function ResourcesTab({
       <div className="overflow-x-auto">
         <table className="w-full min-w-[680px] text-left">
           <thead>
-            <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:text-slate-400">
+            <tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
               {headers.map((header) => (
                 <th key={header} className="px-3 py-3">
                   {header}
@@ -840,11 +840,11 @@ function ResourcesTab({
             {rows.map((row) => (
               <tr
                 key={row[0]}
-                className="border-b border-slate-100 dark:border-slate-800"
+                className="border-b border-neutral-100 dark:border-neutral-800"
               >
                 <td className="px-3 py-4">
                   <div className="flex items-center gap-2">
-                    <Icon size={15} className="text-slate-400" />
+                    <Icon size={15} className="text-neutral-400" />
                     {getRowHref ? (
                       <Link
                         to={getRowHref(row)}
@@ -853,7 +853,7 @@ function ResourcesTab({
                         {row[0]}
                       </Link>
                     ) : (
-                      <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                      <span className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
                         {row[0]}
                       </span>
                     )}
@@ -862,7 +862,7 @@ function ResourcesTab({
                 {row.slice(1).map((value, index) => (
                   <td
                     key={`${row[0]}-${index}`}
-                    className="px-3 py-4 text-sm text-slate-600 dark:text-slate-400"
+                    className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400"
                   >
                     {value}
                   </td>
@@ -878,7 +878,7 @@ function ResourcesTab({
                   ) : (
                     <div className="flex items-center justify-end gap-1">
                       {onInspect && <button type="button" title="Inspect" aria-label={`Inspect ${row[0]}`} className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/30" onClick={() => onInspect(row)}><Settings2 size={15} /></button>}
-                      {onClone && <button type="button" title="Clone volume" aria-label={`Clone ${row[0]}`} className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800" onClick={() => onClone(row)}><Copy size={15} /></button>}
+                      {onClone && <button type="button" title="Clone volume" aria-label={`Clone ${row[0]}`} className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800" onClick={() => onClone(row)}><Copy size={15} /></button>}
                       {onDelete && <button type="button" title="Delete volume" aria-label={`Delete ${row[0]}`} className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/30" onClick={() => onDelete(row)}><Trash2 size={15} /></button>}
                     </div>
                   )}
@@ -889,7 +889,7 @@ function ResourcesTab({
         </table>
       </div>
       {!rows.length && (
-        <div className="border-t border-slate-200 py-10 text-center text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400">
+        <div className="border-t border-neutral-200 py-10 text-center text-sm text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
           No {title.toLowerCase()} found.
         </div>
       )}
@@ -932,30 +932,30 @@ function DockerResourceInspectModal({ resource, onClose }) {
         ["Containers", Object.keys(details?.containers || {}).length],
       ];
   return (
-    <div className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-slate-950/60 p-4 sm:p-8">
-      <section className="w-full max-w-3xl rounded-xl bg-white shadow-xl dark:bg-slate-900">
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+    <div className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8">
+      <section className="w-full max-w-3xl rounded-xl bg-white shadow-xl dark:bg-neutral-900">
+        <div className="flex items-start justify-between gap-4 border-b border-neutral-200 px-5 py-4 dark:border-neutral-800">
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">
               Docker {isVolume ? "volume" : "network"}
             </p>
-            <h2 className="mt-1 truncate text-xl font-semibold text-slate-900 dark:text-slate-100">
+            <h2 className="mt-1 truncate text-xl font-semibold text-neutral-900 dark:text-neutral-100">
               {resource.name}
             </h2>
           </div>
-          <button type="button" aria-label="Close inspection" title="Close" className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200" onClick={onClose}>
+          <button type="button" aria-label="Close inspection" title="Close" className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200" onClick={onClose}>
             <X size={17} />
           </button>
         </div>
         <div className="space-y-5 p-5">
           {error && <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-300">{error}</p>}
-          {!details && !error ? <div className="flex h-32 items-center justify-center text-slate-400"><LoaderCircle className="animate-spin" /></div> : details && <>
+          {!details && !error ? <div className="flex h-32 items-center justify-center text-neutral-400"><LoaderCircle className="animate-spin" /></div> : details && <>
             <div className="grid gap-3 sm:grid-cols-3">
-              {facts.map(([label, value]) => <div key={label} className="rounded-lg border border-slate-200 p-3 dark:border-slate-800"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p><p className="mt-1 break-words text-sm font-semibold text-slate-900 dark:text-slate-100">{value ?? "—"}</p></div>)}
+              {facts.map(([label, value]) => <div key={label} className="rounded-lg border border-neutral-200 p-3 dark:border-neutral-800"><p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">{label}</p><p className="mt-1 break-words text-sm font-semibold text-neutral-900 dark:text-neutral-100">{value ?? "—"}</p></div>)}
             </div>
             <div>
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Docker inspect</h3>
-              <pre className="mt-2 max-h-[28rem] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-slate-100 p-4 font-mono text-xs leading-5 text-slate-800 dark:bg-slate-950 dark:text-slate-200">{JSON.stringify(details.inspect, null, 2)}</pre>
+              <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Docker inspect</h3>
+              <pre className="mt-2 max-h-[28rem] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-neutral-100 p-4 font-mono text-xs leading-5 text-neutral-800 dark:bg-neutral-950 dark:text-neutral-200">{JSON.stringify(details.inspect, null, 2)}</pre>
             </div>
           </>}
         </div>
@@ -967,10 +967,10 @@ function DockerResourceInspectModal({ resource, onClose }) {
 function DockerVolumeCloneModal({ volume, onClose, onSubmit }) {
   const [name, setName] = React.useState(`${volume.name}-copy`);
   return (
-    <div className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-slate-950/60 p-4 sm:p-8">
-      <section className="w-full max-w-md rounded-xl bg-white shadow-xl dark:bg-slate-900">
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 dark:border-slate-800"><div><p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Docker volume</p><h2 className="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">Clone volume</h2></div><button type="button" title="Close" aria-label="Close clone volume" className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800" onClick={onClose}><X size={17} /></button></div>
-        <form className="space-y-4 p-5" onSubmit={(event) => { event.preventDefault(); onSubmit(name); }}><p className="text-sm text-slate-500 dark:text-slate-400">Copy all files from <strong className="text-slate-700 dark:text-slate-200">{volume.name}</strong> into a new Docker volume.</p><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">New volume name<input autoFocus required pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" value={name} onChange={(event) => setName(event.target.value)} className={input} /></label><div className="flex justify-end gap-2"><button type="button" className="cursor-pointer rounded-md px-3 py-2 text-sm text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800" onClick={onClose}>Cancel</button><button type="submit" className="cursor-pointer rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700">Clone volume</button></div></form>
+    <div className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8">
+      <section className="w-full max-w-md rounded-xl bg-white shadow-xl dark:bg-neutral-900">
+        <div className="flex items-start justify-between gap-4 border-b border-neutral-200 px-5 py-4 dark:border-neutral-800"><div><p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Docker volume</p><h2 className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">Clone volume</h2></div><button type="button" title="Close" aria-label="Close clone volume" className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800" onClick={onClose}><X size={17} /></button></div>
+        <form className="space-y-4 p-5" onSubmit={(event) => { event.preventDefault(); onSubmit(name); }}><p className="text-sm text-neutral-500 dark:text-neutral-400">Copy all files from <strong className="text-neutral-700 dark:text-neutral-200">{volume.name}</strong> into a new Docker volume.</p><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">New volume name<input autoFocus required pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" value={name} onChange={(event) => setName(event.target.value)} className={input} /></label><div className="flex justify-end gap-2"><button type="button" className="cursor-pointer rounded-md px-3 py-2 text-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800" onClick={onClose}>Cancel</button><button type="submit" className="cursor-pointer rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700">Clone volume</button></div></form>
       </section>
     </div>
   );
@@ -1499,10 +1499,10 @@ function ComposeStarterModal({ onClose, onCreate }) {
     window.setTimeout(() => setCopied(false), 2000);
   };
   return (
-    <div className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-slate-950/60 p-4 sm:p-8">
-      <section className="w-full max-w-3xl rounded-xl bg-white shadow-xl dark:bg-slate-900">
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 dark:border-slate-800"><div><p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Docker Compose</p><h2 className="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">Compose starter</h2><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Choose a starting definition, then save it as compose.yml in your project folder.</p></div><button type="button" title="Close" aria-label="Close Compose starter" className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800" onClick={onClose}><X size={17} /></button></div>
-        <form className="space-y-4 p-5" onSubmit={(event) => { event.preventDefault(); onCreate(projectName, fileName, content); }}><div className="grid gap-4 sm:grid-cols-3"><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Project name<input required pattern="[A-Za-z0-9]{1,64}" className={input} value={projectName} onChange={(event) => setProjectName(event.target.value.replace(/[^A-Za-z0-9]/g, ""))} placeholder="myapp" /><span className="mt-1 block text-xs font-normal text-slate-500 dark:text-slate-400">Letters and numbers only.</span></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300 sm:col-span-2">Starter template<select className={input} value={template} onChange={(event) => setTemplate(event.target.value)}>{Object.keys(composeTemplates).map((name) => <option key={name}>{name}</option>)}</select></label></div><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Compose filename<select className={input} value={fileName} onChange={(event) => setFileName(event.target.value)}><option>compose.yml</option><option>compose.yaml</option><option>docker-compose.yml</option><option>docker-compose.yaml</option></select></label><pre className="max-h-[28rem] overflow-auto whitespace-pre-wrap rounded-lg bg-slate-100 p-4 font-mono text-xs leading-5 text-slate-800 dark:bg-slate-950 dark:text-slate-200">{content}</pre><div className="rounded-md bg-blue-50 px-3 py-2 text-xs leading-5 text-blue-800 dark:bg-blue-950/30 dark:text-blue-200">Server Engine creates <code className="font-mono">/server-engine/compose/{projectName || "project-name"}/{fileName}</code> and runs <code className="font-mono">docker compose -f {fileName} up -d</code>. The selected starter contains everything needed to start its declared containers.</div><div className="flex items-center justify-between gap-3"><button type="button" className="inline-flex cursor-pointer items-center gap-1.5 text-sm font-semibold text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white" onClick={copy}><Copy size={15} />{copied ? "Copied" : `Copy ${fileName}`}</button><div className="flex gap-2"><button type="button" className="cursor-pointer rounded-md px-3 py-2 text-sm text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800" onClick={onClose}>Cancel</button><button type="submit" className="inline-flex cursor-pointer items-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"><Play size={15} />Create and start</button></div></div></form>
+    <div className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8">
+      <section className="w-full max-w-3xl rounded-xl bg-white shadow-xl dark:bg-neutral-900">
+        <div className="flex items-start justify-between gap-4 border-b border-neutral-200 px-5 py-4 dark:border-neutral-800"><div><p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Docker Compose</p><h2 className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">Compose starter</h2><p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">Choose a starting definition, then save it as compose.yml in your project folder.</p></div><button type="button" title="Close" aria-label="Close Compose starter" className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800" onClick={onClose}><X size={17} /></button></div>
+        <form className="space-y-4 p-5" onSubmit={(event) => { event.preventDefault(); onCreate(projectName, fileName, content); }}><div className="grid gap-4 sm:grid-cols-3"><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Project name<input required pattern="[A-Za-z0-9]{1,64}" className={input} value={projectName} onChange={(event) => setProjectName(event.target.value.replace(/[^A-Za-z0-9]/g, ""))} placeholder="myapp" /><span className="mt-1 block text-xs font-normal text-neutral-500 dark:text-neutral-400">Letters and numbers only.</span></label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 sm:col-span-2">Starter template<select className={input} value={template} onChange={(event) => setTemplate(event.target.value)}>{Object.keys(composeTemplates).map((name) => <option key={name}>{name}</option>)}</select></label></div><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Compose filename<select className={input} value={fileName} onChange={(event) => setFileName(event.target.value)}><option>compose.yml</option><option>compose.yaml</option><option>docker-compose.yml</option><option>docker-compose.yaml</option></select></label><pre className="max-h-[28rem] overflow-auto whitespace-pre-wrap rounded-lg bg-neutral-100 p-4 font-mono text-xs leading-5 text-neutral-800 dark:bg-neutral-950 dark:text-neutral-200">{content}</pre><div className="rounded-md bg-blue-50 px-3 py-2 text-xs leading-5 text-blue-800 dark:bg-blue-950/30 dark:text-blue-200">Server Engine creates <code className="font-mono">/server-engine/compose/{projectName || "project-name"}/{fileName}</code> and runs <code className="font-mono">docker compose -f {fileName} up -d</code>. The selected starter contains everything needed to start its declared containers.</div><div className="flex items-center justify-between gap-3"><button type="button" className="inline-flex cursor-pointer items-center gap-1.5 text-sm font-semibold text-neutral-600 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white" onClick={copy}><Copy size={15} />{copied ? "Copied" : `Copy ${fileName}`}</button><div className="flex gap-2"><button type="button" className="cursor-pointer rounded-md px-3 py-2 text-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800" onClick={onClose}>Cancel</button><button type="submit" className="inline-flex cursor-pointer items-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"><Play size={15} />Create and start</button></div></div></form>
       </section>
     </div>
   );
@@ -1515,10 +1515,10 @@ function Overview({ containers, docker, children }) {
         title="Docker Engine is not installed"
         description="Install Docker Engine on the Ubuntu host before managing containers, images, volumes, or networks."
       >
-        <div className="flex items-center justify-between gap-4 rounded-md bg-slate-50 p-4 dark:bg-slate-950">
+        <div className="flex items-center justify-between gap-4 rounded-md bg-neutral-50 p-4 dark:bg-neutral-950">
           <div className="flex items-center gap-3">
             <CircleAlert className="text-amber-500" size={20} />
-            <p className="text-sm text-slate-600 dark:text-slate-300">
+            <p className="text-sm text-neutral-600 dark:text-neutral-300">
               Docker is not available to Server Engine.
             </p>
           </div>
@@ -1712,18 +1712,18 @@ export default function DockerPage() {
         aria-label="Loading Docker data"
         aria-busy="true"
       >
-        <div className="h-10 w-64 rounded bg-slate-100 dark:bg-slate-800" />
-        <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-800">
-          <div className="h-11 bg-slate-100 dark:bg-slate-800" />
+        <div className="h-10 w-64 rounded bg-neutral-100 dark:bg-neutral-800" />
+        <div className="overflow-hidden rounded-lg border border-neutral-200 dark:border-neutral-800">
+          <div className="h-11 bg-neutral-100 dark:bg-neutral-800" />
           {[1, 2, 3, 4, 5].map((item) => (
             <div
               key={item}
-              className="flex gap-4 border-t border-slate-200 px-4 py-5 dark:border-slate-800"
+              className="flex gap-4 border-t border-neutral-200 px-4 py-5 dark:border-neutral-800"
             >
-              <div className="h-4 w-40 rounded bg-slate-100 dark:bg-slate-800" />
-              <div className="h-4 w-28 rounded bg-slate-100 dark:bg-slate-800" />
-              <div className="h-4 w-24 rounded bg-slate-100 dark:bg-slate-800" />
-              <div className="ml-auto h-4 w-16 rounded bg-slate-100 dark:bg-slate-800" />
+              <div className="h-4 w-40 rounded bg-neutral-100 dark:bg-neutral-800" />
+              <div className="h-4 w-28 rounded bg-neutral-100 dark:bg-neutral-800" />
+              <div className="h-4 w-24 rounded bg-neutral-100 dark:bg-neutral-800" />
+              <div className="ml-auto h-4 w-16 rounded bg-neutral-100 dark:bg-neutral-800" />
             </div>
           ))}
         </div>
@@ -1784,7 +1784,7 @@ export default function DockerPage() {
         <div className="overflow-x-auto">
           <table className="w-full min-w-[680px] text-left">
             <thead>
-              <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-800">
+              <tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800">
                 <th className="px-3 py-3">Project</th>
                 <th className="px-3 py-3">Status</th>
                 <th className="px-3 py-3">Configuration</th>
@@ -1794,15 +1794,15 @@ export default function DockerPage() {
               {composeRows.map((item) => (
                 <tr
                   key={item.name}
-                  className="border-b border-slate-100 dark:border-slate-800"
+                  className="border-b border-neutral-100 dark:border-neutral-800"
                 >
-                  <td className="px-3 py-4 text-sm font-semibold text-slate-900 dark:text-slate-100">
+                  <td className="px-3 py-4 text-sm font-semibold text-neutral-900 dark:text-neutral-100">
                     {item.name}
                   </td>
-                  <td className="px-3 py-4 text-sm text-slate-600 dark:text-slate-400">
+                  <td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">
                     {item.status}
                   </td>
-                  <td className="px-3 py-4 text-xs text-slate-500 dark:text-slate-400">
+                  <td className="px-3 py-4 text-xs text-neutral-500 dark:text-neutral-400">
                     {item.config}
                   </td>
                 </tr>
@@ -1811,9 +1811,9 @@ export default function DockerPage() {
           </table>
         </div>
         {!composeRows.length && (
-          <div className="grid gap-4 border-t border-slate-200 py-8 dark:border-slate-800 md:grid-cols-2">
-            <div className="rounded-lg bg-slate-50 p-5 dark:bg-slate-950"><div className="flex items-start gap-3"><FileCode2 className="mt-0.5 text-blue-600 dark:text-blue-400" size={20} /><div><h4 className="text-sm font-semibold text-slate-900 dark:text-slate-100">No Compose apps detected</h4><p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">This list only shows projects known to the Docker daemon. Put a compose.yml in a project folder and run it once to make it appear here.</p></div></div></div>
-            <div className="rounded-lg border border-dashed border-slate-300 p-5 dark:border-slate-700"><h4 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Start with a template</h4><p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">Generate a clean starter file for PHP, Node.js, Redis, MySQL, or a static Nginx site.</p><button type="button" className="mt-4 inline-flex cursor-pointer items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400" onClick={() => setComposeStarter(true)}>Choose a starter <ArrowLeft className="rotate-180" size={15} /></button></div>
+          <div className="grid gap-4 border-t border-neutral-200 py-8 dark:border-neutral-800 md:grid-cols-2">
+            <div className="rounded-lg bg-neutral-50 p-5 dark:bg-neutral-950"><div className="flex items-start gap-3"><FileCode2 className="mt-0.5 text-blue-600 dark:text-blue-400" size={20} /><div><h4 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">No Compose apps detected</h4><p className="mt-1 text-sm leading-6 text-neutral-500 dark:text-neutral-400">This list only shows projects known to the Docker daemon. Put a compose.yml in a project folder and run it once to make it appear here.</p></div></div></div>
+            <div className="rounded-lg border border-dashed border-neutral-300 p-5 dark:border-neutral-700"><h4 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Start with a template</h4><p className="mt-1 text-sm leading-6 text-neutral-500 dark:text-neutral-400">Generate a clean starter file for PHP, Node.js, Redis, MySQL, or a static Nginx site.</p><button type="button" className="mt-4 inline-flex cursor-pointer items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400" onClick={() => setComposeStarter(true)}>Choose a starter <ArrowLeft className="rotate-180" size={15} /></button></div>
           </div>
         )}
       </Section>
@@ -1826,20 +1826,20 @@ export default function DockerPage() {
           <p className="text-sm font-medium text-blue-600 dark:text-blue-400">
             Services / Containers
           </p>
-          <h2 className="mt-1 text-3xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
+          <h2 className="mt-1 text-3xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-100">
             Docker
           </h2>
-          <p className="mt-2 max-w-2xl text-sm text-slate-500 dark:text-slate-400">
+          <p className="mt-2 max-w-2xl text-sm text-neutral-500 dark:text-neutral-400">
             Manage containers, images, persistent storage, networks, and Compose
             applications from one workspace.
           </p>
         </div>
         <div className="flex items-center gap-2">
           <span
-            className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium ${docker?.running ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300" : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"}`}
+            className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium ${docker?.running ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300" : "bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300"}`}
           >
             <span
-              className={`h-2 w-2 rounded-full ${docker?.running ? "bg-emerald-500" : "bg-slate-400"}`}
+              className={`h-2 w-2 rounded-full ${docker?.running ? "bg-emerald-500" : "bg-neutral-400"}`}
             />
             {loading
               ? "Checking Docker…"
@@ -1854,20 +1854,20 @@ export default function DockerPage() {
             title="Refresh Docker data"
             aria-label="Refresh Docker data"
             onClick={load}
-            className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-slate-300 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+            className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-neutral-300 text-neutral-600 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
           >
             <RefreshCw size={15} />
           </button>
         </div>
       </div>
-      <div className="border-b border-slate-200 dark:border-slate-800">
+      <div className="border-b border-neutral-200 dark:border-neutral-800">
         <div className="flex gap-5 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {tabs.map(([id, label, Icon]) => (
             <button
               type="button"
               key={id}
               onClick={() => setTab(id)}
-              className={`inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap border-b-2 px-1 pb-3 text-sm font-medium ${tab === id ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"}`}
+              className={`inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap border-b-2 px-1 pb-3 text-sm font-medium ${tab === id ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200"}`}
             >
               <Icon size={15} />
               {label}

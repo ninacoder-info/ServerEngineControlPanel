@@ -1,5 +1,7 @@
 import hashlib
 import hmac
+import os
+import pwd
 import secrets
 import sqlite3
 import json
@@ -10,6 +12,15 @@ from fastapi import HTTPException, Request, Response, status
 
 SESSION_COOKIE = "se_session"
 PBKDF2_ROUNDS = 310_000
+BUILTIN_PANEL_ROLES = (
+    ("administrator", "Administrator", "Full panel access.", ["*"]),
+    ("operator", "Operator", "Manage routine services and operations.", ["services", "jobs", "logs"]),
+    ("website_manager", "Website manager", "Manage websites, domains, and files.", ["websites", "domains", "files"]),
+    ("database_manager", "Database manager", "Manage databases and credentials.", ["databases", "backups"]),
+    ("mail_manager", "Mail manager", "Manage mailboxes and mail routing.", ["mail", "domains"]),
+    ("security_auditor", "Security auditor", "Review security controls and logs.", ["logs", "firewall", "malware"]),
+    ("viewer", "Viewer", "Read-only panel access.", []),
+)
 
 
 class AuthStore:
@@ -32,6 +43,55 @@ class AuthStore:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT NOT NULL UNIQUE,
                     password_hash TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    display_name TEXT NOT NULL DEFAULT '',
+                    email TEXT NOT NULL DEFAULT '',
+                    role TEXT NOT NULL DEFAULT 'administrator',
+                    status TEXT NOT NULL DEFAULT 'active',
+                    mfa_required INTEGER NOT NULL DEFAULT 0,
+                    last_login_at TEXT,
+                    last_login_ip TEXT
+                );
+                CREATE TABLE IF NOT EXISTS hosting_accounts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL UNIQUE REFERENCES users(id),
+                    account_name TEXT NOT NULL,
+                    primary_domain TEXT NOT NULL,
+                    home_path TEXT NOT NULL UNIQUE,
+                    package_id TEXT NOT NULL DEFAULT 'starter',
+                    disk_quota_mb INTEGER NOT NULL DEFAULT 10240,
+                    bandwidth_quota_mb INTEGER NOT NULL DEFAULT 102400,
+                    websites_quota INTEGER NOT NULL DEFAULT 1,
+                    feature_flags TEXT NOT NULL DEFAULT '{}',
+                    status TEXT NOT NULL DEFAULT 'active',
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS hosting_plans (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    disk_quota_mb INTEGER NOT NULL DEFAULT 10240,
+                    bandwidth_quota_mb INTEGER NOT NULL DEFAULT 102400,
+                    websites_quota INTEGER NOT NULL DEFAULT 1,
+                    databases_quota INTEGER NOT NULL DEFAULT 2,
+                    mailboxes_quota INTEGER NOT NULL DEFAULT 5,
+                    ftp_quota INTEGER NOT NULL DEFAULT 2,
+                    cron_quota INTEGER NOT NULL DEFAULT 5,
+                    php_version TEXT NOT NULL DEFAULT 'latest',
+                    webserver TEXT NOT NULL DEFAULT 'nginx',
+                    database_engine TEXT NOT NULL DEFAULT 'mysql',
+                    features TEXT NOT NULL DEFAULT '[]',
+                    system_plan INTEGER NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS panel_roles (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    permissions TEXT NOT NULL DEFAULT '[]',
+                    system_role INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS sessions (
@@ -79,9 +139,38 @@ class AuthStore:
                     expires_at TEXT NOT NULL,
                     used_at TEXT
                 );
+                CREATE TABLE IF NOT EXISTS audit_events (
+                    id TEXT PRIMARY KEY,
+                    category TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    actor_user_id INTEGER,
+                    actor TEXT NOT NULL,
+                    target TEXT NOT NULL DEFAULT '',
+                    detail TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'info',
+                    metadata TEXT NOT NULL DEFAULT '{}',
+                    source_ip TEXT,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_audit_events_created_at ON audit_events(created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_audit_events_category ON audit_events(category, created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_audit_events_status ON audit_events(status, created_at DESC);
             """)
-            columns = {row["name"] for row in db.execute("PRAGMA table_info(api_tokens)").fetchall()}
-            migrations = {
+            user_columns = {row["name"] for row in db.execute("PRAGMA table_info(users)").fetchall()}
+            user_migrations = {
+                "display_name": "TEXT NOT NULL DEFAULT ''",
+                "email": "TEXT NOT NULL DEFAULT ''",
+                "role": "TEXT NOT NULL DEFAULT 'administrator'",
+                "status": "TEXT NOT NULL DEFAULT 'active'",
+                "mfa_required": "INTEGER NOT NULL DEFAULT 0",
+                "last_login_at": "TEXT",
+                "last_login_ip": "TEXT",
+            }
+            for name, definition in user_migrations.items():
+                if name not in user_columns:
+                    db.execute(f"ALTER TABLE users ADD COLUMN {name} {definition}")
+            token_columns = {row["name"] for row in db.execute("PRAGMA table_info(api_tokens)").fetchall()}
+            token_migrations = {
                 "created_ip": "TEXT",
                 "last_used_ip": "TEXT",
                 "user_agent": "TEXT",
@@ -89,15 +178,40 @@ class AuthStore:
                 "device_name": "TEXT",
                 "revoked_at": "TEXT",
             }
-            for name, definition in migrations.items():
-                if name not in columns:
+            for name, definition in token_migrations.items():
+                if name not in token_columns:
                     db.execute(f"ALTER TABLE api_tokens ADD COLUMN {name} {definition}")
             if db.execute("SELECT 1 FROM users LIMIT 1").fetchone() is None:
-                db.execute("INSERT INTO users(username, password_hash, created_at) VALUES (?, ?, ?)", (self.bootstrap_user, hash_password(self.bootstrap_password), now().isoformat()))
+                db.execute("INSERT INTO users(username, password_hash, created_at, display_name, role) VALUES (?, ?, ?, ?, ?)", (self.bootstrap_user, hash_password(self.bootstrap_password), now().isoformat(), self.bootstrap_user, "administrator"))
+            else:
+                db.execute("UPDATE users SET role = 'administrator' WHERE username = ? AND (role IS NULL OR role = '')", (self.bootstrap_user,))
+            for role_id, name, description, permissions in BUILTIN_PANEL_ROLES:
+                db.execute(
+                    "INSERT OR IGNORE INTO panel_roles(id, name, description, permissions, system_role, created_at) VALUES (?, ?, ?, ?, 1, ?)",
+                    (role_id, name, description, json.dumps(permissions), now().isoformat()),
+                )
+            if db.execute("SELECT 1 FROM hosting_plans LIMIT 1").fetchone() is None:
+                created = now().isoformat()
+                db.executemany(
+                    """INSERT INTO hosting_plans(
+                        id, name, description, disk_quota_mb, bandwidth_quota_mb,
+                        websites_quota, databases_quota, mailboxes_quota, ftp_quota,
+                        cron_quota, php_version, webserver, database_engine, features,
+                        system_plan, status, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'active', ?, ?)""",
+                    [
+                        ("starter", "Starter", "For one small website or landing page.", 10240, 102400, 1, 2, 5, 2, 5, "latest", "nginx", "mysql", json.dumps(["ssl", "dns", "backups", "git"]), created, created),
+                        ("business", "Business", "Balanced resources for client websites and stores.", 51200, 512000, 10, 10, 25, 10, 20, "latest", "nginx", "mysql", json.dumps(["ssl", "dns", "mail", "backups", "git"]), created, created),
+                        ("agency", "Agency", "A larger allocation for multiple managed websites.", 204800, 2097152, 50, 50, 100, 50, 100, "latest", "nginx", "mysql", json.dumps(["ssl", "dns", "mail", "backups", "git", "shell"]), created, created),
+                    ],
+                )
+            db.execute("UPDATE panel_roles SET system_role = CASE WHEN id = 'administrator' THEN 1 ELSE 0 END")
 
     def authenticate(self, username: str, password: str) -> int | None:
         with self.connection() as db:
-            row = db.execute("SELECT id, password_hash FROM users WHERE username = ?", (username,)).fetchone()
+            row = db.execute("SELECT id, password_hash, status FROM users WHERE username = ?", (username,)).fetchone()
+            if row and row["status"] != "active":
+                return None
         return int(row["id"]) if row and verify_password(password, row["password_hash"]) else None
 
     def create_session(self, user_id: int) -> str:
@@ -107,20 +221,256 @@ class AuthStore:
             db.execute("INSERT INTO sessions(token_hash, user_id, expires_at) VALUES (?, ?, ?)", (token_hash(token), user_id, expires.isoformat()))
         return token
 
+    def record_login(self, user_id: int, client_ip: str | None = None):
+        with self.connection() as db:
+            db.execute(
+                "UPDATE users SET last_login_at = ?, last_login_ip = ? WHERE id = ?",
+                (now().isoformat(), client_ip, user_id),
+            )
+
     def create_session_for_user(self, user_id: int) -> str:
         return self.create_session(user_id)
 
     def user_by_id(self, user_id: int):
         with self.connection() as db:
-            row = db.execute("SELECT id, username FROM users WHERE id = ?", (user_id,)).fetchone()
+            row = db.execute("SELECT id, username, display_name, email, role, status, mfa_required, created_at, last_login_at, last_login_ip FROM users WHERE id = ?", (user_id,)).fetchone()
         return dict(row) if row else None
 
     def user_for_session(self, token: str | None):
         if not token:
             return None
         with self.connection() as db:
-            row = db.execute("SELECT users.id, users.username FROM sessions JOIN users ON users.id = sessions.user_id WHERE sessions.token_hash = ? AND sessions.expires_at > ?", (token_hash(token), now().isoformat())).fetchone()
+            row = db.execute("SELECT users.id, users.username, users.display_name, users.email, users.role, users.status, users.mfa_required FROM sessions JOIN users ON users.id = sessions.user_id WHERE sessions.token_hash = ? AND sessions.expires_at > ? AND users.status = 'active'", (token_hash(token), now().isoformat())).fetchone()
         return dict(row) if row else None
+
+    def list_users(self):
+        with self.connection() as db:
+            rows = db.execute("SELECT id, username, display_name, email, role, status, mfa_required, created_at, last_login_at, last_login_ip FROM users ORDER BY username COLLATE NOCASE").fetchall()
+        return [dict(row) for row in rows]
+
+    def create_user(self, username: str, password: str, display_name: str = "", email: str = "", role: str = "viewer"):
+        created = now().isoformat()
+        with self.connection() as db:
+            cursor = db.execute("INSERT INTO users(username, password_hash, created_at, display_name, email, role) VALUES (?, ?, ?, ?, ?, ?)", (username, hash_password(password), created, display_name or username, email, role))
+            user_id = cursor.lastrowid
+        return self.user_by_id(user_id)
+
+    def list_roles(self):
+        with self.connection() as db:
+            rows = db.execute("SELECT panel_roles.id, panel_roles.name, panel_roles.description, panel_roles.permissions, panel_roles.system_role, panel_roles.created_at, COUNT(users.id) AS assigned_count FROM panel_roles LEFT JOIN users ON users.role = panel_roles.id GROUP BY panel_roles.id ORDER BY system_role DESC, name COLLATE NOCASE").fetchall()
+        result = []
+        for row in rows:
+            role = dict(row)
+            try:
+                role["permissions"] = json.loads(role["permissions"] or "[]")
+            except json.JSONDecodeError:
+                role["permissions"] = []
+            role["system_role"] = bool(role["system_role"])
+            result.append(role)
+        return result
+
+    def create_role(self, role_id: str, name: str, description: str, permissions: list[str]):
+        with self.connection() as db:
+            db.execute(
+                "INSERT INTO panel_roles(id, name, description, permissions, system_role, created_at) VALUES (?, ?, ?, ?, 0, ?)",
+                (role_id, name, description, json.dumps(permissions), now().isoformat()),
+            )
+        return next(role for role in self.list_roles() if role["id"] == role_id)
+
+    def update_role(self, role_id: str, name: str, description: str, permissions: list[str]):
+        with self.connection() as db:
+            role = db.execute("SELECT system_role FROM panel_roles WHERE id = ?", (role_id,)).fetchone()
+            if not role or role["system_role"]:
+                return None
+            db.execute("UPDATE panel_roles SET name = ?, description = ?, permissions = ? WHERE id = ?", (name, description, json.dumps(permissions), role_id))
+        return next(role for role in self.list_roles() if role["id"] == role_id)
+
+    def delete_role(self, role_id: str, replacement_role: str | None = None) -> bool:
+        with self.connection() as db:
+            role = db.execute("SELECT system_role FROM panel_roles WHERE id = ?", (role_id,)).fetchone()
+            if not role or role["system_role"]:
+                return False
+            assigned = db.execute("SELECT COUNT(*) AS count FROM users WHERE role = ?", (role_id,)).fetchone()["count"]
+            if assigned and not replacement_role:
+                return False
+            if assigned:
+                target = db.execute("SELECT id FROM panel_roles WHERE id = ?", (replacement_role,)).fetchone()
+                if not target or replacement_role == role_id:
+                    return False
+                db.execute("UPDATE users SET role = ? WHERE role = ?", (replacement_role, role_id))
+            db.execute("DELETE FROM panel_roles WHERE id = ?", (role_id,))
+            return True
+
+    def record_activity(self, category: str, action: str, actor: str, target: str = "", detail: str = "", status: str = "info", metadata: dict | None = None, actor_user_id: int | None = None, source_ip: str | None = None):
+        event_id = f"audit-{secrets.token_urlsafe(18)}"
+        timestamp = now().isoformat()
+        with self.connection() as db:
+            db.execute(
+                "INSERT INTO audit_events(id, category, action, actor_user_id, actor, target, detail, status, metadata, source_ip, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (event_id, category, action, actor_user_id, actor, target, detail, status, json.dumps(metadata or {}, sort_keys=True), source_ip, timestamp),
+            )
+        return {"id": event_id, "category": category, "type": action, "actor": actor, "target": target, "detail": detail, "time": timestamp, "status": status, "metadata": metadata or {}}
+
+    def list_activity(self, since: str | None = None):
+        with self.connection() as db:
+            if since:
+                rows = db.execute("SELECT id, category, action AS type, actor, target, detail, created_at AS time, status, metadata, source_ip FROM audit_events WHERE created_at >= ? ORDER BY created_at DESC LIMIT 1000", (since,)).fetchall()
+            else:
+                rows = db.execute("SELECT id, category, action AS type, actor, target, detail, created_at AS time, status, metadata, source_ip FROM audit_events ORDER BY created_at DESC LIMIT 1000").fetchall()
+        result = []
+        for row in rows:
+            event = dict(row)
+            try:
+                event["metadata"] = json.loads(event["metadata"] or "{}")
+            except json.JSONDecodeError:
+                event["metadata"] = {}
+            if event.get("source_ip"):
+                event["metadata"].setdefault("Source IP", event["source_ip"])
+            event.pop("source_ip", None)
+            result.append(event)
+        return result
+
+    def list_hosting_accounts(self):
+        with self.connection() as db:
+            rows = db.execute(
+                """
+                SELECT a.id, a.user_id, a.account_name, a.primary_domain,
+                       a.home_path, a.package_id, a.disk_quota_mb,
+                       a.bandwidth_quota_mb, a.websites_quota, a.feature_flags,
+                       a.status, a.created_at, u.username, u.email,
+                       u.last_login_at
+                FROM hosting_accounts a
+                JOIN users u ON u.id = a.user_id
+                ORDER BY a.account_name COLLATE NOCASE
+                """
+            ).fetchall()
+        accounts = []
+        for row in rows:
+            account = dict(row)
+            try:
+                account["feature_flags"] = json.loads(account["feature_flags"] or "{}")
+            except json.JSONDecodeError:
+                account["feature_flags"] = {}
+            accounts.append(account)
+        return accounts
+
+    def list_hosting_plans(self):
+        with self.connection() as db:
+            rows = db.execute(
+                """SELECT p.*, COUNT(a.id) AS assigned_count
+                   FROM hosting_plans p
+                   LEFT JOIN hosting_accounts a ON a.package_id = p.id
+                   GROUP BY p.id
+                   ORDER BY p.system_plan DESC, p.name COLLATE NOCASE"""
+            ).fetchall()
+        plans = []
+        for row in rows:
+            plan = dict(row)
+            try:
+                plan["features"] = json.loads(plan["features"] or "[]")
+            except json.JSONDecodeError:
+                plan["features"] = []
+            plan["system_plan"] = bool(plan["system_plan"])
+            plans.append(plan)
+        return plans
+
+    def create_hosting_plan(self, plan: dict):
+        timestamp = now().isoformat()
+        with self.connection() as db:
+            db.execute(
+                """INSERT INTO hosting_plans(
+                    id, name, description, disk_quota_mb, bandwidth_quota_mb,
+                    websites_quota, databases_quota, mailboxes_quota, ftp_quota,
+                    cron_quota, php_version, webserver, database_engine, features,
+                    system_plan, status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)""",
+                (plan["id"], plan["name"], plan["description"], plan["disk_quota_mb"], plan["bandwidth_quota_mb"], plan["websites_quota"], plan["databases_quota"], plan["mailboxes_quota"], plan["ftp_quota"], plan["cron_quota"], plan["php_version"], plan["webserver"], plan["database_engine"], json.dumps(plan["features"], sort_keys=True), plan["status"], timestamp, timestamp),
+            )
+        return next(item for item in self.list_hosting_plans() if item["id"] == plan["id"])
+
+    def update_hosting_plan(self, plan_id: str, plan: dict):
+        timestamp = now().isoformat()
+        with self.connection() as db:
+            existing = db.execute("SELECT system_plan FROM hosting_plans WHERE id = ?", (plan_id,)).fetchone()
+            if not existing:
+                return None
+            db.execute(
+                """UPDATE hosting_plans SET name = ?, description = ?, disk_quota_mb = ?,
+                    bandwidth_quota_mb = ?, websites_quota = ?, databases_quota = ?,
+                    mailboxes_quota = ?, ftp_quota = ?, cron_quota = ?, php_version = ?,
+                    webserver = ?, database_engine = ?, features = ?, status = ?, updated_at = ?
+                    WHERE id = ?""",
+                (plan["name"], plan["description"], plan["disk_quota_mb"], plan["bandwidth_quota_mb"], plan["websites_quota"], plan["databases_quota"], plan["mailboxes_quota"], plan["ftp_quota"], plan["cron_quota"], plan["php_version"], plan["webserver"], plan["database_engine"], json.dumps(plan["features"], sort_keys=True), plan["status"], timestamp, plan_id),
+            )
+        return next(item for item in self.list_hosting_plans() if item["id"] == plan_id)
+
+    def delete_hosting_plan(self, plan_id: str, replacement_plan: str | None = None):
+        with self.connection() as db:
+            plan = db.execute("SELECT system_plan FROM hosting_plans WHERE id = ?", (plan_id,)).fetchone()
+            if not plan or plan["system_plan"]:
+                return False, 0
+            assigned = db.execute("SELECT COUNT(*) AS count FROM hosting_accounts WHERE package_id = ?", (plan_id,)).fetchone()["count"]
+            if assigned and not replacement_plan:
+                return False, assigned
+            if assigned:
+                replacement = db.execute("SELECT id FROM hosting_plans WHERE id = ? AND id != ?", (replacement_plan, plan_id)).fetchone()
+                if not replacement:
+                    return False, assigned
+                db.execute("UPDATE hosting_accounts SET package_id = ? WHERE package_id = ?", (replacement_plan, plan_id))
+            db.execute("DELETE FROM hosting_plans WHERE id = ?", (plan_id,))
+            return True, assigned
+
+    def create_hosting_account(
+        self,
+        username: str,
+        password: str,
+        account_name: str,
+        primary_domain: str,
+        email: str = "",
+        package_id: str = "starter",
+        disk_quota_mb: int = 10240,
+        bandwidth_quota_mb: int = 102400,
+        websites_quota: int = 1,
+        feature_flags: dict | None = None,
+    ):
+        created = now().isoformat()
+        home_path = f"/server-engine/www/{username}"
+        home = Path(home_path)
+        home.mkdir(parents=True, exist_ok=False)
+        try:
+            owner = pwd.getpwnam("serverengine")
+            if os.geteuid() == 0:
+                os.chown(home, owner.pw_uid, owner.pw_gid)
+            home.chmod(0o750)
+        except Exception:
+            home.rmdir()
+            raise
+        with self.connection() as db:
+            try:
+                user_cursor = db.execute(
+                    "INSERT INTO users(username, password_hash, created_at, display_name, email, role) VALUES (?, ?, ?, ?, ?, ?)",
+                    (username, hash_password(password), created, account_name or username, email, "hosting_account"),
+                )
+                user_id = user_cursor.lastrowid
+                account_cursor = db.execute(
+                    """
+                    INSERT INTO hosting_accounts(
+                        user_id, account_name, primary_domain, home_path, package_id,
+                        disk_quota_mb, bandwidth_quota_mb, websites_quota,
+                        feature_flags, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        user_id, account_name, primary_domain, home_path, package_id,
+                        disk_quota_mb, bandwidth_quota_mb, websites_quota,
+                        json.dumps(feature_flags or {}, sort_keys=True), created,
+                    ),
+                )
+                account_id = account_cursor.lastrowid
+            except Exception:
+                home.rmdir()
+                raise
+        return next(account for account in self.list_hosting_accounts() if account["id"] == account_id)
 
     def delete_session(self, token: str | None):
         if token:
@@ -154,7 +504,7 @@ class AuthStore:
             return None
         with self.connection() as db:
             row = db.execute(
-                "SELECT users.id, users.username, api_tokens.id AS token_id, api_tokens.last_used_at FROM api_tokens JOIN users ON users.id = api_tokens.user_id WHERE api_tokens.token_hash = ? AND api_tokens.revoked_at IS NULL AND (api_tokens.expires_at IS NULL OR api_tokens.expires_at > ?)",
+                "SELECT users.id, users.username, users.display_name, users.email, users.role, users.status, api_tokens.id AS token_id, api_tokens.last_used_at FROM api_tokens JOIN users ON users.id = api_tokens.user_id WHERE api_tokens.token_hash = ? AND api_tokens.revoked_at IS NULL AND users.status = 'active' AND (api_tokens.expires_at IS NULL OR api_tokens.expires_at > ?)",
                 (token_hash(token), now().isoformat()),
             ).fetchone()
             if not row:
@@ -163,7 +513,7 @@ class AuthStore:
             previous = datetime.fromisoformat(row["last_used_at"]) if row["last_used_at"] else None
             if not previous or (current - previous).total_seconds() >= 60:
                 db.execute("UPDATE api_tokens SET last_used_at = ?, last_used_ip = ? WHERE id = ?", (current.isoformat(), request.client.host if request and request.client else None, row["token_id"]))
-        return {"id": row["id"], "username": row["username"]}
+        return {"id": row["id"], "username": row["username"], "display_name": row["display_name"], "email": row["email"], "role": row["role"], "status": row["status"]}
 
     def create_pairing(self, user_id: int):
         code = secrets.token_urlsafe(18)

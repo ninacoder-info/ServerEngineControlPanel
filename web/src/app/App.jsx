@@ -26,13 +26,7 @@ export default function App() {
     return (
       <>
         {toaster}
-        <div
-          className={`loading-screen ${
-            localStorage.getItem("server-engine-theme") === "light"
-              ? "theme-light"
-              : ""
-          }`}
-        >
+        <div className="grid min-h-screen place-items-center bg-[var(--se-bg)] p-6 text-sm text-[var(--se-muted)]">
           Loading Server Engine…
         </div>
       </>

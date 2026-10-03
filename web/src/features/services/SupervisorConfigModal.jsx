@@ -39,7 +39,7 @@ export default function SupervisorConfigModal({
     status === "running"
       ? "text-emerald-600 dark:text-emerald-400"
       : status === "not-installed"
-        ? "text-slate-500 dark:text-slate-400"
+        ? "text-neutral-500 dark:text-neutral-400"
         : "text-amber-600 dark:text-amber-400";
 
   async function action(nextAction) {
@@ -62,21 +62,21 @@ export default function SupervisorConfigModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex min-h-screen items-start justify-center overflow-y-auto bg-slate-950/60 p-4 sm:p-8">
-      <section className="my-0 w-full max-w-3xl overflow-hidden rounded-xl bg-white shadow-xl dark:bg-slate-900 sm:my-2">
-        <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+    <div className="fixed inset-0 z-50 flex min-h-screen items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8">
+      <section className="my-0 w-full max-w-3xl overflow-hidden rounded-xl bg-white shadow-xl dark:bg-neutral-900 sm:my-2">
+        <header className="flex items-start justify-between gap-4 border-b border-neutral-200 px-5 py-4 dark:border-neutral-800">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">
               Process manager
             </p>
-            <h2 className="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">
+            <h2 className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">
               Supervisor
             </h2>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
               <span className={statusClass}>{statusText}</span> · v
               {item.version || "4.2.5"}
             </p>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
               Manage long-running workers, schedulers, restart policies, and
               process logs.
             </p>
@@ -85,18 +85,18 @@ export default function SupervisorConfigModal({
             type="button"
             aria-label="Close Supervisor configuration"
             onClick={onClose}
-            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
           >
             <X size={17} />
           </button>
         </header>
-        <nav className="flex flex-nowrap gap-5 overflow-x-auto border-b border-slate-200 px-5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:border-slate-800">
+        <nav className="flex flex-nowrap gap-5 overflow-x-auto border-b border-neutral-200 px-5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:border-neutral-800">
           {tabs.map(([id, label, Icon]) => (
             <button
               type="button"
               key={id}
               onClick={() => setTab(id)}
-              className={`inline-flex shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium ${tab === id ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"}`}
+              className={`inline-flex shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium ${tab === id ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200"}`}
             >
               <Icon size={15} />
               {label}
@@ -107,37 +107,37 @@ export default function SupervisorConfigModal({
           {tab === "configuration" && (
             <div className="space-y-5">
               <div>
-                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
                   Supervisor configuration
                 </h3>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
                   Keep the process manager ready for website queues, schedulers,
                   and background workers.
                 </p>
               </div>
-              <div className="divide-y divide-slate-200 border-y border-slate-200 dark:divide-slate-800 dark:border-slate-800">
+              <div className="divide-y divide-neutral-200 border-y border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
                 <div className="flex flex-col gap-1 py-3 sm:flex-row sm:items-center sm:justify-between">
-                  <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
                     Configuration file
                   </span>
-                  <code className="break-all text-xs text-slate-500 dark:text-slate-400">
+                  <code className="break-all text-xs text-neutral-500 dark:text-neutral-400">
                     /opt/server-engine/services/supervisor/conf/supervisord.conf
                   </code>
                 </div>
                 <div className="flex flex-col gap-1 py-3 sm:flex-row sm:items-center sm:justify-between">
-                  <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
                     Program directory
                   </span>
-                  <code className="break-all text-xs text-slate-500 dark:text-slate-400">
+                  <code className="break-all text-xs text-neutral-500 dark:text-neutral-400">
                     /opt/server-engine/services/supervisor/conf/programs
                   </code>
                 </div>
               </div>
               <div className="grid gap-4 sm:grid-cols-3">
                 <div>
-                  <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
                     Log level
-                    <select className="mt-2 block min-h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100">
+                    <select className="mt-2 block min-h-10 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100">
                       <option>info</option>
                       <option>warn</option>
                       <option>debug</option>
@@ -145,9 +145,9 @@ export default function SupervisorConfigModal({
                   </label>
                 </div>
                 <div>
-                  <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
                     Log retention
-                    <select className="mt-2 block min-h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100">
+                    <select className="mt-2 block min-h-10 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100">
                       <option>30 days</option>
                       <option>90 days</option>
                       <option>365 days</option>
@@ -155,16 +155,16 @@ export default function SupervisorConfigModal({
                   </label>
                 </div>
                 <div>
-                  <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
                     Start on boot
-                    <select className="mt-2 block min-h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100">
+                    <select className="mt-2 block min-h-10 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100">
                       <option>Enabled</option>
                       <option>Disabled</option>
                     </select>
                   </label>
                 </div>
               </div>
-              <div className="flex items-start gap-3 rounded-md border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400">
+              <div className="flex items-start gap-3 rounded-md border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-600 dark:border-neutral-800 dark:bg-neutral-950 dark:text-neutral-400">
                 <ShieldCheck
                   size={17}
                   className="mt-0.5 shrink-0 text-blue-600"
@@ -179,17 +179,17 @@ export default function SupervisorConfigModal({
           {tab === "runtime" && (
             <div className="space-y-5">
               <div>
-                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
                   Runtime control
                 </h3>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
                   Start Supervisor before launching managed programs.
                 </p>
                 <StartupPolicyToggle serviceId="supervisor" />
               </div>
-              <div className="divide-y divide-slate-200 border-y border-slate-200 dark:divide-slate-800 dark:border-slate-800">
+              <div className="divide-y divide-neutral-200 border-y border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
                 <div className="flex items-center justify-between gap-4 py-3">
-                  <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
                     Service state
                   </span>
                   <span className={`text-sm font-semibold ${statusClass}`}>
@@ -197,24 +197,24 @@ export default function SupervisorConfigModal({
                   </span>
                 </div>
                 <div className="flex flex-col gap-1 py-3 sm:flex-row sm:items-center sm:justify-between">
-                  <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
                     Control socket
                   </span>
-                  <code className="break-all text-xs text-slate-500 dark:text-slate-400">
+                  <code className="break-all text-xs text-neutral-500 dark:text-neutral-400">
                     /opt/server-engine/services/supervisor/run/supervisor.sock
                   </code>
                 </div>
                 <div className="flex items-center justify-between gap-4 py-3">
-                  <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
                     Managed programs
                   </span>
-                  <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                  <span className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
                     0
                   </span>
                 </div>
               </div>
               {!installedState ? (
-                <p className="rounded-md border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400">
+                <p className="rounded-md border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-600 dark:border-neutral-800 dark:bg-neutral-950 dark:text-neutral-400">
                   Install Supervisor from Services before managing its runtime.
                 </p>
               ) : (
@@ -225,7 +225,7 @@ export default function SupervisorConfigModal({
                         type="button"
                         disabled={busy}
                         onClick={() => action("stop")}
-                        className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                        className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800"
                       >
                         <Square size={15} />
                         Stop
@@ -234,7 +234,7 @@ export default function SupervisorConfigModal({
                         type="button"
                         disabled={busy}
                         onClick={() => action("restart")}
-                        className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                        className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800"
                       >
                         <RotateCw size={15} />
                         Restart
@@ -254,7 +254,7 @@ export default function SupervisorConfigModal({
                 </div>
               )}
               {message && (
-                <p className="text-sm text-slate-600 dark:text-slate-300">
+                <p className="text-sm text-neutral-600 dark:text-neutral-300">
                   {message}
                 </p>
               )}
@@ -263,17 +263,17 @@ export default function SupervisorConfigModal({
           {tab === "logs" && (
             <div className="space-y-5">
               <div>
-                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
                   Supervisor error log
                 </h3>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
                   Review process-manager failures and startup diagnostics.
                 </p>
               </div>
-              <code className="block break-all rounded-md bg-slate-950 p-4 text-xs leading-6 text-slate-300">
+              <code className="block break-all rounded-md bg-neutral-950 p-4 text-xs leading-6 text-neutral-300">
                 /opt/server-engine/services/supervisor/logs/supervisord.log
               </code>
-              <pre className="min-h-40 overflow-auto rounded-md bg-slate-950 p-4 text-xs leading-6 text-slate-300">
+              <pre className="min-h-40 overflow-auto rounded-md bg-neutral-950 p-4 text-xs leading-6 text-neutral-300">
                 No Supervisor errors available.
               </pre>
             </div>

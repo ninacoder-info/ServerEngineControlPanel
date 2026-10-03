@@ -22,10 +22,10 @@ import { apiRequest } from "../../lib/api";
 
 function Section({ title, description, children }) {
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800">
+    <section className="rounded-xl border border-neutral-200 bg-white p-5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
       <div className="mb-5">
-        <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">{title}</h3>
-        {description && <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{description}</p>}
+        <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">{title}</h3>
+        {description && <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">{description}</p>}
       </div>
       {children}
     </section>
@@ -36,10 +36,10 @@ function Skeleton() {
   return (
     <div className="animate-pulse space-y-6" aria-busy="true">
       <div className="flex items-center gap-3">
-        <div className="h-9 w-9 rounded-full bg-slate-200 dark:bg-slate-800" />
-        <div className="space-y-2"><div className="h-3 w-28 rounded bg-slate-100 dark:bg-slate-800" /><div className="h-6 w-64 rounded bg-slate-200 dark:bg-slate-800" /></div>
+        <div className="h-9 w-9 rounded-full bg-neutral-200 dark:bg-neutral-800" />
+        <div className="space-y-2"><div className="h-3 w-28 rounded bg-neutral-100 dark:bg-neutral-800" /><div className="h-6 w-64 rounded bg-neutral-200 dark:bg-neutral-800" /></div>
       </div>
-      <div className="h-[32rem] rounded-xl bg-slate-100 dark:bg-slate-800" />
+      <div className="h-[32rem] rounded-xl bg-neutral-100 dark:bg-neutral-800" />
     </div>
   );
 }
@@ -139,27 +139,27 @@ export default function DockerContainerDetailsPage() {
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-col justify-between gap-4 border-b border-slate-200 pb-5 dark:border-slate-800 sm:flex-row sm:items-center">
+      <header className="flex flex-col justify-between gap-4 border-b border-neutral-200 pb-5 dark:border-neutral-800 sm:flex-row sm:items-center">
         <div className="flex min-w-0 items-center gap-3">
-          <button type="button" aria-label="Back to Docker" title="Back to Docker" className="inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800" onClick={() => navigate("/docker")}><ArrowLeft size={18} /></button>
-          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-950/30 dark:text-blue-400"><Container size={22} /></span>
+          <button type="button" aria-label="Back to Docker" title="Back to Docker" className="inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800" onClick={() => navigate("/docker")}><ArrowLeft size={18} /></button>
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300"><Container size={22} /></span>
           <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Docker container</p>
-            <h2 className="truncate text-xl font-semibold text-slate-900 dark:text-slate-100">{name}</h2>
+            <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">Docker container</p>
+            <h2 className="truncate text-xl font-semibold text-neutral-900 dark:text-neutral-100">{name}</h2>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-              <span className="font-mono text-slate-500 dark:text-slate-400">{details?.id || containerId}</span>
-              <Link to={`/docker/images/${encodeURIComponent(details?.image || "")}`} className="font-mono font-semibold text-blue-600 hover:underline dark:text-blue-400">{details?.image || "Loading image…"}</Link>
-              {Object.entries(details?.ports || {}).flatMap(([containerPort, bindings]) => (Array.isArray(bindings) ? bindings : bindings ? [bindings] : []).map((binding) => { const host = binding.HostIp || "127.0.0.1"; const url = `http://${host}:${binding.HostPort}/`; return <a key={`${containerPort}-${binding.HostPort}`} href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-mono font-semibold text-blue-600 hover:underline dark:text-blue-400"><ExternalLink size={13} />{url}</a>; }))}
+              <span className="font-mono text-neutral-500 dark:text-neutral-400">{details?.id || containerId}</span>
+              <Link to={`/docker/images/${encodeURIComponent(details?.image || "")}`} className="font-mono font-semibold text-neutral-700 hover:underline dark:text-neutral-300">{details?.image || "Loading image…"}</Link>
+              {Object.entries(details?.ports || {}).flatMap(([containerPort, bindings]) => (Array.isArray(bindings) ? bindings : bindings ? [bindings] : []).map((binding) => { const host = binding.HostIp || "127.0.0.1"; const url = `http://${host}:${binding.HostPort}/`; return <a key={`${containerPort}-${binding.HostPort}`} href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-mono font-semibold text-neutral-700 hover:underline dark:text-neutral-300"><ExternalLink size={13} />{url}</a>; }))}
             </div>
           </div>
         </div>
         <div className="flex items-center gap-1.5">
-          {tabs.map(([key, label, Icon]) => <button key={key} type="button" title={label} aria-label={label} className={`inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md border ${panel === key ? "border-blue-600 bg-blue-600 text-white" : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"}`} onClick={() => setPanel(key)}><Icon size={16} /></button>)}
-          <span className="mx-1 h-6 w-px bg-slate-200 dark:bg-slate-800" />
+          {tabs.map(([key, label, Icon]) => <button key={key} type="button" title={label} aria-label={label} className={`inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md border ${panel === key ? "border-neutral-700 bg-neutral-800 text-white dark:border-neutral-500 dark:bg-neutral-700" : "border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"}`} onClick={() => setPanel(key)}><Icon size={16} /></button>)}
+          <span className="mx-1 h-6 w-px bg-neutral-200 dark:bg-neutral-800" />
           <button type="button" title={running ? "Stop container" : "Start container"} aria-label={running ? "Stop container" : "Start container"} disabled={disabled} className={`inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md border disabled:cursor-wait disabled:opacity-60 ${running ? "border-red-200 text-red-600 hover:bg-red-50" : "border-emerald-200 text-emerald-600 hover:bg-emerald-50"}`} onClick={() => runAction(running ? "stop" : "start")}>{disabled ? <LoaderCircle className="animate-spin" size={16} /> : running ? <Square size={16} /> : <Play size={16} />}</button>
-          <button type="button" title="Restart container" aria-label="Restart container" disabled={disabled} className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md border border-slate-300 text-slate-600 hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800" onClick={() => runAction("restart")}><RotateCw size={16} /></button>
+          <button type="button" title="Restart container" aria-label="Restart container" disabled={disabled} className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md border border-neutral-300 text-neutral-600 hover:bg-neutral-50 disabled:cursor-wait disabled:opacity-60 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800" onClick={() => runAction("restart")}><RotateCw size={16} /></button>
           <button type="button" title="Delete container" aria-label="Delete container" disabled={disabled} className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md border border-red-200 text-red-600 hover:bg-red-50 disabled:cursor-wait disabled:opacity-60 dark:border-red-900/70 dark:text-red-400" onClick={() => setDialog({ kind: "confirm", title: "Delete container?", message: `This will remove ${name} from Docker. Mounted files and volumes will remain.`, submitLabel: "Delete container", tone: "danger" })}><Trash2 size={16} /></button>
-          <button type="button" title="Refresh" aria-label="Refresh" className="ml-1 inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800" onClick={load}><RefreshCw size={16} /></button>
+          <button type="button" title="Refresh" aria-label="Refresh" className="ml-1 inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800" onClick={load}><RefreshCw size={16} /></button>
         </div>
       </header>
 
@@ -174,9 +174,9 @@ export default function DockerContainerDetailsPage() {
               ["Mounted volumes", String((details?.mounts || []).length)],
               ["Working directory", details?.working_dir || "/"],
             ].map(([label, value]) => (
-              <div key={label} className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</p>
-                <p className="mt-2 truncate text-lg font-semibold text-slate-900 dark:text-slate-100" title={value}>{value}</p>
+              <div key={label} className="rounded-lg border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
+                <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">{label}</p>
+                <p className="mt-2 truncate text-lg font-semibold text-neutral-900 dark:text-neutral-100" title={value}>{value}</p>
               </div>
             ))}
           </div>
@@ -184,9 +184,9 @@ export default function DockerContainerDetailsPage() {
         </div>
       ) : (
       <Section title={panel === "logs" ? "Console logs" : panel === "terminal" ? "Terminal" : "Container configuration"} description={panel === "logs" ? "Recent output from this Docker container." : panel === "terminal" ? "Interactive root shell inside this Docker container." : "Docker configuration for this container."}>
-        {panel === "logs" && <pre ref={logRef} onScroll={(event) => { const output = event.currentTarget; setFollowLogs(output.scrollHeight - output.scrollTop - output.clientHeight < 24); }} className="docker-console-output h-[32rem] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-slate-950 p-5 font-mono text-xs leading-5 text-slate-200">{details?.logs || "No logs available."}</pre>}
+        {panel === "logs" && <pre ref={logRef} onScroll={(event) => { const output = event.currentTarget; setFollowLogs(output.scrollHeight - output.scrollTop - output.clientHeight < 24); }} className="h-[32rem] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-neutral-950 p-5 font-mono text-xs leading-5 text-neutral-200">{details?.logs || "No logs available."}</pre>}
         {panel === "terminal" && <TerminalSession profile={{ id: `docker-${containerId}`, name, kind: "docker", container_id: containerId, username: "root" }} visible enabled restart={0} onStatus={() => {}} onControls={() => {}} />}
-        {panel === "config" && <pre className="docker-console-output h-[32rem] overflow-auto whitespace-pre-wrap rounded-lg bg-slate-950 p-5 font-mono text-xs leading-5 text-slate-200">{details?.compose_yaml || "No Compose configuration is available for this container."}</pre>}
+        {panel === "config" && <pre className="h-[32rem] overflow-auto whitespace-pre-wrap rounded-lg bg-neutral-950 p-5 font-mono text-xs leading-5 text-neutral-200">{details?.compose_yaml || "No Compose configuration is available for this container."}</pre>}
       </Section>
       )}
       <ActionDialog dialog={dialog} onClose={() => setDialog(null)} onSubmit={() => runAction("delete")} />

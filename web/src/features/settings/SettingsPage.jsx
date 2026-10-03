@@ -77,11 +77,10 @@ const fields = {
   maintenance: [["__maintenance__", "", "", "custom"]],
 };
 const input =
-  "mt-2 block min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm outline-none placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100";
-const card =
-  "rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950";
+  "mt-2 block min-h-11 w-full rounded-md border border-neutral-300 bg-white px-3 py-2.5 text-sm text-neutral-900 shadow-sm outline-none placeholder:text-neutral-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100";
+const card = "w-full";
 const row =
-  "grid gap-5 border-b border-slate-200 py-5 last:border-b-0 dark:border-slate-800 md:grid-cols-[minmax(0,1fr)_minmax(18rem,28rem)] md:items-center";
+  "grid gap-5 py-5 md:grid-cols-[minmax(0,1fr)_minmax(18rem,28rem)] md:items-center";
 const panelValues = (values) => ({
   panel_name: values.panel_name || "",
   language: values.language || "en",
@@ -270,29 +269,32 @@ const appearanceAccentColors = [
 ];
 function Section({ icon: Icon, title, description, badge, children }) {
   return (
-    <section className={card}>
-      <div className="mb-6 flex items-start justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-md bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-            <Icon size={17} />
-          </span>
-          <div>
-            <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
-              {title}
-            </h3>
-            <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
-              {description}
-            </p>
+    <>
+      <section className={card}>
+        <div className="mb-6 flex items-start justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-md bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
+              <Icon size={17} />
+            </span>
+            <div>
+              <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
+                {title}
+              </h3>
+              <p className="mt-1 text-sm leading-6 text-neutral-500 dark:text-neutral-400">
+                {description}
+              </p>
+            </div>
           </div>
+          {badge && (
+            <span className="rounded-full border border-neutral-200 bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-600 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300">
+              {badge}
+            </span>
+          )}
         </div>
-        {badge && (
-          <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
-            {badge}
-          </span>
-        )}
-      </div>
-      {children}
-    </section>
+        {children}
+      </section>
+      <hr className="my-6 border-0 border-t border-neutral-200 dark:border-neutral-800" />
+    </>
   );
 }
 function Control({ label, description, children, full = false, error }) {
@@ -302,10 +304,10 @@ function Control({ label, description, children, full = false, error }) {
   return (
     <label className={`${row}${full ? " md:grid-cols-1" : ""}`}>
       <span>
-        <strong className={`text-sm font-semibold ${error ? "text-rose-600 dark:text-rose-400" : "text-slate-900 dark:text-slate-100"}`}>
+        <strong className={`text-sm font-semibold ${error ? "text-rose-600 dark:text-rose-400" : "text-neutral-900 dark:text-neutral-100"}`}>
           {label}
         </strong>
-        <small className="mt-1 block text-sm leading-6 text-slate-500 dark:text-slate-400">
+        <small className="mt-1 block text-sm leading-6 text-neutral-500 dark:text-neutral-400">
           {description}
         </small>
       </span>
@@ -317,16 +319,16 @@ function Toggle({ label, description, checked, onChange }) {
   return (
     <label className={row}>
       <span>
-        <strong className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+        <strong className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
           {label}
         </strong>
-        <small className="mt-1 block text-sm leading-6 text-slate-500 dark:text-slate-400">
+        <small className="mt-1 block text-sm leading-6 text-neutral-500 dark:text-neutral-400">
           {description}
         </small>
       </span>
       <span className="flex justify-start md:justify-end">
         <input
-          className="h-4 w-4 rounded border-slate-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 dark:border-slate-600 dark:bg-slate-800 dark:focus:ring-offset-slate-900"
+          className="h-4 w-4 rounded border-neutral-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 dark:border-neutral-600 dark:bg-neutral-800 dark:focus:ring-offset-neutral-900"
           type="checkbox"
           checked={checked}
           onChange={(e) => onChange(e.target.checked)}
@@ -361,10 +363,10 @@ function FieldSet({ label, description, children, error }) {
     : children;
   return (
     <label className="block">
-      <span className={`text-sm font-semibold ${error ? "text-rose-600 dark:text-rose-400" : "text-slate-900 dark:text-slate-100"}`}>
+      <span className={`text-sm font-semibold ${error ? "text-rose-600 dark:text-rose-400" : "text-neutral-900 dark:text-neutral-100"}`}>
         {label}
       </span>
-      <small className="mt-1 block text-sm leading-6 text-slate-500 dark:text-slate-400">
+      <small className="mt-1 block text-sm leading-6 text-neutral-500 dark:text-neutral-400">
         {description}
       </small>
       {control}
@@ -382,16 +384,16 @@ function TagInput({ value, onChange, placeholder }) {
   };
   const remove = (tag) => onChange(value.filter((item) => item !== tag));
   return (
-    <div className="mt-2 flex min-h-11 flex-wrap items-center gap-2 rounded-md border border-slate-300 bg-white px-2.5 py-2 shadow-sm focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-900">
+    <div className="mt-2 flex min-h-11 flex-wrap items-center gap-2 rounded-md border border-neutral-300 bg-white px-2.5 py-2 shadow-sm focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/20 dark:border-neutral-700 dark:bg-neutral-900">
       {value.map((tag) => (
         <span
           key={tag}
-          className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+          className="inline-flex items-center gap-1 rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-medium text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"
         >
           {tag}
           <button
             type="button"
-            className="cursor-pointer text-slate-400 hover:text-slate-700 dark:hover:text-slate-100"
+            className="cursor-pointer text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-100"
             aria-label={`Remove ${tag}`}
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => remove(tag)}
@@ -401,7 +403,7 @@ function TagInput({ value, onChange, placeholder }) {
         </span>
       ))}
       <input
-        className="min-w-32 flex-1 bg-transparent py-1 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:text-slate-100"
+        className="min-w-32 flex-1 bg-transparent py-1 text-sm text-neutral-900 outline-none placeholder:text-neutral-400 dark:text-neutral-100"
         value={draft}
         placeholder={value.length ? "Add another" : placeholder}
         onChange={(event) => setDraft(event.target.value)}
@@ -421,7 +423,7 @@ function TagInput({ value, onChange, placeholder }) {
 function Notice({ children, amber = false }) {
   return (
     <div
-      className={`mt-5 flex items-start gap-2 rounded-md border p-4 text-sm leading-6 ${amber ? "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200" : "border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400"}`}
+      className={`mt-5 flex items-start gap-2 rounded-md border p-4 text-sm leading-6 ${amber ? "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200" : "border-neutral-200 bg-neutral-50 text-neutral-600 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-400"}`}
     >
       {children}
     </div>
@@ -429,10 +431,10 @@ function Notice({ children, amber = false }) {
 }
 function SettingsActions({ onSave, onReset, saving, dirty, message }) {
   return (
-    <div className="mt-5 flex flex-col gap-3 border-t border-slate-200 pt-5 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
-      <span className="text-sm text-slate-500 dark:text-slate-400">{message}</span>
+    <div className="mt-5 flex flex-col gap-3 border-t border-neutral-200 pt-5 dark:border-neutral-800 sm:flex-row sm:items-center sm:justify-between">
+      <span className="text-sm text-neutral-500 dark:text-neutral-400">{message}</span>
       <div className="flex items-center gap-2">
-        <button type="button" onClick={onReset} disabled={saving} className="inline-flex cursor-pointer items-center justify-center rounded-md px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-800">Restore defaults</button>
+        <button type="button" onClick={onReset} disabled={saving} className="inline-flex cursor-pointer items-center justify-center rounded-md px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-neutral-200 dark:hover:bg-neutral-800">Restore defaults</button>
         <SaveButton
           onClick={onSave}
           saving={saving}
@@ -535,7 +537,7 @@ function PanelTab({ values, onChange, onSave, onReset, saving, dirty, message, e
                   aria-checked={selected}
                   aria-label={accent.name}
                   title={accent.name}
-                  className={`relative inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded-full border border-slate-300 shadow-sm ring-offset-2 transition focus:outline-none focus:ring-2 focus:ring-[var(--panel-accent)] dark:border-slate-600 dark:ring-offset-slate-900 ${accent.className} ${selected ? "ring-2 ring-[var(--panel-accent)]" : "hover:border-slate-500"}`}
+                  className={`relative inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded-full border border-neutral-300 shadow-sm ring-offset-2 transition focus:outline-none focus:ring-2 focus:ring-[var(--panel-accent)] dark:border-neutral-600 dark:ring-offset-neutral-900 ${accent.className} ${selected ? "ring-2 ring-[var(--panel-accent)]" : "hover:border-neutral-500"}`}
                   onClick={() => set("panel_accent", accent.value)}
                 >
                   {selected && <span className="h-1.5 w-1.5 rounded-full bg-white shadow-sm" />}
@@ -645,13 +647,13 @@ function PanelTab({ values, onChange, onSave, onReset, saving, dirty, message, e
         </Notice>
       </Section>
       <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-slate-500 dark:text-slate-400" role="status">
+        <p className="text-sm text-neutral-500 dark:text-neutral-400" role="status">
           {message}
         </p>
         <div className="flex items-center justify-end gap-3">
           <button
             type="button"
-            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-800"
+            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-neutral-200 dark:hover:bg-neutral-800"
             onClick={onReset}
             disabled={saving}
           >
@@ -862,13 +864,13 @@ function StorageTab({ values, onChange, onSave, onReset, saving, dirty, message,
         </Control>
       </Section>
       <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-slate-500 dark:text-slate-400" role="status">
+        <p className="text-sm text-neutral-500 dark:text-neutral-400" role="status">
           {message}
         </p>
         <div className="flex items-center justify-end gap-3">
           <button
             type="button"
-            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-800"
+            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-neutral-200 dark:hover:bg-neutral-800"
             onClick={onReset}
             disabled={saving}
           >
@@ -1085,13 +1087,13 @@ function SecurityTab({ values, onChange, onSave, onReset, saving, dirty, message
         />
       </Section>
       <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-slate-500 dark:text-slate-400" role="status">
+        <p className="text-sm text-neutral-500 dark:text-neutral-400" role="status">
           {message}
         </p>
         <div className="flex items-center justify-end gap-3">
           <button
             type="button"
-            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-800"
+            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-neutral-200 dark:hover:bg-neutral-800"
             onClick={onReset}
             disabled={saving}
           >
@@ -1219,10 +1221,10 @@ function ApiTab({ values, onChange, onSave, onReset, saving, dirty, message, err
       >
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+            <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
               Token inventory
             </p>
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="mt-1 text-sm text-neutral-500">
               Tokens are shown once at creation and can be revoked at any time.
             </p>
           </div>
@@ -1235,7 +1237,7 @@ function ApiTab({ values, onChange, onSave, onReset, saving, dirty, message, err
         </div>
         <div className="mt-5 overflow-x-auto">
           <table className="w-full min-w-[680px] text-left text-sm">
-            <thead className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-800">
+            <thead className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800">
               <tr>
                 <th className="py-3">Token</th>
                 <th className="py-3">Device</th>
@@ -1245,29 +1247,29 @@ function ApiTab({ values, onChange, onSave, onReset, saving, dirty, message, err
                 <th />
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+            <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
               {tokens.map((token) => (
                 <tr key={token.id}>
-                  <td className="py-3 font-semibold text-slate-900 dark:text-slate-100">
+                  <td className="py-3 font-semibold text-neutral-900 dark:text-neutral-100">
                     <span>{token.name}</span>
-                    <small className="ml-2 text-slate-400">{token.token_prefix}…</small>
+                    <small className="ml-2 text-neutral-400">{token.token_prefix}…</small>
                   </td>
-                  <td className="py-3 text-slate-500">
-                    <span className="block font-medium text-slate-700 dark:text-slate-300">{token.device_name || "Unknown device"}</span>
+                  <td className="py-3 text-neutral-500">
+                    <span className="block font-medium text-neutral-700 dark:text-neutral-300">{token.device_name || "Unknown device"}</span>
                     <small>{token.platform || "web"} · {token.last_used_ip || token.created_ip || "Unknown IP"}</small>
                   </td>
-                  <td className="py-3 text-slate-500">{token.scopes?.join(", ")}</td>
-                  <td className="py-3 text-slate-500">{token.expires_at ? new Date(token.expires_at).toLocaleDateString() : "Never"}</td>
-                  <td className="py-3 text-slate-500">{token.last_used_at ? new Date(token.last_used_at).toLocaleString() : "Never used"}</td>
+                  <td className="py-3 text-neutral-500">{token.scopes?.join(", ")}</td>
+                  <td className="py-3 text-neutral-500">{token.expires_at ? new Date(token.expires_at).toLocaleDateString() : "Never"}</td>
+                  <td className="py-3 text-neutral-500">{token.last_used_at ? new Date(token.last_used_at).toLocaleString() : "Never used"}</td>
                   <td className="py-3 text-right">
-                    {token.status === "revoked" ? <span className="text-xs font-semibold text-slate-400">Revoked</span> : <button onClick={() => revokeToken(token.id)} className="cursor-pointer text-sm font-semibold text-red-600">Revoke</button>}
+                    {token.status === "revoked" ? <span className="text-xs font-semibold text-neutral-400">Revoked</span> : <button onClick={() => revokeToken(token.id)} className="cursor-pointer text-sm font-semibold text-red-600">Revoke</button>}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        <div className="mt-5 grid gap-4 border-t border-slate-200 pt-5 dark:border-slate-800 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto] md:items-end">
+        <div className="mt-5 grid gap-4 border-t border-neutral-200 pt-5 dark:border-neutral-800 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto] md:items-end">
           <FieldSet label="Token name" description="Use one token per device or integration.">
             <input className={input} value={tokenName} onChange={(event) => setTokenName(event.target.value)} />
           </FieldSet>
@@ -1287,10 +1289,10 @@ function ApiTab({ values, onChange, onSave, onReset, saving, dirty, message, err
           <div className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200">
             <p className="font-semibold">Copy this token now</p>
             <p className="mt-1 text-xs">It will not be shown again.</p>
-            <code className="mt-3 block overflow-x-auto rounded bg-white px-3 py-2 text-xs dark:bg-slate-950">{newToken.token}</code>
+            <code className="mt-3 block overflow-x-auto rounded bg-white px-3 py-2 text-xs dark:bg-neutral-950">{newToken.token}</code>
           </div>
         )}
-        <div className="grid gap-5 border-t border-slate-200 pt-5 dark:border-slate-800 md:grid-cols-2">
+        <div className="grid gap-5 border-t border-neutral-200 pt-5 dark:border-neutral-800 md:grid-cols-2">
           <FieldSet
             label="Token expiration"
             description="Default lifetime for newly generated tokens."
@@ -1335,19 +1337,19 @@ function ApiTab({ values, onChange, onSave, onReset, saving, dirty, message, err
           ].map(([key, label]) => (
             <label
               key={key}
-              className="flex items-center gap-3 rounded-md border border-slate-200 p-3 text-sm dark:border-slate-800"
+              className="flex items-center gap-3 rounded-md border border-neutral-200 p-3 text-sm dark:border-neutral-800"
             >
               <input
                 type="checkbox"
                 checked={tokenScopes.includes(key)}
                 onChange={(event) => setScope(key, event.target.checked)}
-                className="h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 dark:border-slate-600 dark:bg-slate-800 dark:focus:ring-offset-slate-900"
+                className="h-4 w-4 shrink-0 rounded border-neutral-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 dark:border-neutral-600 dark:bg-neutral-800 dark:focus:ring-offset-neutral-900"
               />
               <span>
-                <strong className="block text-slate-900 dark:text-slate-100">
+                <strong className="block text-neutral-900 dark:text-neutral-100">
                   {key}
                 </strong>
-                <small className="text-slate-500">{label}</small>
+                <small className="text-neutral-500">{label}</small>
               </span>
             </label>
           ))}
@@ -1454,18 +1456,18 @@ function ApiTab({ values, onChange, onSave, onReset, saving, dirty, message, err
       >
         <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
           <div>
-            <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">One-time device pairing</p>
-            <p className="mt-1 max-w-2xl text-sm text-slate-500 dark:text-slate-400">The code expires in five minutes and can be used once. The mobile app receives a scoped API token after scanning it.</p>
+            <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">One-time device pairing</p>
+            <p className="mt-1 max-w-2xl text-sm text-neutral-500 dark:text-neutral-400">The code expires in five minutes and can be used once. The mobile app receives a scoped API token after scanning it.</p>
           </div>
           <button type="button" onClick={createPairing} className="inline-flex cursor-pointer items-center justify-center rounded-md bg-[var(--panel-accent)] px-3 py-2 text-sm font-semibold text-white hover:opacity-90">Create pairing QR</button>
         </div>
         {pairing && (
-          <div className="mt-5 flex flex-col gap-5 rounded-md border border-slate-200 p-4 dark:border-slate-800 sm:flex-row sm:items-center">
+          <div className="mt-5 flex flex-col gap-5 rounded-md border border-neutral-200 p-4 dark:border-neutral-800 sm:flex-row sm:items-center">
             <canvas ref={qrCanvas} className="h-[220px] w-[220px] self-center rounded bg-white p-2 sm:self-auto" />
             <div className="min-w-0 text-sm">
-              <p className="font-semibold text-slate-900 dark:text-slate-100">Scan this code in the mobile app</p>
-              <p className="mt-1 text-slate-500 dark:text-slate-400">Expires {new Date(pairing.expires_at).toLocaleTimeString()}.</p>
-              <code className="mt-3 block break-all rounded-md bg-slate-100 px-3 py-2 text-xs text-slate-700 dark:bg-slate-900 dark:text-slate-300">{pairing.code}</code>
+              <p className="font-semibold text-neutral-900 dark:text-neutral-100">Scan this code in the mobile app</p>
+              <p className="mt-1 text-neutral-500 dark:text-neutral-400">Expires {new Date(pairing.expires_at).toLocaleTimeString()}.</p>
+              <code className="mt-3 block break-all rounded-md bg-neutral-100 px-3 py-2 text-xs text-neutral-700 dark:bg-neutral-900 dark:text-neutral-300">{pairing.code}</code>
             </div>
           </div>
         )}
@@ -1524,14 +1526,14 @@ function NotificationsTab({ values, onChange, onSave, onReset, saving, dirty, me
           checked={o.notification_webhook_channel}
           onChange={(v) => set("notification_webhook_channel", v)}
         />
-        <div className="flex flex-wrap gap-3 border-t border-slate-200 pt-5 dark:border-slate-800">
+        <div className="flex flex-wrap gap-3 border-t border-neutral-200 pt-5 dark:border-neutral-800">
           <button
             type="button"
-            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+            className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm font-semibold text-neutral-700 shadow-sm hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
           >
             Send test notification
           </button>
-          <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-2 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+          <span className="inline-flex items-center rounded-full bg-neutral-100 px-3 py-2 text-xs font-medium text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
             No delivery test yet
           </span>
         </div>
@@ -1675,13 +1677,13 @@ function NotificationsTab({ values, onChange, onSave, onReset, saving, dirty, me
         </Notice>
       </Section>
       <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-slate-500 dark:text-slate-400" role="status">
+        <p className="text-sm text-neutral-500 dark:text-neutral-400" role="status">
           {message}
         </p>
         <div className="flex items-center justify-end gap-3">
           <button
             type="button"
-            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-800"
+            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-neutral-200 dark:hover:bg-neutral-800"
             onClick={onReset}
             disabled={saving}
           >
@@ -1850,13 +1852,13 @@ function CertificatesTab({ values, onChange, onSave, onReset, saving, dirty, mes
         </Notice>
       </Section>
       <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-slate-500 dark:text-slate-400" role="status">
+        <p className="text-sm text-neutral-500 dark:text-neutral-400" role="status">
           {message}
         </p>
         <div className="flex items-center justify-end gap-3">
           <button
             type="button"
-            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-800"
+            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-neutral-200 dark:hover:bg-neutral-800"
             onClick={onReset}
             disabled={saving}
           >
@@ -1953,7 +1955,7 @@ function MaintenanceTab({ values, onChange, onSave, onReset, saving, dirty, mess
         />
         <div className="space-y-4">
           <Control full label="Maximum log size" description="Size threshold used for size-only rotation and active-log protection." error={errors.log_rotation_max_size_mb}>
-            <div className="flex items-center gap-2"><input className={input} type="number" min="1" max="100000" value={o.log_rotation_max_size_mb} onChange={(e) => set("log_rotation_max_size_mb", Number(e.target.value))} /><span className="shrink-0 text-sm text-slate-500">MB</span></div>
+            <div className="flex items-center gap-2"><input className={input} type="number" min="1" max="100000" value={o.log_rotation_max_size_mb} onChange={(e) => set("log_rotation_max_size_mb", Number(e.target.value))} /><span className="shrink-0 text-sm text-neutral-500">MB</span></div>
           </Control>
           <SelectControl full label="Rotation schedule" description="Daily and weekly rotation run during the maintenance window." value={o.log_rotation_schedule} onChange={(v) => set("log_rotation_schedule", v)}>
             <option value="size-only">When size limit is reached</option><option value="daily">Daily and when size limit is reached</option><option value="weekly">Weekly and when size limit is reached</option>
@@ -1965,12 +1967,12 @@ function MaintenanceTab({ values, onChange, onSave, onReset, saving, dirty, mess
             <input className={input} type="number" min="1" max="100000" value={o.log_rotation_retention_count} onChange={(e) => set("log_rotation_retention_count", Number(e.target.value))} />
           </Control>
         </div>
-        <div className="border-t border-slate-200 pt-5 dark:border-slate-800">
+        <div className="border-t border-neutral-200 pt-5 dark:border-neutral-800">
           <div className="space-y-4">
             <SelectControl full label="Per-service override" description="Override the global policy for one managed service." value={policyService} onChange={setPolicyService}>
               {policyServices.map((service) => <option key={service} value={service}>{service}</option>)}
             </SelectControl>
-            <div className="flex flex-wrap items-center justify-between gap-3"><button type="button" className="cursor-pointer text-sm font-semibold text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white" onClick={clearPolicy}>Use global defaults</button><button type="button" className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800" onClick={onRun} disabled={rotationRunning}>{rotationRunning ? "Rotating…" : "Run now"}</button></div>
+            <div className="flex flex-wrap items-center justify-between gap-3"><button type="button" className="cursor-pointer text-sm font-semibold text-neutral-600 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white" onClick={clearPolicy}>Use global defaults</button><button type="button" className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800" onClick={onRun} disabled={rotationRunning}>{rotationRunning ? "Rotating…" : "Run now"}</button></div>
           </div>
           <div className="mt-4 space-y-4">
             <Control full label="Service max size"><input className={input} type="number" min="1" value={policy.max_size_mb ?? o.log_rotation_max_size_mb} onChange={(e) => setPolicy("max_size_mb", Number(e.target.value))} /></Control>
@@ -2071,13 +2073,13 @@ function MaintenanceTab({ values, onChange, onSave, onReset, saving, dirty, mess
         </Notice>
       </Section>
       <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-slate-500 dark:text-slate-400" role="status">
+        <p className="text-sm text-neutral-500 dark:text-neutral-400" role="status">
           {message}
         </p>
         <div className="flex items-center justify-end gap-3">
           <button
             type="button"
-            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-800"
+            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-neutral-200 dark:hover:bg-neutral-800"
             onClick={onReset}
             disabled={saving}
           >
@@ -2589,24 +2591,24 @@ export default function SettingsPage() {
     <div className="space-y-7">
       <div className="flex flex-col items-start justify-between gap-5 xl:flex-row xl:items-end">
         <div>
-          <p className="text-sm font-medium text-blue-600 dark:text-blue-400">
+          <p className="text-sm font-medium text-neutral-500 dark:text-neutral-400">
             Control plane
           </p>
-          <h2 className="mt-1 text-4xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
+          <h2 className="mt-1 text-4xl font-bold tracking-tight text-neutral-900 dark:text-neutral-100">
             Settings
           </h2>
-          <p className="mt-2 max-w-3xl text-base leading-7 text-slate-500 dark:text-slate-400">
+          <p className="mt-2 max-w-3xl text-base leading-7 text-neutral-500 dark:text-neutral-400">
             Configure the panel, shared server paths, access policy,
             notifications, certificates, maintenance, and external API behavior.
           </p>
         </div>
       </div>
-      <div className="grid overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:grid-cols-[18rem_minmax(0,1fr)]">
-        <aside className="border-b border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950 lg:border-b-0 lg:border-r">
-          <div className="flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2.5 text-slate-400 dark:border-slate-700 dark:bg-slate-900">
+      <div className="grid overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-sm dark:border-neutral-800 dark:bg-neutral-900 lg:grid-cols-[18rem_minmax(0,1fr)]">
+        <aside className="border-b border-neutral-200 bg-neutral-50 p-4 dark:border-neutral-800 dark:bg-neutral-950 lg:border-b-0 lg:border-r">
+          <div className="flex items-center gap-2 rounded-md border border-neutral-300 bg-white px-3 py-2.5 text-neutral-400 dark:border-neutral-700 dark:bg-neutral-900">
             <Search size={16} />
             <input
-              className="w-full bg-transparent text-sm text-slate-900 outline-none dark:text-slate-100"
+              className="w-full bg-transparent text-sm text-neutral-900 outline-none dark:text-neutral-100"
               placeholder="Find a setting"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -2616,7 +2618,7 @@ export default function SettingsPage() {
             {visible.map(([id, label, Icon, description]) => (
               <button
                 key={id}
-                className={`flex w-full items-start gap-3 rounded-md p-3 text-left ${active === id ? "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300" : "text-slate-600 hover:bg-white dark:text-slate-400 dark:hover:bg-slate-900"}`}
+                className={`flex w-full items-start gap-3 rounded-md p-3 text-left ${active === id ? "bg-neutral-100 text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100" : "text-neutral-600 hover:bg-white dark:text-neutral-400 dark:hover:bg-neutral-900"}`}
                 onClick={() => setActive(id)}
               >
                 <Icon size={17} className="mt-0.5 shrink-0" />
@@ -2624,7 +2626,7 @@ export default function SettingsPage() {
                   <strong className="block text-sm font-semibold">
                     {label}
                   </strong>
-                  <small className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">
+                  <small className="mt-1 block text-xs leading-5 text-neutral-500 dark:text-neutral-400">
                     {description}
                   </small>
                 </span>
@@ -2632,14 +2634,14 @@ export default function SettingsPage() {
             ))}
           </nav>
         </aside>
-        <main className="min-w-0 bg-white p-5 dark:bg-slate-900 md:p-8">
+        <main className="min-w-0 bg-white p-5 dark:bg-neutral-900 md:p-8">
           {message && (
-            <div className="mb-6 rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
+            <div className="mb-6 rounded-md border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-700 dark:border-neutral-800 dark:bg-neutral-950 dark:text-neutral-300">
               {message}
             </div>
           )}
           {busy ? (
-            <div className="grid min-h-64 place-items-center text-sm text-slate-500">
+            <div className="grid min-h-64 place-items-center text-sm text-neutral-500">
               Loading settings…
             </div>
           ) : active === "panel" ? (
@@ -2699,11 +2701,11 @@ export default function SettingsPage() {
               {!["notifications", "certificates", "maintenance"].includes(
                 active,
               ) && (
-                <div className="mb-6 border-b border-slate-200 pb-5 dark:border-slate-800">
-                  <p className="text-sm font-medium text-blue-600 dark:text-blue-400">
+                <div className="mb-6 pb-5">
+                  <p className="text-sm font-medium text-neutral-500 dark:text-neutral-400">
                     {groups.find((g) => g[0] === active)?.[1]}
                   </p>
-                  <h3 className="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">
+                  <h3 className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">
                     {groups.find((g) => g[0] === active)?.[3]}
                   </h3>
                 </div>
@@ -2745,7 +2747,7 @@ export default function SettingsPage() {
               ))}
             </section>
           ) : (
-            <div className="grid min-h-64 place-items-center text-sm text-slate-500">
+            <div className="grid min-h-64 place-items-center text-sm text-neutral-500">
               No settings match your search.
             </div>
           )}

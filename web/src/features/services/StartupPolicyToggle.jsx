@@ -43,17 +43,17 @@ export default function StartupPolicyToggle({ serviceId, version, label = "Start
 
   return (
     <>
-      <label className="mt-5 flex cursor-pointer items-start gap-3 border-t border-slate-200 pt-4 text-sm text-slate-700 dark:border-slate-800 dark:text-slate-300">
+      <label className="mt-5 flex cursor-pointer items-start gap-3 border-t border-neutral-200 pt-4 text-sm text-neutral-700 dark:border-neutral-800 dark:text-neutral-300">
         <input
           type="checkbox"
           checked={enabled}
           disabled={!loaded || busy}
           onChange={update}
-          className="mt-0.5 h-4 w-4 cursor-pointer rounded border-slate-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500/20 disabled:cursor-wait disabled:opacity-60 dark:border-slate-600 dark:bg-slate-800"
+          className="mt-0.5 h-4 w-4 cursor-pointer rounded border-neutral-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500/20 disabled:cursor-wait disabled:opacity-60 dark:border-neutral-600 dark:bg-neutral-800"
         />
         <span>
-          <span className="block font-medium text-slate-900 dark:text-slate-100">{label}</span>
-          <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
+          <span className="block font-medium text-neutral-900 dark:text-neutral-100">{label}</span>
+          <span className="mt-0.5 block text-xs text-neutral-500 dark:text-neutral-400">
             Starts this service automatically when Server Engine starts.
           </span>
         </span>

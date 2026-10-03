@@ -11,27 +11,27 @@ export default function Pm2OverviewCard({
 }) {
   return (
     <article
-      className={`service-card php-overview-card ${pinned ? "service-card-pinned" : ""}`}
+      className={`flex cursor-pointer gap-4 rounded-lg border border-neutral-200 bg-white p-4 transition-colors hover:border-neutral-300 dark:border-neutral-800 dark:bg-neutral-900 dark:hover:border-neutral-700 ${pinned ? "ring-1 ring-blue-600 dark:ring-blue-400" : ""}`}
       onClick={onOpenWorkspace}
     >
-      <div className="service-card-top">
-        <div className="service-icon">
+      <div className="flex shrink-0 flex-col items-center gap-3">
+        <div className="grid h-10 w-10 place-items-center rounded-md bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
           <Server size={21} />
         </div>
       </div>
-      <div className="service-card-main">
+      <div className="min-w-0 flex-1">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h3>{service.name}</h3>
-            <p>{service.description}</p>
+            <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{service.name}</h3>
+            <p className="mt-1 text-xs leading-5 text-neutral-500 dark:text-neutral-400">{service.description}</p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <span className="status-pill status-running">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-2 py-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
               <Activity size={13} />
               Multi-version
             </span>
             <button
-              className={`pin-button ${pinned ? "pin-button-active" : ""}`}
+              className={`inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200 ${pinned ? "text-amber-500 dark:text-amber-400" : ""}`}
               title={pinned ? "Unstar service" : "Star service"}
               aria-label={pinned ? "Unstar PM2" : "Star PM2"}
               onClick={(event) => {
@@ -43,22 +43,22 @@ export default function Pm2OverviewCard({
             </button>
           </div>
         </div>
-        <div className="php-overview-stats">
+        <div className="mt-3 flex items-baseline gap-2 text-xs text-neutral-500 dark:text-neutral-400">
           <strong>{installed.length}</strong>
           <span>installed versions</span>
         </div>
-        <div className="php-version-chips">
+        <div className="mt-3 flex flex-wrap gap-2">
           {installed.length ? (
             installed.slice(0, 5).map((item) => (
-              <span key={`${item.id}-${item.version}`} className="php-version-chip chip-running">
+              <span key={`${item.id}-${item.version}`} className="inline-flex items-center gap-1 rounded-full border border-emerald-500/40 px-2 py-1 text-[11px] text-emerald-700 dark:text-emerald-400">
                 PM2 {item.version}
               </span>
             ))
           ) : (
-            <span className="php-empty-state">No PM2 version installed yet</span>
+            <span className="text-xs text-neutral-500 dark:text-neutral-400">No PM2 version installed yet</span>
           )}
         </div>
-        <div className="service-actions" onClick={(event) => event.stopPropagation()}>
+        <div className="mt-4 flex flex-wrap items-center gap-3" onClick={(event) => event.stopPropagation()}>
           <button
             className="inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
             type="button"
@@ -69,7 +69,7 @@ export default function Pm2OverviewCard({
           </button>
           {installed.length > 0 && (
             <button
-              className="inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-slate-300 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+              className="inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-neutral-300 px-2.5 py-1.5 text-xs font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
               type="button"
               onClick={onOpenWorkspace}
             >

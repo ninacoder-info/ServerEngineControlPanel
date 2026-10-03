@@ -83,9 +83,9 @@ const initialRules = [
   },
 ];
 const input =
-  "mt-2 block min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100";
+  "mt-2 block min-h-11 w-full rounded-md border border-neutral-300 bg-white px-3 py-2.5 text-sm text-neutral-900 outline-none placeholder:text-neutral-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100";
 const panel =
-  "rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900";
+  "rounded-xl border border-neutral-200 bg-white p-5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900";
 
 function PortTagsField({ value, onChange }) {
   const [draft, setDraft] = React.useState("");
@@ -106,18 +106,18 @@ function PortTagsField({ value, onChange }) {
   }
 
   return (
-    <div className="mt-2 rounded-md border border-slate-300 px-2 py-2 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/20 dark:border-slate-700">
+    <div className="mt-2 rounded-md border border-neutral-300 px-2 py-2 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/20 dark:border-neutral-700">
       <div className="flex flex-wrap items-center gap-1.5">
         {items.map((item) => (
           <span
             key={item}
-            className="inline-flex items-center gap-1 rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+            className="inline-flex items-center gap-1 rounded bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"
           >
             {item}
             <button
               type="button"
               aria-label={`Remove ${item}`}
-              className="cursor-pointer text-slate-400 hover:text-slate-700 dark:hover:text-slate-100"
+              className="cursor-pointer text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-100"
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => removeItem(item)}
             >
@@ -126,7 +126,7 @@ function PortTagsField({ value, onChange }) {
           </span>
         ))}
         <input
-          className="min-w-[9rem] flex-1 border-0 bg-transparent px-1 py-1 text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:text-slate-100"
+          className="min-w-[9rem] flex-1 border-0 bg-transparent px-1 py-1 text-sm text-neutral-900 outline-none placeholder:text-neutral-400 dark:text-neutral-100"
           required={items.length === 0}
           value={draft}
           placeholder="Type a port or alias and press Enter"
@@ -168,10 +168,10 @@ function RuleModal({ rule, onClose, onSave }) {
     setForm((current) => ({ ...current, [key]: value }));
   return (
     <div
-      className="fixed inset-0 z-50 grid place-items-center bg-slate-950/60 p-4"
+      className="fixed inset-0 z-50 grid place-items-center bg-neutral-950/60 p-4"
     >
       <form
-        className="max-h-[calc(100vh-2rem)] w-full max-w-3xl overflow-y-auto rounded-xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+        className="max-h-[calc(100vh-2rem)] w-full max-w-3xl overflow-y-auto rounded-xl border border-neutral-200 bg-white p-6 shadow-2xl dark:border-neutral-700 dark:bg-neutral-900"
           onSubmit={async (event) => {
           event.preventDefault();
           const saved = await onSave(form);
@@ -183,24 +183,24 @@ function RuleModal({ rule, onClose, onSave }) {
             <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">
               Rule editor
             </p>
-            <h2 className="mt-1 text-2xl font-semibold text-slate-900 dark:text-slate-100">
+            <h2 className="mt-1 text-2xl font-semibold text-neutral-900 dark:text-neutral-100">
               {rule ? "Edit firewall rule" : "Add firewall rule"}
             </h2>
-            <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+            <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
               Rules are evaluated from top to bottom. Keep trusted allow rules
               above broad deny rules.
             </p>
           </div>
           <button
             type="button"
-            className="grid h-9 w-9 place-items-center rounded-md text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+            className="grid h-9 w-9 place-items-center rounded-md text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
             onClick={onClose}
           >
             <X size={18} />
           </button>
         </div>
         <div className="mt-6 grid gap-5 md:grid-cols-2">
-          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+          <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
             Action
             <select
               className={input}
@@ -212,7 +212,7 @@ function RuleModal({ rule, onClose, onSave }) {
               <option>Reject</option>
             </select>
           </label>
-          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+          <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
             Interface
             <select
               className={input}
@@ -224,7 +224,7 @@ function RuleModal({ rule, onClose, onSave }) {
               <option>Docker bridge</option>
             </select>
           </label>
-          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+          <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
             Protocol
             <select
               className={input}
@@ -237,7 +237,7 @@ function RuleModal({ rule, onClose, onSave }) {
               <option>ICMP</option>
             </select>
           </label>
-          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+          <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
             Service
             <select
               className={input}
@@ -252,7 +252,7 @@ function RuleModal({ rule, onClose, onSave }) {
               <option>Database</option>
             </select>
           </label>
-          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+          <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
             Source address or alias
             <input
               className={input}
@@ -261,7 +261,7 @@ function RuleModal({ rule, onClose, onSave }) {
               placeholder="Any, 203.0.113.0/24, TrustedAdmins"
             />
           </label>
-          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+          <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
             Destination address or alias
             <input
               className={input}
@@ -270,14 +270,14 @@ function RuleModal({ rule, onClose, onSave }) {
               placeholder="Any, WebServers"
             />
           </label>
-          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+          <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
             Port or port alias
             <PortTagsField
               value={form.port}
               onChange={(value) => change("port", value)}
             />
           </label>
-          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+          <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
             Rule note
             <input
               className={input}
@@ -297,7 +297,7 @@ function RuleModal({ rule, onClose, onSave }) {
         <div className="mt-6 flex justify-end gap-3">
           <button
             type="button"
-            className="rounded-md border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-300"
+            className="rounded-md border border-neutral-300 px-4 py-2.5 text-sm font-semibold text-neutral-700 dark:border-neutral-700 dark:text-neutral-300"
             onClick={onClose}
           >
             Cancel
@@ -342,30 +342,30 @@ function ForwardingModal({ forwarding, onClose, onSave }) {
     if (await onSave(form)) onClose();
   };
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/60 p-4">
-      <form onSubmit={save} className="max-h-[calc(100vh-2rem)] w-full max-w-3xl overflow-y-auto rounded-xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+    <div className="fixed inset-0 z-50 grid place-items-center bg-neutral-950/60 p-4">
+      <form onSubmit={save} className="max-h-[calc(100vh-2rem)] w-full max-w-3xl overflow-y-auto rounded-xl border border-neutral-200 bg-white p-6 shadow-2xl dark:border-neutral-700 dark:bg-neutral-900">
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">NAT gateway</p>
-            <h2 className="mt-1 text-2xl font-semibold text-slate-900 dark:text-slate-100">{forwarding ? "Edit port forwarding" : "Add port forwarding"}</h2>
-            <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">Forward traffic arriving on this server to an IPv4 service behind it.</p>
+            <h2 className="mt-1 text-2xl font-semibold text-neutral-900 dark:text-neutral-100">{forwarding ? "Edit port forwarding" : "Add port forwarding"}</h2>
+            <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">Forward traffic arriving on this server to an IPv4 service behind it.</p>
           </div>
-          <button type="button" onClick={onClose} className="grid h-9 w-9 cursor-pointer place-items-center rounded-full text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"><X size={18} /></button>
+          <button type="button" onClick={onClose} className="grid h-9 w-9 cursor-pointer place-items-center rounded-full text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"><X size={18} /></button>
         </div>
         <div className="mt-6 grid gap-5 md:grid-cols-2">
-          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Protocol<select className={input} value={form.protocol} onChange={(event) => change("protocol", event.target.value)}><option>TCP</option><option>UDP</option><option>TCP / UDP</option></select></label>
-          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Network interface<select className={input} value={form.interface} onChange={(event) => change("interface", event.target.value)}><option>Any</option><option>eth0</option><option>ens3</option><option>enp1s0</option><option>virbr0</option></select></label>
-          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Public/listen address<span className="mt-1 block text-xs font-normal text-slate-500">Use Any for all server addresses.</span><input className={input} value={form.listen_address} onChange={(event) => change("listen_address", event.target.value)} placeholder="Any or 51.161.115.162" /></label>
-          <label className={`text-sm font-medium ${errors.listen_port ? "text-rose-600 dark:text-rose-400" : "text-slate-700 dark:text-slate-300"}`}>Public port<input className={`${input} ${errors.listen_port ? "border-rose-500" : ""}`} value={form.listen_port} onChange={(event) => change("listen_port", event.target.value)} placeholder="2222" />{errors.listen_port && <span className="mt-1 block text-xs font-normal">{errors.listen_port}</span>}</label>
-          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Source restriction<span className="mt-1 block text-xs font-normal text-slate-500">Optional client IP or CIDR.</span><input className={input} value={form.source} onChange={(event) => change("source", event.target.value)} placeholder="Any or 203.0.113.0/24" /></label>
+          <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Protocol<select className={input} value={form.protocol} onChange={(event) => change("protocol", event.target.value)}><option>TCP</option><option>UDP</option><option>TCP / UDP</option></select></label>
+          <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Network interface<select className={input} value={form.interface} onChange={(event) => change("interface", event.target.value)}><option>Any</option><option>eth0</option><option>ens3</option><option>enp1s0</option><option>virbr0</option></select></label>
+          <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Public/listen address<span className="mt-1 block text-xs font-normal text-neutral-500">Use Any for all server addresses.</span><input className={input} value={form.listen_address} onChange={(event) => change("listen_address", event.target.value)} placeholder="Any or 51.161.115.162" /></label>
+          <label className={`text-sm font-medium ${errors.listen_port ? "text-rose-600 dark:text-rose-400" : "text-neutral-700 dark:text-neutral-300"}`}>Public port<input className={`${input} ${errors.listen_port ? "border-rose-500" : ""}`} value={form.listen_port} onChange={(event) => change("listen_port", event.target.value)} placeholder="2222" />{errors.listen_port && <span className="mt-1 block text-xs font-normal">{errors.listen_port}</span>}</label>
+          <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Source restriction<span className="mt-1 block text-xs font-normal text-neutral-500">Optional client IP or CIDR.</span><input className={input} value={form.source} onChange={(event) => change("source", event.target.value)} placeholder="Any or 203.0.113.0/24" /></label>
           <div />
-          <label className={`text-sm font-medium ${errors.target_address ? "text-rose-600 dark:text-rose-400" : "text-slate-700 dark:text-slate-300"}`}>Target host<input className={`${input} ${errors.target_address ? "border-rose-500" : ""}`} value={form.target_address} onChange={(event) => change("target_address", event.target.value)} placeholder="192.168.122.233" />{errors.target_address && <span className="mt-1 block text-xs font-normal">{errors.target_address}</span>}</label>
-          <label className={`text-sm font-medium ${errors.target_port ? "text-rose-600 dark:text-rose-400" : "text-slate-700 dark:text-slate-300"}`}>Target port<input className={`${input} ${errors.target_port ? "border-rose-500" : ""}`} value={form.target_port} onChange={(event) => change("target_port", event.target.value)} placeholder="22" />{errors.target_port && <span className="mt-1 block text-xs font-normal">{errors.target_port}</span>}</label>
-          <label className="text-sm font-medium text-slate-700 dark:text-slate-300 md:col-span-2">Note<input className={input} value={form.note} onChange={(event) => change("note", event.target.value)} placeholder="SSH access to the test VPS" /></label>
+          <label className={`text-sm font-medium ${errors.target_address ? "text-rose-600 dark:text-rose-400" : "text-neutral-700 dark:text-neutral-300"}`}>Target host<input className={`${input} ${errors.target_address ? "border-rose-500" : ""}`} value={form.target_address} onChange={(event) => change("target_address", event.target.value)} placeholder="192.168.122.233" />{errors.target_address && <span className="mt-1 block text-xs font-normal">{errors.target_address}</span>}</label>
+          <label className={`text-sm font-medium ${errors.target_port ? "text-rose-600 dark:text-rose-400" : "text-neutral-700 dark:text-neutral-300"}`}>Target port<input className={`${input} ${errors.target_port ? "border-rose-500" : ""}`} value={form.target_port} onChange={(event) => change("target_port", event.target.value)} placeholder="22" />{errors.target_port && <span className="mt-1 block text-xs font-normal">{errors.target_port}</span>}</label>
+          <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300 md:col-span-2">Note<input className={input} value={form.note} onChange={(event) => change("note", event.target.value)} placeholder="SSH access to the test VPS" /></label>
         </div>
-        <label className="mt-5 flex cursor-pointer items-start gap-3 text-sm text-slate-700 dark:text-slate-300"><input type="checkbox" className="mt-0.5 h-4 w-4 cursor-pointer accent-blue-600" checked={form.enabled} onChange={(event) => change("enabled", event.target.checked)} /><span><span className="block font-medium">Enable forwarding rule</span><span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">The rule is applied immediately after saving.</span></span></label>
+        <label className="mt-5 flex cursor-pointer items-start gap-3 text-sm text-neutral-700 dark:text-neutral-300"><input type="checkbox" className="mt-0.5 h-4 w-4 cursor-pointer accent-blue-600" checked={form.enabled} onChange={(event) => change("enabled", event.target.checked)} /><span><span className="block font-medium">Enable forwarding rule</span><span className="mt-1 block text-xs text-neutral-500 dark:text-neutral-400">The rule is applied immediately after saving.</span></span></label>
         <div className="mt-6 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200"><AlertTriangle size={18} className="mt-0.5 shrink-0" /><span>IP forwarding must be enabled and the target host must route replies through this server. Server Engine will not change the host's default route.</span></div>
-        <div className="mt-6 flex justify-end gap-3"><button type="button" onClick={onClose} className="cursor-pointer rounded-md border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-300">Cancel</button><button className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"><CirclePlus size={16} />{forwarding ? "Save forwarding" : "Add forwarding"}</button></div>
+        <div className="mt-6 flex justify-end gap-3"><button type="button" onClick={onClose} className="cursor-pointer rounded-md border border-neutral-300 px-4 py-2.5 text-sm font-semibold text-neutral-700 dark:border-neutral-700 dark:text-neutral-300">Cancel</button><button className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"><CirclePlus size={16} />{forwarding ? "Save forwarding" : "Add forwarding"}</button></div>
       </form>
     </div>
   );
@@ -374,9 +374,9 @@ function ForwardingModal({ forwarding, onClose, onSave }) {
 function ForwardingTab({ forwardings, backend, onCreate, onEdit, onToggle, onDelete }) {
   return (
     <div className="p-5">
-      <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center"><div><h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Port forwarding</h3><p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500 dark:text-slate-400">Publish a service behind this server by translating an incoming port to an internal IPv4 host and port.</p></div><button type="button" onClick={onCreate} className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"><CirclePlus size={15} />Add forwarding</button></div>
+      <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center"><div><h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Port forwarding</h3><p className="mt-1 max-w-3xl text-sm leading-6 text-neutral-500 dark:text-neutral-400">Publish a service behind this server by translating an incoming port to an internal IPv4 host and port.</p></div><button type="button" onClick={onCreate} className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"><CirclePlus size={15} />Add forwarding</button></div>
       {backend && !backend.forwarding_enabled && <div className="mt-5 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-200"><AlertTriangle size={17} className="mt-0.5 shrink-0" /><span>IP forwarding is disabled on this server. The rule can be saved, but traffic will not reach the target until IPv4 forwarding is enabled.</span></div>}
-      <div className="mt-5 overflow-x-auto"><table className="w-full min-w-[980px] text-left"><thead><tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:text-slate-400"><th className="px-3 py-3">Status</th><th className="px-3 py-3">Public listener</th><th className="px-3 py-3">Target</th><th className="px-3 py-3">Protocol</th><th className="px-3 py-3">Packets</th><th className="px-3 py-3">Note</th><th className="px-3 py-3" /></tr></thead><tbody>{forwardings.map((forwarding) => <tr key={forwarding.id} className={`border-b border-slate-100 dark:border-slate-800 ${!forwarding.enabled ? "opacity-50" : ""}`}><td className="px-3 py-4"><span className={`inline-flex items-center gap-2 text-xs font-semibold ${forwarding.enabled ? "text-emerald-600 dark:text-emerald-400" : "text-slate-500"}`}><span className="h-2 w-2 rounded-full bg-current" />{forwarding.enabled ? "Enabled" : "Disabled"}</span></td><td className="px-3 py-4"><p className="text-sm font-semibold text-slate-800 dark:text-slate-200">{forwarding.listen_address}:{forwarding.listen_port}</p><p className="mt-1 text-xs text-slate-500">{forwarding.interface} · {forwarding.source}</p></td><td className="px-3 py-4 text-sm text-slate-700 dark:text-slate-300">{forwarding.target_address}:{forwarding.target_port}</td><td className="px-3 py-4 text-sm text-slate-600 dark:text-slate-400">{forwarding.protocol}</td><td className="px-3 py-4 text-sm text-slate-600 dark:text-slate-400">{Number(forwarding.states || 0).toLocaleString()}</td><td className="max-w-xs px-3 py-4 text-sm text-slate-600 dark:text-slate-400">{forwarding.note || "—"}</td><td className="px-3 py-4 text-right"><div className="flex justify-end gap-2"><button type="button" onClick={() => onEdit(forwarding)} className="cursor-pointer text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400">Edit</button><button type="button" onClick={() => onToggle(forwarding)} className="cursor-pointer text-sm font-semibold text-slate-600 hover:text-slate-900 dark:text-slate-300">{forwarding.enabled ? "Disable" : "Enable"}</button><button type="button" onClick={() => onDelete(forwarding)} className="cursor-pointer text-sm font-semibold text-rose-600 hover:text-rose-700 dark:text-rose-400">Delete</button></div></td></tr>)}</tbody></table>{forwardings.length === 0 && <div className="grid place-items-center py-16 text-center"><ArrowDownToLine size={30} className="text-slate-400" /><h4 className="mt-4 text-base font-semibold text-slate-900 dark:text-slate-100">No port forwarding rules</h4><p className="mt-2 text-sm text-slate-500 dark:text-slate-400">Add a rule to publish a service behind this server.</p></div>}</div>
+      <div className="mt-5 overflow-x-auto"><table className="w-full min-w-[980px] text-left"><thead><tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400"><th className="px-3 py-3">Status</th><th className="px-3 py-3">Public listener</th><th className="px-3 py-3">Target</th><th className="px-3 py-3">Protocol</th><th className="px-3 py-3">Packets</th><th className="px-3 py-3">Note</th><th className="px-3 py-3" /></tr></thead><tbody>{forwardings.map((forwarding) => <tr key={forwarding.id} className={`border-b border-neutral-100 dark:border-neutral-800 ${!forwarding.enabled ? "opacity-50" : ""}`}><td className="px-3 py-4"><span className={`inline-flex items-center gap-2 text-xs font-semibold ${forwarding.enabled ? "text-emerald-600 dark:text-emerald-400" : "text-neutral-500"}`}><span className="h-2 w-2 rounded-full bg-current" />{forwarding.enabled ? "Enabled" : "Disabled"}</span></td><td className="px-3 py-4"><p className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">{forwarding.listen_address}:{forwarding.listen_port}</p><p className="mt-1 text-xs text-neutral-500">{forwarding.interface} · {forwarding.source}</p></td><td className="px-3 py-4 text-sm text-neutral-700 dark:text-neutral-300">{forwarding.target_address}:{forwarding.target_port}</td><td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">{forwarding.protocol}</td><td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">{Number(forwarding.states || 0).toLocaleString()}</td><td className="max-w-xs px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">{forwarding.note || "—"}</td><td className="px-3 py-4 text-right"><div className="flex justify-end gap-2"><button type="button" onClick={() => onEdit(forwarding)} className="cursor-pointer text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400">Edit</button><button type="button" onClick={() => onToggle(forwarding)} className="cursor-pointer text-sm font-semibold text-neutral-600 hover:text-neutral-900 dark:text-neutral-300">{forwarding.enabled ? "Disable" : "Enable"}</button><button type="button" onClick={() => onDelete(forwarding)} className="cursor-pointer text-sm font-semibold text-rose-600 hover:text-rose-700 dark:text-rose-400">Delete</button></div></td></tr>)}</tbody></table>{forwardings.length === 0 && <div className="grid place-items-center py-16 text-center"><ArrowDownToLine size={30} className="text-neutral-400" /><h4 className="mt-4 text-base font-semibold text-neutral-900 dark:text-neutral-100">No port forwarding rules</h4><p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">Add a rule to publish a service behind this server.</p></div>}</div>
     </div>
   );
 }
@@ -389,7 +389,7 @@ function AliasValuesField({ values, onChange, kind }) {
     onChange([...values, value]);
     setDraft("");
   };
-  return <div className="mt-2 rounded-md border border-slate-300 p-2 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/20 dark:border-slate-700"><div className="flex flex-wrap items-center gap-1.5">{values.map((value) => <span key={value} className="inline-flex items-center gap-1 rounded bg-slate-100 px-2 py-1 font-mono text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-200">{value}<button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => onChange(values.filter((item) => item !== value))} className="cursor-pointer text-slate-400 hover:text-slate-800 dark:hover:text-white">×</button></span>)}<input className="min-w-[12rem] flex-1 border-0 bg-transparent px-1 py-1 text-sm outline-none dark:text-slate-100" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === ",") { event.preventDefault(); add(); } }} placeholder={kind === "Port" ? "80 or 8000-8010, then Enter" : "IP or CIDR, then Enter"} /><button type="button" onClick={add} className="cursor-pointer px-1 text-sm font-semibold text-blue-600 dark:text-blue-400">Add</button></div></div>;
+  return <div className="mt-2 rounded-md border border-neutral-300 p-2 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/20 dark:border-neutral-700"><div className="flex flex-wrap items-center gap-1.5">{values.map((value) => <span key={value} className="inline-flex items-center gap-1 rounded bg-neutral-100 px-2 py-1 font-mono text-xs text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200">{value}<button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => onChange(values.filter((item) => item !== value))} className="cursor-pointer text-neutral-400 hover:text-neutral-800 dark:hover:text-white">×</button></span>)}<input className="min-w-[12rem] flex-1 border-0 bg-transparent px-1 py-1 text-sm outline-none dark:text-neutral-100" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === ",") { event.preventDefault(); add(); } }} placeholder={kind === "Port" ? "80 or 8000-8010, then Enter" : "IP or CIDR, then Enter"} /><button type="button" onClick={add} className="cursor-pointer px-1 text-sm font-semibold text-blue-600 dark:text-blue-400">Add</button></div></div>;
 }
 
 function AliasModal({ alias, onClose, onSave }) {
@@ -403,11 +403,11 @@ function AliasModal({ alias, onClose, onSave }) {
     if (!form.values.length) return setError("Add at least one value.");
     if (await onSave(form)) onClose();
   };
-  return <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/60 p-4"><form onSubmit={save} className="max-h-[calc(100vh-2rem)] w-full max-w-2xl overflow-y-auto rounded-xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Reusable network object</p><h2 className="mt-1 text-2xl font-semibold text-slate-900 dark:text-slate-100">{alias ? "Edit alias" : "Add alias"}</h2><p className="mt-2 text-sm text-slate-500 dark:text-slate-400">Create a named group once, then use it in firewall rule sources, destinations, or ports.</p></div><button type="button" onClick={onClose} className="grid h-9 w-9 cursor-pointer place-items-center rounded-full text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"><X size={18} /></button></div><div className="mt-6 space-y-5"><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Alias name<input className={input} value={form.name} onChange={(event) => change("name", event.target.value)} placeholder="trusted-admins" disabled={Boolean(alias)} /></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Alias type<select className={input} value={form.kind} onChange={(event) => change("kind", event.target.value)} disabled={Boolean(alias)}><option>Address</option><option>Port</option></select></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Values<AliasValuesField values={form.values} onChange={(value) => change("values", value)} kind={form.kind} /></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Note<input className={input} value={form.note} onChange={(event) => change("note", event.target.value)} placeholder="Office and VPN administrator addresses" /></label><label className="flex cursor-pointer items-center gap-3 text-sm text-slate-700 dark:text-slate-300"><input type="checkbox" className="h-4 w-4 cursor-pointer accent-blue-600" checked={form.enabled} onChange={(event) => change("enabled", event.target.checked)} />Use this alias in applied rules</label>{error && <p className="text-sm text-rose-600 dark:text-rose-400">{error}</p>}</div><div className="mt-6 flex justify-end gap-3"><button type="button" onClick={onClose} className="cursor-pointer rounded-md border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-300">Cancel</button><button className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"><CirclePlus size={16} />{alias ? "Save alias" : "Add alias"}</button></div></form></div>;
+  return <div className="fixed inset-0 z-50 grid place-items-center bg-neutral-950/60 p-4"><form onSubmit={save} className="max-h-[calc(100vh-2rem)] w-full max-w-2xl overflow-y-auto rounded-xl border border-neutral-200 bg-white p-6 shadow-2xl dark:border-neutral-700 dark:bg-neutral-900"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Reusable network object</p><h2 className="mt-1 text-2xl font-semibold text-neutral-900 dark:text-neutral-100">{alias ? "Edit alias" : "Add alias"}</h2><p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">Create a named group once, then use it in firewall rule sources, destinations, or ports.</p></div><button type="button" onClick={onClose} className="grid h-9 w-9 cursor-pointer place-items-center rounded-full text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"><X size={18} /></button></div><div className="mt-6 space-y-5"><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Alias name<input className={input} value={form.name} onChange={(event) => change("name", event.target.value)} placeholder="trusted-admins" disabled={Boolean(alias)} /></label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Alias type<select className={input} value={form.kind} onChange={(event) => change("kind", event.target.value)} disabled={Boolean(alias)}><option>Address</option><option>Port</option></select></label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Values<AliasValuesField values={form.values} onChange={(value) => change("values", value)} kind={form.kind} /></label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Note<input className={input} value={form.note} onChange={(event) => change("note", event.target.value)} placeholder="Office and VPN administrator addresses" /></label><label className="flex cursor-pointer items-center gap-3 text-sm text-neutral-700 dark:text-neutral-300"><input type="checkbox" className="h-4 w-4 cursor-pointer accent-blue-600" checked={form.enabled} onChange={(event) => change("enabled", event.target.checked)} />Use this alias in applied rules</label>{error && <p className="text-sm text-rose-600 dark:text-rose-400">{error}</p>}</div><div className="mt-6 flex justify-end gap-3"><button type="button" onClick={onClose} className="cursor-pointer rounded-md border border-neutral-300 px-4 py-2.5 text-sm font-semibold text-neutral-700 dark:border-neutral-700 dark:text-neutral-300">Cancel</button><button className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"><CirclePlus size={16} />{alias ? "Save alias" : "Add alias"}</button></div></form></div>;
 }
 
 function AliasesTab({ aliases, onCreate, onEdit, onToggle, onDelete }) {
-  return <div className="p-5"><div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center"><div><h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Aliases</h3><p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500 dark:text-slate-400">Manage reusable address and port groups. Updating an alias re-applies every firewall rule that uses it.</p></div><button type="button" onClick={onCreate} className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"><CirclePlus size={15} />Add alias</button></div><div className="mt-5 overflow-x-auto"><table className="w-full min-w-[850px] text-left"><thead><tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:text-slate-400"><th className="px-3 py-3">Status</th><th className="px-3 py-3">Name</th><th className="px-3 py-3">Type</th><th className="px-3 py-3">Values</th><th className="px-3 py-3">Note</th><th className="px-3 py-3" /></tr></thead><tbody>{aliases.map((alias) => <tr key={alias.id} className={`border-b border-slate-100 dark:border-slate-800 ${!alias.enabled ? "opacity-50" : ""}`}><td className="px-3 py-4"><span className={`inline-flex items-center gap-2 text-xs font-semibold ${alias.enabled ? "text-emerald-600 dark:text-emerald-400" : "text-slate-500"}`}><span className="h-2 w-2 rounded-full bg-current" />{alias.enabled ? "Enabled" : "Disabled"}</span></td><td className="px-3 py-4 font-mono text-sm font-semibold text-slate-800 dark:text-slate-200">{alias.name}</td><td className="px-3 py-4 text-sm text-slate-600 dark:text-slate-400">{alias.kind}</td><td className="max-w-md px-3 py-4"><div className="flex flex-wrap gap-1">{alias.values.map((value) => <code key={value} className="rounded bg-slate-100 px-1.5 py-1 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-300">{value}</code>)}</div></td><td className="max-w-xs px-3 py-4 text-sm text-slate-600 dark:text-slate-400">{alias.note || "—"}</td><td className="px-3 py-4 text-right"><div className="flex justify-end gap-2"><button type="button" onClick={() => onEdit(alias)} className="cursor-pointer text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400">Edit</button><button type="button" onClick={() => onToggle(alias)} className="cursor-pointer text-sm font-semibold text-slate-600 hover:text-slate-900 dark:text-slate-300">{alias.enabled ? "Disable" : "Enable"}</button><button type="button" onClick={() => onDelete(alias)} className="cursor-pointer text-sm font-semibold text-rose-600 hover:text-rose-700 dark:text-rose-400">Delete</button></div></td></tr>)}</tbody></table>{aliases.length === 0 && <div className="grid place-items-center py-16 text-center"><Network size={30} className="text-slate-400" /><h4 className="mt-4 text-base font-semibold text-slate-900 dark:text-slate-100">No aliases yet</h4><p className="mt-2 text-sm text-slate-500 dark:text-slate-400">Add address groups or port groups to simplify your rules.</p></div>}</div></div>;
+  return <div className="p-5"><div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center"><div><h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Aliases</h3><p className="mt-1 max-w-3xl text-sm leading-6 text-neutral-500 dark:text-neutral-400">Manage reusable address and port groups. Updating an alias re-applies every firewall rule that uses it.</p></div><button type="button" onClick={onCreate} className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"><CirclePlus size={15} />Add alias</button></div><div className="mt-5 overflow-x-auto"><table className="w-full min-w-[850px] text-left"><thead><tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400"><th className="px-3 py-3">Status</th><th className="px-3 py-3">Name</th><th className="px-3 py-3">Type</th><th className="px-3 py-3">Values</th><th className="px-3 py-3">Note</th><th className="px-3 py-3" /></tr></thead><tbody>{aliases.map((alias) => <tr key={alias.id} className={`border-b border-neutral-100 dark:border-neutral-800 ${!alias.enabled ? "opacity-50" : ""}`}><td className="px-3 py-4"><span className={`inline-flex items-center gap-2 text-xs font-semibold ${alias.enabled ? "text-emerald-600 dark:text-emerald-400" : "text-neutral-500"}`}><span className="h-2 w-2 rounded-full bg-current" />{alias.enabled ? "Enabled" : "Disabled"}</span></td><td className="px-3 py-4 font-mono text-sm font-semibold text-neutral-800 dark:text-neutral-200">{alias.name}</td><td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">{alias.kind}</td><td className="max-w-md px-3 py-4"><div className="flex flex-wrap gap-1">{alias.values.map((value) => <code key={value} className="rounded bg-neutral-100 px-1.5 py-1 text-xs text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300">{value}</code>)}</div></td><td className="max-w-xs px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">{alias.note || "—"}</td><td className="px-3 py-4 text-right"><div className="flex justify-end gap-2"><button type="button" onClick={() => onEdit(alias)} className="cursor-pointer text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400">Edit</button><button type="button" onClick={() => onToggle(alias)} className="cursor-pointer text-sm font-semibold text-neutral-600 hover:text-neutral-900 dark:text-neutral-300">{alias.enabled ? "Disable" : "Enable"}</button><button type="button" onClick={() => onDelete(alias)} className="cursor-pointer text-sm font-semibold text-rose-600 hover:text-rose-700 dark:text-rose-400">Delete</button></div></td></tr>)}</tbody></table>{aliases.length === 0 && <div className="grid place-items-center py-16 text-center"><Network size={30} className="text-neutral-400" /><h4 className="mt-4 text-base font-semibold text-neutral-900 dark:text-neutral-100">No aliases yet</h4><p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">Add address groups or port groups to simplify your rules.</p></div>}</div></div>;
 }
 
 function BlockedAddressModal({ entry, onClose, onSave }) {
@@ -419,21 +419,21 @@ function BlockedAddressModal({ entry, onClose, onSave }) {
     if (!form.address.trim()) return setError("IP address or CIDR range is required.");
     if (await onSave({ ...form, expires_at: form.expires_at ? new Date(form.expires_at).toISOString() : null })) onClose();
   };
-  return <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/60 p-4"><form onSubmit={save} className="w-full max-w-xl rounded-xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wide text-rose-600 dark:text-rose-400">Traffic deny list</p><h2 className="mt-1 text-2xl font-semibold text-slate-900 dark:text-slate-100">{entry ? "Edit blocked address" : "Block an address"}</h2><p className="mt-2 text-sm text-slate-500 dark:text-slate-400">Drop new connections from an IP address or CIDR range before other firewall rules are evaluated.</p></div><button type="button" onClick={onClose} className="grid h-9 w-9 cursor-pointer place-items-center rounded-full text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"><X size={18} /></button></div><div className="mt-6 space-y-5"><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">IP address or CIDR range<input className={`${input} ${error ? "border-rose-500" : ""}`} value={form.address} onChange={(event) => { setForm({ ...form, address: event.target.value }); setError(""); }} placeholder="203.0.113.44 or 203.0.113.0/24" />{error && <span className="mt-1 block text-xs font-normal text-rose-600 dark:text-rose-400">{error}</span>}</label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Expires at<span className="mt-1 block text-xs font-normal text-slate-500">Leave empty for a permanent block.</span><input type="datetime-local" className={input} value={form.expires_at} onChange={(event) => setForm({ ...form, expires_at: event.target.value })} /></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Reason<input className={input} value={form.note} onChange={(event) => setForm({ ...form, note: event.target.value })} placeholder="Repeated SSH scans" /></label><label className="flex cursor-pointer items-center gap-3 text-sm text-slate-700 dark:text-slate-300"><input type="checkbox" className="h-4 w-4 cursor-pointer accent-blue-600" checked={form.enabled} onChange={(event) => setForm({ ...form, enabled: event.target.checked })} />Apply this block immediately</label></div><div className="mt-6 flex justify-end gap-3"><button type="button" onClick={onClose} className="cursor-pointer rounded-md border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-300">Cancel</button><button className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-rose-700"><ShieldAlert size={16} />{entry ? "Save block" : "Block address"}</button></div></form></div>;
+  return <div className="fixed inset-0 z-50 grid place-items-center bg-neutral-950/60 p-4"><form onSubmit={save} className="w-full max-w-xl rounded-xl border border-neutral-200 bg-white p-6 shadow-2xl dark:border-neutral-700 dark:bg-neutral-900"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wide text-rose-600 dark:text-rose-400">Traffic deny list</p><h2 className="mt-1 text-2xl font-semibold text-neutral-900 dark:text-neutral-100">{entry ? "Edit blocked address" : "Block an address"}</h2><p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">Drop new connections from an IP address or CIDR range before other firewall rules are evaluated.</p></div><button type="button" onClick={onClose} className="grid h-9 w-9 cursor-pointer place-items-center rounded-full text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"><X size={18} /></button></div><div className="mt-6 space-y-5"><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">IP address or CIDR range<input className={`${input} ${error ? "border-rose-500" : ""}`} value={form.address} onChange={(event) => { setForm({ ...form, address: event.target.value }); setError(""); }} placeholder="203.0.113.44 or 203.0.113.0/24" />{error && <span className="mt-1 block text-xs font-normal text-rose-600 dark:text-rose-400">{error}</span>}</label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Expires at<span className="mt-1 block text-xs font-normal text-neutral-500">Leave empty for a permanent block.</span><input type="datetime-local" className={input} value={form.expires_at} onChange={(event) => setForm({ ...form, expires_at: event.target.value })} /></label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Reason<input className={input} value={form.note} onChange={(event) => setForm({ ...form, note: event.target.value })} placeholder="Repeated SSH scans" /></label><label className="flex cursor-pointer items-center gap-3 text-sm text-neutral-700 dark:text-neutral-300"><input type="checkbox" className="h-4 w-4 cursor-pointer accent-blue-600" checked={form.enabled} onChange={(event) => setForm({ ...form, enabled: event.target.checked })} />Apply this block immediately</label></div><div className="mt-6 flex justify-end gap-3"><button type="button" onClick={onClose} className="cursor-pointer rounded-md border border-neutral-300 px-4 py-2.5 text-sm font-semibold text-neutral-700 dark:border-neutral-700 dark:text-neutral-300">Cancel</button><button className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-rose-700"><ShieldAlert size={16} />{entry ? "Save block" : "Block address"}</button></div></form></div>;
 }
 
 function BlockedAddressesTab({ entries, onCreate, onEdit, onToggle, onDelete }) {
   const [query, setQuery] = React.useState("");
   const visible = entries.filter((entry) => `${entry.address} ${entry.note}`.toLowerCase().includes(query.toLowerCase()));
-  return <div className="p-5"><div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center"><div><h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Blocked addresses</h3><p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500 dark:text-slate-400">Deny hostile IPs or networks at the firewall boundary. Expired entries remain visible for audit but are no longer applied.</p></div><button type="button" onClick={onCreate} className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md bg-rose-600 px-3 py-2 text-sm font-semibold text-white hover:bg-rose-700"><ShieldAlert size={15} />Block address</button></div><label className="mt-5 flex max-w-md items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-slate-400 dark:border-slate-700"><Search size={15} /><input className="w-full bg-transparent text-sm text-slate-900 outline-none dark:text-slate-100" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search blocked addresses" /></label><div className="mt-5 overflow-x-auto"><table className="w-full min-w-[820px] text-left"><thead><tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:text-slate-400"><th className="px-3 py-3">Status</th><th className="px-3 py-3">Address</th><th className="px-3 py-3">Reason</th><th className="px-3 py-3">Expires</th><th className="px-3 py-3">Packets</th><th className="px-3 py-3" /></tr></thead><tbody>{visible.map((entry) => <tr key={entry.id} className={`border-b border-slate-100 dark:border-slate-800 ${!entry.enabled ? "opacity-50" : ""}`}><td className="px-3 py-4"><span className={`inline-flex items-center gap-2 text-xs font-semibold ${entry.enabled ? "text-rose-600 dark:text-rose-400" : "text-slate-500"}`}><span className="h-2 w-2 rounded-full bg-current" />{entry.enabled ? "Blocked" : "Paused"}</span></td><td className="px-3 py-4 font-mono text-sm font-semibold text-slate-800 dark:text-slate-200">{entry.address}</td><td className="max-w-sm px-3 py-4 text-sm text-slate-600 dark:text-slate-400">{entry.note || "—"}</td><td className="px-3 py-4 text-sm text-slate-600 dark:text-slate-400">{entry.expires_at ? new Date(entry.expires_at).toLocaleString() : "Permanent"}</td><td className="px-3 py-4 text-sm text-slate-600 dark:text-slate-400">{Number(entry.states || 0).toLocaleString()}</td><td className="px-3 py-4 text-right"><div className="flex justify-end gap-2"><button type="button" onClick={() => onEdit(entry)} className="cursor-pointer text-sm font-semibold text-blue-600 dark:text-blue-400">Edit</button><button type="button" onClick={() => onToggle(entry)} className="cursor-pointer text-sm font-semibold text-slate-600 dark:text-slate-300">{entry.enabled ? "Pause" : "Enable"}</button><button type="button" onClick={() => onDelete(entry)} className="cursor-pointer text-sm font-semibold text-rose-600 dark:text-rose-400">Remove</button></div></td></tr>)}</tbody></table>{visible.length === 0 && <div className="py-16 text-center text-sm text-slate-500 dark:text-slate-400">No blocked addresses match your search.</div>}</div></div>;
+  return <div className="p-5"><div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center"><div><h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Blocked addresses</h3><p className="mt-1 max-w-3xl text-sm leading-6 text-neutral-500 dark:text-neutral-400">Deny hostile IPs or networks at the firewall boundary. Expired entries remain visible for audit but are no longer applied.</p></div><button type="button" onClick={onCreate} className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md bg-rose-600 px-3 py-2 text-sm font-semibold text-white hover:bg-rose-700"><ShieldAlert size={15} />Block address</button></div><label className="mt-5 flex max-w-md items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-neutral-400 dark:border-neutral-700"><Search size={15} /><input className="w-full bg-transparent text-sm text-neutral-900 outline-none dark:text-neutral-100" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search blocked addresses" /></label><div className="mt-5 overflow-x-auto"><table className="w-full min-w-[820px] text-left"><thead><tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400"><th className="px-3 py-3">Status</th><th className="px-3 py-3">Address</th><th className="px-3 py-3">Reason</th><th className="px-3 py-3">Expires</th><th className="px-3 py-3">Packets</th><th className="px-3 py-3" /></tr></thead><tbody>{visible.map((entry) => <tr key={entry.id} className={`border-b border-neutral-100 dark:border-neutral-800 ${!entry.enabled ? "opacity-50" : ""}`}><td className="px-3 py-4"><span className={`inline-flex items-center gap-2 text-xs font-semibold ${entry.enabled ? "text-rose-600 dark:text-rose-400" : "text-neutral-500"}`}><span className="h-2 w-2 rounded-full bg-current" />{entry.enabled ? "Blocked" : "Paused"}</span></td><td className="px-3 py-4 font-mono text-sm font-semibold text-neutral-800 dark:text-neutral-200">{entry.address}</td><td className="max-w-sm px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">{entry.note || "—"}</td><td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">{entry.expires_at ? new Date(entry.expires_at).toLocaleString() : "Permanent"}</td><td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">{Number(entry.states || 0).toLocaleString()}</td><td className="px-3 py-4 text-right"><div className="flex justify-end gap-2"><button type="button" onClick={() => onEdit(entry)} className="cursor-pointer text-sm font-semibold text-blue-600 dark:text-blue-400">Edit</button><button type="button" onClick={() => onToggle(entry)} className="cursor-pointer text-sm font-semibold text-neutral-600 dark:text-neutral-300">{entry.enabled ? "Pause" : "Enable"}</button><button type="button" onClick={() => onDelete(entry)} className="cursor-pointer text-sm font-semibold text-rose-600 dark:text-rose-400">Remove</button></div></td></tr>)}</tbody></table>{visible.length === 0 && <div className="py-16 text-center text-sm text-neutral-500 dark:text-neutral-400">No blocked addresses match your search.</div>}</div></div>;
 }
 
 function ActivityStat({ icon: Icon, label, value, detail }) {
-  return <div className={panel}><div className="flex items-center gap-3"><Icon size={19} className="text-blue-500" /><div><p className="text-xs text-slate-500 dark:text-slate-400">{label}</p><p className="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">{value}</p></div></div><p className="mt-3 text-xs text-slate-500 dark:text-slate-400">{detail}</p></div>;
+  return <div className={panel}><div className="flex items-center gap-3"><Icon size={19} className="text-blue-500" /><div><p className="text-xs text-neutral-500 dark:text-neutral-400">{label}</p><p className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">{value}</p></div></div><p className="mt-3 text-xs text-neutral-500 dark:text-neutral-400">{detail}</p></div>;
 }
 
 function DdosConfigModal({ value, onChange, onSave, onClose }) {
-  return <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/60 p-4 sm:p-8"><section className="w-full max-w-3xl rounded-xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-900"><div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5 dark:border-slate-800"><div><p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Firewall configuration</p><h2 className="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">DDoS protection</h2><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Set local connection and request limits for this server.</p></div><button type="button" aria-label="Close DDoS configuration" onClick={onClose} className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"><X size={18} /></button></div><form className="space-y-5 p-6" onSubmit={(event) => { event.preventDefault(); onSave(); }}><label className="flex cursor-pointer items-start gap-3 text-sm text-slate-700 dark:text-slate-300"><input type="checkbox" className="mt-1 h-4 w-4 accent-blue-600" checked={value.enabled} onChange={(event) => onChange("enabled", event.target.checked)} /><span><span className="block font-semibold text-slate-900 dark:text-slate-100">Enable local traffic protection</span><span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">Apply limits before requests reach the website runtime.</span></span></label><div className="grid gap-5 md:grid-cols-2"><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Mitigation mode<select className={input} value={value.mode} onChange={(event) => onChange("mode", event.target.value)}><option value="rate-limit">Rate limit</option><option value="challenge">Challenge suspicious clients</option><option value="block">Block over-limit clients</option></select></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Requests per second<input className={input} type="number" min="1" value={value.requestsPerSecond} onChange={(event) => onChange("requestsPerSecond", Number(event.target.value))} /></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Burst allowance<input className={input} type="number" min="1" value={value.burst} onChange={(event) => onChange("burst", Number(event.target.value))} /></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Concurrent connections<input className={input} type="number" min="1" value={value.concurrent} onChange={(event) => onChange("concurrent", Number(event.target.value))} /></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Temporary ban duration<input className={input} value={value.banDuration} onChange={(event) => onChange("banDuration", event.target.value)} placeholder="10m" /></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Trusted proxy networks<textarea className={`${input} min-h-24`} value={value.trustedProxies} onChange={(event) => onChange("trustedProxies", event.target.value)} placeholder="One CIDR range per line" /></label></div><label className="flex cursor-pointer items-start gap-3 text-sm text-slate-700 dark:text-slate-300"><input type="checkbox" className="mt-1 h-4 w-4 accent-blue-600" checked={value.logMitigations} onChange={(event) => onChange("logMitigations", event.target.checked)} /><span><span className="block font-medium">Log mitigation events</span><span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">Keep rate-limit and temporary-block decisions available for review.</span></span></label><div className="flex justify-end gap-3 border-t border-slate-200 pt-5 dark:border-slate-800"><button type="button" onClick={onClose} className="cursor-pointer rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-300">Cancel</button><button type="submit" className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"><Shield size={15} />Save DDoS policy</button></div></form></section></div>;
+  return <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8"><section className="w-full max-w-3xl rounded-xl border border-neutral-200 bg-white shadow-xl dark:border-neutral-700 dark:bg-neutral-900"><div className="flex items-start justify-between gap-4 border-b border-neutral-200 px-6 py-5 dark:border-neutral-800"><div><p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Firewall configuration</p><h2 className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">DDoS protection</h2><p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">Set local connection and request limits for this server.</p></div><button type="button" aria-label="Close DDoS configuration" onClick={onClose} className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"><X size={18} /></button></div><form className="space-y-5 p-6" onSubmit={(event) => { event.preventDefault(); onSave(); }}><label className="flex cursor-pointer items-start gap-3 text-sm text-neutral-700 dark:text-neutral-300"><input type="checkbox" className="mt-1 h-4 w-4 accent-blue-600" checked={value.enabled} onChange={(event) => onChange("enabled", event.target.checked)} /><span><span className="block font-semibold text-neutral-900 dark:text-neutral-100">Enable local traffic protection</span><span className="mt-1 block text-xs text-neutral-500 dark:text-neutral-400">Apply limits before requests reach the website runtime.</span></span></label><div className="grid gap-5 md:grid-cols-2"><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Mitigation mode<select className={input} value={value.mode} onChange={(event) => onChange("mode", event.target.value)}><option value="rate-limit">Rate limit</option><option value="challenge">Challenge suspicious clients</option><option value="block">Block over-limit clients</option></select></label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Requests per second<input className={input} type="number" min="1" value={value.requestsPerSecond} onChange={(event) => onChange("requestsPerSecond", Number(event.target.value))} /></label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Burst allowance<input className={input} type="number" min="1" value={value.burst} onChange={(event) => onChange("burst", Number(event.target.value))} /></label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Concurrent connections<input className={input} type="number" min="1" value={value.concurrent} onChange={(event) => onChange("concurrent", Number(event.target.value))} /></label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Temporary ban duration<input className={input} value={value.banDuration} onChange={(event) => onChange("banDuration", event.target.value)} placeholder="10m" /></label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Trusted proxy networks<textarea className={`${input} min-h-24`} value={value.trustedProxies} onChange={(event) => onChange("trustedProxies", event.target.value)} placeholder="One CIDR range per line" /></label></div><label className="flex cursor-pointer items-start gap-3 text-sm text-neutral-700 dark:text-neutral-300"><input type="checkbox" className="mt-1 h-4 w-4 accent-blue-600" checked={value.logMitigations} onChange={(event) => onChange("logMitigations", event.target.checked)} /><span><span className="block font-medium">Log mitigation events</span><span className="mt-1 block text-xs text-neutral-500 dark:text-neutral-400">Keep rate-limit and temporary-block decisions available for review.</span></span></label><div className="flex justify-end gap-3 border-t border-neutral-200 pt-5 dark:border-neutral-800"><button type="button" onClick={onClose} className="cursor-pointer rounded-md border border-neutral-300 px-4 py-2 text-sm font-semibold text-neutral-700 dark:border-neutral-700 dark:text-neutral-300">Cancel</button><button type="submit" className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"><Shield size={15} />Save DDoS policy</button></div></form></section></div>;
 }
 
 function TrafficActivityTab({ data, loading, onRefresh, rules, forwardings, blockedAddresses }) {
@@ -473,10 +473,10 @@ function TrafficActivityTab({ data, loading, onRefresh, rules, forwardings, bloc
     <div className="p-5">
       <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
         <div>
-          <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+          <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">
             Traffic activity
           </h3>
-          <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500 dark:text-slate-400">
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-neutral-500 dark:text-neutral-400">
             Live packet counters from the firewall, blocked-address list, and port forwarding rules.
           </p>
         </div>
@@ -484,14 +484,14 @@ function TrafficActivityTab({ data, loading, onRefresh, rules, forwardings, bloc
           type="button"
           onClick={onRefresh}
           disabled={loading}
-          className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 disabled:cursor-wait disabled:opacity-60 dark:border-slate-700 dark:text-slate-300"
+          className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 disabled:cursor-wait disabled:opacity-60 dark:border-neutral-700 dark:text-neutral-300"
         >
           <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
           Refresh counters
         </button>
       </div>
       {data?.last_apply && (
-        <p className="mt-4 text-xs text-slate-500 dark:text-slate-400">
+        <p className="mt-4 text-xs text-neutral-500 dark:text-neutral-400">
           Counters since the last policy apply: {new Date(data.last_apply).toLocaleString()}
         </p>
       )}
@@ -513,13 +513,13 @@ function TrafficActivityTab({ data, loading, onRefresh, rules, forwardings, bloc
       )}
       {loading && !data ? (
         <div className="mt-5 space-y-3">
-          {[1, 2, 3, 4].map((item) => <div key={item} className="h-14 animate-pulse rounded-md bg-slate-100 dark:bg-slate-800" />)}
+          {[1, 2, 3, 4].map((item) => <div key={item} className="h-14 animate-pulse rounded-md bg-neutral-100 dark:bg-neutral-800" />)}
         </div>
       ) : (
         <div className="mt-5 overflow-x-auto">
           <table className="w-full min-w-[850px] text-left">
             <thead>
-              <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:text-slate-400">
+              <tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
                 <th className="px-3 py-3">Type</th>
                 <th className="px-3 py-3">Source/rule</th>
                 <th className="px-3 py-3">Match</th>
@@ -530,19 +530,19 @@ function TrafficActivityTab({ data, loading, onRefresh, rules, forwardings, bloc
             </thead>
             <tbody>
               {entries.map((entry) => (
-                <tr key={`${entry.type}-${entry.id}`} className="border-b border-slate-100 dark:border-slate-800">
-                  <td className="px-3 py-4 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{entry.type}</td>
-                  <td className="px-3 py-4 font-mono text-sm text-slate-800 dark:text-slate-200">{entry.name}</td>
-                  <td className="px-3 py-4 text-sm text-slate-600 dark:text-slate-400">{entry.match}</td>
+                <tr key={`${entry.type}-${entry.id}`} className="border-b border-neutral-100 dark:border-neutral-800">
+                  <td className="px-3 py-4 text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">{entry.type}</td>
+                  <td className="px-3 py-4 font-mono text-sm text-neutral-800 dark:text-neutral-200">{entry.name}</td>
+                  <td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">{entry.match}</td>
                   <td className={`px-3 py-4 text-sm font-semibold ${["Deny", "Reject", "Drop"].includes(entry.action) ? "text-rose-600 dark:text-rose-400" : entry.action === "Forward" ? "text-blue-600 dark:text-blue-400" : "text-emerald-600 dark:text-emerald-400"}`}>{entry.action}</td>
-                  <td className="px-3 py-4 text-sm font-semibold text-slate-800 dark:text-slate-200">{Number(entry.packets || 0).toLocaleString()}</td>
-                  <td className="max-w-sm px-3 py-4 text-sm text-slate-500 dark:text-slate-400">{entry.note || "—"}</td>
+                  <td className="px-3 py-4 text-sm font-semibold text-neutral-800 dark:text-neutral-200">{Number(entry.packets || 0).toLocaleString()}</td>
+                  <td className="max-w-sm px-3 py-4 text-sm text-neutral-500 dark:text-neutral-400">{entry.note || "—"}</td>
                 </tr>
               ))}
             </tbody>
           </table>
           {data && entries.length === 0 && (
-            <div className="py-16 text-center text-sm text-slate-500 dark:text-slate-400">
+            <div className="py-16 text-center text-sm text-neutral-500 dark:text-neutral-400">
               No firewall rules, forwarding rules, or blocked addresses have been configured yet.
             </div>
           )}
@@ -782,24 +782,24 @@ export default function FirewallPage() {
           <p className="text-sm font-medium text-blue-600 dark:text-blue-400">
             Network security
           </p>
-          <h2 className="mt-1 text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
+          <h2 className="mt-1 text-3xl font-bold tracking-tight text-neutral-900 dark:text-neutral-100">
             Firewall
           </h2>
-          <p className="mt-2 max-w-3xl text-base leading-7 text-slate-500 dark:text-slate-400">
+          <p className="mt-2 max-w-3xl text-base leading-7 text-neutral-500 dark:text-neutral-400">
             Control inbound access, service exposure, trusted networks, and
             traffic decisions for this server.
           </p>
         </div>
         <div className="flex gap-3">
-          <button type="button" className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800" onClick={() => { window.location.href = "/application-shield"; }}>
+          <button type="button" className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-4 py-2.5 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800" onClick={() => { window.location.href = "/application-shield"; }}>
             <ShieldAlert size={16} />
             Configure WAF
           </button>
-          <button type="button" className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800" onClick={() => setDdosModal(true)}>
+          <button type="button" className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-4 py-2.5 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800" onClick={() => setDdosModal(true)}>
             <Shield size={16} />
             Configure DDoS
           </button>
-          <button onClick={reloadPolicy} disabled={loading || !backend?.available} className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-300 disabled:cursor-not-allowed disabled:opacity-50">
+          <button onClick={reloadPolicy} disabled={loading || !backend?.available} className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-4 py-2.5 text-sm font-semibold text-neutral-700 dark:border-neutral-700 dark:text-neutral-300 disabled:cursor-not-allowed disabled:opacity-50">
             <RefreshCw size={16} />
             Apply rules
           </button>
@@ -817,7 +817,7 @@ export default function FirewallPage() {
           <div className="flex items-center gap-3">
             <Shield className="text-emerald-500" size={20} />
             <span>
-              <small className="block text-xs text-slate-500 dark:text-slate-400">
+              <small className="block text-xs text-neutral-500 dark:text-neutral-400">
                 Firewall status
               </small>
               <strong className="mt-1 block text-xl text-emerald-600 dark:text-emerald-400">
@@ -825,7 +825,7 @@ export default function FirewallPage() {
               </strong>
             </span>
           </div>
-          <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+          <p className="mt-3 text-xs text-neutral-500 dark:text-neutral-400">
             Policy loaded and enforcing
           </p>
         </div>
@@ -833,15 +833,15 @@ export default function FirewallPage() {
           <div className="flex items-center gap-3">
             <Network className="text-blue-500" size={20} />
             <span>
-              <small className="block text-xs text-slate-500 dark:text-slate-400">
+              <small className="block text-xs text-neutral-500 dark:text-neutral-400">
                 Active rules
               </small>
-              <strong className="mt-1 block text-xl text-slate-900 dark:text-slate-100">
+              <strong className="mt-1 block text-xl text-neutral-900 dark:text-neutral-100">
                 {rules.filter((rule) => rule.enabled).length}
               </strong>
             </span>
           </div>
-          <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+          <p className="mt-3 text-xs text-neutral-500 dark:text-neutral-400">
             Across WAN and LAN
           </p>
         </div>
@@ -849,15 +849,15 @@ export default function FirewallPage() {
           <div className="flex items-center gap-3">
             <ShieldAlert className="text-amber-500" size={20} />
             <span>
-              <small className="block text-xs text-slate-500 dark:text-slate-400">
+              <small className="block text-xs text-neutral-500 dark:text-neutral-400">
                 Blocked states
               </small>
-              <strong className="mt-1 block text-xl text-slate-900 dark:text-slate-100">
+              <strong className="mt-1 block text-xl text-neutral-900 dark:text-neutral-100">
                 {blockedStates.toLocaleString()}
               </strong>
             </span>
           </div>
-          <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+          <p className="mt-3 text-xs text-neutral-500 dark:text-neutral-400">
             Since the last policy reload
           </p>
         </div>
@@ -865,15 +865,15 @@ export default function FirewallPage() {
           <div className="flex items-center gap-3">
             <LockKeyhole className="text-violet-500" size={20} />
             <span>
-              <small className="block text-xs text-slate-500 dark:text-slate-400">
+              <small className="block text-xs text-neutral-500 dark:text-neutral-400">
                 Management access
               </small>
-              <strong className="mt-1 block text-xl text-slate-900 dark:text-slate-100">
+              <strong className="mt-1 block text-xl text-neutral-900 dark:text-neutral-100">
                 Restricted
               </strong>
             </span>
           </div>
-          <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+          <p className="mt-3 text-xs text-neutral-500 dark:text-neutral-400">
             Trusted network rule enabled
           </p>
         </div>
@@ -889,14 +889,14 @@ export default function FirewallPage() {
           </div>
         </div>
       )}
-      <section className="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <div className="border-b border-slate-200 px-5 pt-5 dark:border-slate-800">
+      <section className="rounded-xl border border-neutral-200 bg-white shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
+        <div className="border-b border-neutral-200 px-5 pt-5 dark:border-neutral-800">
           <div className="flex gap-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {tabs.map(([id, label]) => (
               <button
                 key={id}
                 onClick={() => setTab(id)}
-                className={`whitespace-nowrap border-b-2 px-4 pb-3 text-sm font-semibold ${tab === id ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"}`}
+                className={`whitespace-nowrap border-b-2 px-4 pb-3 text-sm font-semibold ${tab === id ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200"}`}
               >
                 {label}
               </button>
@@ -906,41 +906,41 @@ export default function FirewallPage() {
         {tab === "waf" ? (
           <div className="space-y-6 p-5">
             <div>
-              <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">ModSecurity WAF</h3>
-              <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500 dark:text-slate-400">Inspect and tune OWASP Core Rule Set protection for websites behind Nginx or Apache. Start in detection mode, review events, then move to blocking after false positives are resolved.</p>
+              <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">ModSecurity WAF</h3>
+              <p className="mt-1 max-w-3xl text-sm leading-6 text-neutral-500 dark:text-neutral-400">Inspect and tune OWASP Core Rule Set protection for websites behind Nginx or Apache. Start in detection mode, review events, then move to blocking after false positives are resolved.</p>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Engine mode<select className="mt-1.5 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" value={waf.engine} onChange={(event) => updateWaf("engine", event.target.value)}><option value="Off">Off</option><option value="DetectionOnly">Detection only</option><option value="On">Blocking</option></select></label>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">CRS paranoia level<select className="mt-1.5 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" value={waf.paranoia} onChange={(event) => updateWaf("paranoia", Number(event.target.value))}><option value="1">1 · Baseline</option><option value="2">2 · Hardened</option><option value="3">3 · Strict</option><option value="4">4 · Maximum</option></select></label>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Inbound anomaly threshold<input className="mt-1.5 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" type="number" min="1" value={waf.anomaly} onChange={(event) => updateWaf("anomaly", Number(event.target.value))} /></label>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Request body limit (bytes)<input className="mt-1.5 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" type="number" min="1024" value={waf.requestBodyLimit} onChange={(event) => updateWaf("requestBodyLimit", Number(event.target.value))} /></label>
+              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Engine mode<select className="mt-1.5 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100" value={waf.engine} onChange={(event) => updateWaf("engine", event.target.value)}><option value="Off">Off</option><option value="DetectionOnly">Detection only</option><option value="On">Blocking</option></select></label>
+              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">CRS paranoia level<select className="mt-1.5 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100" value={waf.paranoia} onChange={(event) => updateWaf("paranoia", Number(event.target.value))}><option value="1">1 · Baseline</option><option value="2">2 · Hardened</option><option value="3">3 · Strict</option><option value="4">4 · Maximum</option></select></label>
+              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Inbound anomaly threshold<input className="mt-1.5 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100" type="number" min="1" value={waf.anomaly} onChange={(event) => updateWaf("anomaly", Number(event.target.value))} /></label>
+              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Request body limit (bytes)<input className="mt-1.5 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100" type="number" min="1024" value={waf.requestBodyLimit} onChange={(event) => updateWaf("requestBodyLimit", Number(event.target.value))} /></label>
             </div>
             <div className="space-y-3">
-              <label className="flex cursor-pointer items-start gap-3"><input type="checkbox" className="mt-1 h-4 w-4 accent-blue-600" checked={waf.crs} onChange={(event) => updateWaf("crs", event.target.checked)} /><span><span className="block text-sm font-medium text-slate-900 dark:text-slate-100">Enable OWASP Core Rule Set</span><span className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">Use the maintained generic attack-detection rules for SQL injection, XSS, protocol abuse, scanners, and common exploit patterns.</span></span></label>
-              <label className="flex cursor-pointer items-start gap-3"><input type="checkbox" className="mt-1 h-4 w-4 accent-blue-600" checked={waf.audit} onChange={(event) => updateWaf("audit", event.target.checked)} /><span><span className="block text-sm font-medium text-slate-900 dark:text-slate-100">Audit suspicious transactions</span><span className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">Keep request evidence for incident review without logging every successful request.</span></span></label>
-              <label className="flex cursor-pointer items-start gap-3"><input type="checkbox" className="mt-1 h-4 w-4 accent-blue-600" checked={waf.nginx} onChange={(event) => updateWaf("nginx", event.target.checked)} /><span className="text-sm font-medium text-slate-900 dark:text-slate-100">Protect Nginx websites</span></label>
-              <label className="flex cursor-pointer items-start gap-3"><input type="checkbox" className="mt-1 h-4 w-4 accent-blue-600" checked={waf.apache} onChange={(event) => updateWaf("apache", event.target.checked)} /><span className="text-sm font-medium text-slate-900 dark:text-slate-100">Protect Apache websites</span></label>
+              <label className="flex cursor-pointer items-start gap-3"><input type="checkbox" className="mt-1 h-4 w-4 accent-blue-600" checked={waf.crs} onChange={(event) => updateWaf("crs", event.target.checked)} /><span><span className="block text-sm font-medium text-neutral-900 dark:text-neutral-100">Enable OWASP Core Rule Set</span><span className="mt-1 block text-xs leading-5 text-neutral-500 dark:text-neutral-400">Use the maintained generic attack-detection rules for SQL injection, XSS, protocol abuse, scanners, and common exploit patterns.</span></span></label>
+              <label className="flex cursor-pointer items-start gap-3"><input type="checkbox" className="mt-1 h-4 w-4 accent-blue-600" checked={waf.audit} onChange={(event) => updateWaf("audit", event.target.checked)} /><span><span className="block text-sm font-medium text-neutral-900 dark:text-neutral-100">Audit suspicious transactions</span><span className="mt-1 block text-xs leading-5 text-neutral-500 dark:text-neutral-400">Keep request evidence for incident review without logging every successful request.</span></span></label>
+              <label className="flex cursor-pointer items-start gap-3"><input type="checkbox" className="mt-1 h-4 w-4 accent-blue-600" checked={waf.nginx} onChange={(event) => updateWaf("nginx", event.target.checked)} /><span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">Protect Nginx websites</span></label>
+              <label className="flex cursor-pointer items-start gap-3"><input type="checkbox" className="mt-1 h-4 w-4 accent-blue-600" checked={waf.apache} onChange={(event) => updateWaf("apache", event.target.checked)} /><span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">Protect Apache websites</span></label>
             </div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Rule exclusions<textarea className="mt-1.5 min-h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" value={waf.exclusions} onChange={(event) => updateWaf("exclusions", event.target.value)} placeholder="One rule ID or website path per line" /></label>
-            <div className="flex items-center justify-between gap-4"><p className="text-sm text-slate-500 dark:text-slate-400">{wafMessage || "Review detection events before enabling blocking in production."}</p><button type="button" className="inline-flex cursor-pointer items-center justify-center rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700" onClick={saveWaf}>Save WAF policy</button></div>
+            <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Rule exclusions<textarea className="mt-1.5 min-h-24 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100" value={waf.exclusions} onChange={(event) => updateWaf("exclusions", event.target.value)} placeholder="One rule ID or website path per line" /></label>
+            <div className="flex items-center justify-between gap-4"><p className="text-sm text-neutral-500 dark:text-neutral-400">{wafMessage || "Review detection events before enabling blocking in production."}</p><button type="button" className="inline-flex cursor-pointer items-center justify-center rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700" onClick={saveWaf}>Save WAF policy</button></div>
           </div>
         ) : tab === "ddos" ? (
           <div className="space-y-6 p-5">
             <div>
-              <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">DDoS and traffic protection</h3>
-              <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500 dark:text-slate-400">Protect the origin from connection floods and application-layer bursts. This controls the local server; upstream or provider-level volumetric attacks still require edge protection.</p>
+              <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">DDoS and traffic protection</h3>
+              <p className="mt-1 max-w-3xl text-sm leading-6 text-neutral-500 dark:text-neutral-400">Protect the origin from connection floods and application-layer bursts. This controls the local server; upstream or provider-level volumetric attacks still require edge protection.</p>
             </div>
-            <label className="flex cursor-pointer items-start gap-3"><input type="checkbox" className="mt-1 h-4 w-4 accent-blue-600" checked={ddos.enabled} onChange={(event) => updateDdos("enabled", event.target.checked)} /><span><span className="block text-sm font-medium text-slate-900 dark:text-slate-100">Enable origin traffic protection</span><span className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">Apply limits before requests reach the website runtime.</span></span></label>
+            <label className="flex cursor-pointer items-start gap-3"><input type="checkbox" className="mt-1 h-4 w-4 accent-blue-600" checked={ddos.enabled} onChange={(event) => updateDdos("enabled", event.target.checked)} /><span><span className="block text-sm font-medium text-neutral-900 dark:text-neutral-100">Enable origin traffic protection</span><span className="mt-1 block text-xs leading-5 text-neutral-500 dark:text-neutral-400">Apply limits before requests reach the website runtime.</span></span></label>
             <div className="grid gap-4 md:grid-cols-2">
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Mitigation mode<select className="mt-1.5 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" value={ddos.mode} onChange={(event) => updateDdos("mode", event.target.value)}><option value="rate-limit">Rate limit</option><option value="challenge">Challenge suspicious clients</option><option value="block">Block over-limit clients</option></select></label>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Requests per second<input className="mt-1.5 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" type="number" min="1" value={ddos.requestsPerSecond} onChange={(event) => updateDdos("requestsPerSecond", Number(event.target.value))} /></label>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Burst allowance<input className="mt-1.5 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" type="number" min="1" value={ddos.burst} onChange={(event) => updateDdos("burst", Number(event.target.value))} /></label>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Concurrent connections<input className="mt-1.5 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" type="number" min="1" value={ddos.concurrent} onChange={(event) => updateDdos("concurrent", Number(event.target.value))} /></label>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Temporary ban duration<input className="mt-1.5 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" value={ddos.banDuration} onChange={(event) => updateDdos("banDuration", event.target.value)} /></label>
+              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Mitigation mode<select className="mt-1.5 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100" value={ddos.mode} onChange={(event) => updateDdos("mode", event.target.value)}><option value="rate-limit">Rate limit</option><option value="challenge">Challenge suspicious clients</option><option value="block">Block over-limit clients</option></select></label>
+              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Requests per second<input className="mt-1.5 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100" type="number" min="1" value={ddos.requestsPerSecond} onChange={(event) => updateDdos("requestsPerSecond", Number(event.target.value))} /></label>
+              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Burst allowance<input className="mt-1.5 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100" type="number" min="1" value={ddos.burst} onChange={(event) => updateDdos("burst", Number(event.target.value))} /></label>
+              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Concurrent connections<input className="mt-1.5 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100" type="number" min="1" value={ddos.concurrent} onChange={(event) => updateDdos("concurrent", Number(event.target.value))} /></label>
+              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Temporary ban duration<input className="mt-1.5 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100" value={ddos.banDuration} onChange={(event) => updateDdos("banDuration", event.target.value)} /></label>
             </div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Trusted proxy networks<textarea className="mt-1.5 min-h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" value={ddos.trustedProxies} onChange={(event) => updateDdos("trustedProxies", event.target.value)} placeholder="One CIDR range per line" /></label>
-            <label className="flex cursor-pointer items-start gap-3"><input type="checkbox" className="mt-1 h-4 w-4 accent-blue-600" checked={ddos.logMitigations} onChange={(event) => updateDdos("logMitigations", event.target.checked)} /><span><span className="block text-sm font-medium text-slate-900 dark:text-slate-100">Log mitigation events</span><span className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">Record rate-limit, challenge, and temporary-ban decisions for review.</span></span></label>
-            <div className="flex items-center justify-between gap-4"><p className="text-sm text-slate-500 dark:text-slate-400">{ddosMessage || "Provider-level volumetric DDoS protection must be configured at the hosting or CDN edge."}</p><button type="button" className="inline-flex cursor-pointer items-center justify-center rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700" onClick={saveDdos}>Save DDoS policy</button></div>
+            <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Trusted proxy networks<textarea className="mt-1.5 min-h-24 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100" value={ddos.trustedProxies} onChange={(event) => updateDdos("trustedProxies", event.target.value)} placeholder="One CIDR range per line" /></label>
+            <label className="flex cursor-pointer items-start gap-3"><input type="checkbox" className="mt-1 h-4 w-4 accent-blue-600" checked={ddos.logMitigations} onChange={(event) => updateDdos("logMitigations", event.target.checked)} /><span><span className="block text-sm font-medium text-neutral-900 dark:text-neutral-100">Log mitigation events</span><span className="mt-1 block text-xs leading-5 text-neutral-500 dark:text-neutral-400">Record rate-limit, challenge, and temporary-ban decisions for review.</span></span></label>
+            <div className="flex items-center justify-between gap-4"><p className="text-sm text-neutral-500 dark:text-neutral-400">{ddosMessage || "Provider-level volumetric DDoS protection must be configured at the hosting or CDN edge."}</p><button type="button" className="inline-flex cursor-pointer items-center justify-center rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700" onClick={saveDdos}>Save DDoS policy</button></div>
           </div>
         ) : tab === "forwarding" ? (
           <ForwardingTab forwardings={forwardings} backend={backend} onCreate={() => setForwardingModal({})} onEdit={setForwardingModal} onToggle={toggleForwarding} onDelete={deleteForwarding} />
@@ -961,25 +961,25 @@ export default function FirewallPage() {
           <div className="p-5">
             <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
               <div>
-                <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+                <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">
                   Inbound rules
                 </h3>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
                   Rules are ordered from highest priority to lowest priority.
                 </p>
               </div>
               <div className="flex flex-col gap-3 sm:flex-row">
-                <label className="flex min-w-64 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2.5 text-slate-400 dark:border-slate-700 dark:bg-slate-950">
+                <label className="flex min-w-64 items-center gap-2 rounded-md border border-neutral-300 bg-white px-3 py-2.5 text-neutral-400 dark:border-neutral-700 dark:bg-neutral-950">
                   <Search size={16} />
                   <input
-                    className="w-full bg-transparent text-sm text-slate-900 outline-none dark:text-slate-100"
+                    className="w-full bg-transparent text-sm text-neutral-900 outline-none dark:text-neutral-100"
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
                     placeholder="Search rules"
                   />
                 </label>
                 <select
-                  className="rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300"
+                  className="rounded-md border border-neutral-300 bg-white px-3 py-2.5 text-sm text-neutral-700 outline-none dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-300"
                   value={action}
                   onChange={(event) => setAction(event.target.value)}
                 >
@@ -993,7 +993,7 @@ export default function FirewallPage() {
             <div className="mt-5 overflow-x-auto">
               <table className="w-full min-w-[1100px] border-collapse text-left">
                 <thead>
-                  <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:text-slate-400">
+                  <tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
                     <th className="px-3 py-3 font-semibold">Order</th>
                     <th className="px-3 py-3 font-semibold">Decision</th>
                     <th className="px-3 py-3 font-semibold">Source</th>
@@ -1008,9 +1008,9 @@ export default function FirewallPage() {
                   {visible.map((rule, index) => (
                     <tr
                       key={rule.id}
-                      className={`border-b border-slate-100 dark:border-slate-800 ${!rule.enabled ? "opacity-50" : ""}`}
+                      className={`border-b border-neutral-100 dark:border-neutral-800 ${!rule.enabled ? "opacity-50" : ""}`}
                     >
-                      <td className="px-3 py-4 text-sm font-semibold text-slate-500 dark:text-slate-400">
+                      <td className="px-3 py-4 text-sm font-semibold text-neutral-500 dark:text-neutral-400">
                         {index + 1}
                       </td>
                       <td className="px-3 py-4">
@@ -1019,33 +1019,33 @@ export default function FirewallPage() {
                         >
                           <span className="h-2 w-2 rounded-full bg-current" />
                           {rule.action}
-                          <small className="font-normal text-slate-400">
+                          <small className="font-normal text-neutral-400">
                             {rule.protocol}
                           </small>
                         </span>
                       </td>
-                      <td className="px-3 py-4 text-sm text-slate-700 dark:text-slate-300">
+                      <td className="px-3 py-4 text-sm text-neutral-700 dark:text-neutral-300">
                         {rule.source}
                       </td>
-                      <td className="px-3 py-4 text-sm text-slate-700 dark:text-slate-300">
+                      <td className="px-3 py-4 text-sm text-neutral-700 dark:text-neutral-300">
                         {rule.destination}
                       </td>
                       <td className="px-3 py-4">
-                        <strong className="block text-sm text-slate-800 dark:text-slate-200">
+                        <strong className="block text-sm text-neutral-800 dark:text-neutral-200">
                           {rule.service}
                         </strong>
-                        <small className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+                        <small className="mt-1 block text-xs text-neutral-500 dark:text-neutral-400">
                           {rule.port}
                         </small>
                       </td>
-                      <td className="px-3 py-4 text-sm text-slate-600 dark:text-slate-400">
+                      <td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">
                         {rule.interface}
                       </td>
-                      <td className="px-3 py-4 text-sm text-slate-600 dark:text-slate-400">
+                      <td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">
                         {rule.states.toLocaleString()}
                       </td>
                       <td data-firewall-menu className="px-3 py-4 text-right">
-                        <button onClick={(event) => toggleRuleMenu(event, rule.id)} className="cursor-pointer rounded-md p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">
+                        <button onClick={(event) => toggleRuleMenu(event, rule.id)} className="cursor-pointer rounded-md p-2 text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800">
                           <MoreHorizontal size={17} />
                         </button>
                       </td>
@@ -1055,11 +1055,11 @@ export default function FirewallPage() {
               </table>
               {visible.length === 0 && (
                 <div className="grid place-items-center py-16 text-center">
-                  <Shield size={30} className="text-slate-400" />
-                  <h4 className="mt-4 text-base font-semibold text-slate-900 dark:text-slate-100">
+                  <Shield size={30} className="text-neutral-400" />
+                  <h4 className="mt-4 text-base font-semibold text-neutral-900 dark:text-neutral-100">
                     No rules match
                   </h4>
-                  <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                  <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
                     Try a different action or search term.
                   </p>
                 </div>
@@ -1068,15 +1068,15 @@ export default function FirewallPage() {
           </div>
         ) : (
           <div className="grid min-h-80 place-items-center p-8 text-center">
-            <Globe2 size={30} className="text-slate-400" />
-            <h3 className="mt-4 text-base font-semibold text-slate-900 dark:text-slate-100">
+            <Globe2 size={30} className="text-neutral-400" />
+            <h3 className="mt-4 text-base font-semibold text-neutral-900 dark:text-neutral-100">
               {tabs.find((item) => item[0] === tab)?.[1]}
             </h3>
-            <p className="mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">
+            <p className="mt-2 max-w-md text-sm leading-6 text-neutral-500 dark:text-neutral-400">
               This workspace is ready for port forwards, reusable address and
               port aliases, blocked address review, and traffic states.
             </p>
-            <button className="mt-5 inline-flex items-center gap-2 rounded-md border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-300">
+            <button className="mt-5 inline-flex items-center gap-2 rounded-md border border-neutral-300 px-4 py-2.5 text-sm font-semibold text-neutral-700 dark:border-neutral-700 dark:text-neutral-300">
               <ChevronDown size={15} />
               Configure section
             </button>
@@ -1086,9 +1086,9 @@ export default function FirewallPage() {
       {menu && menuPosition && (() => {
         const rule = rules.find((item) => item.id === menu);
         if (!rule) return null;
-        return <div data-firewall-menu className="fixed z-[60] w-44 rounded-md border border-slate-200 bg-white py-1 text-left shadow-lg dark:border-slate-700 dark:bg-slate-900" style={menuPosition}>
-          <button className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800" onClick={() => { setModal(rule); setMenu(null); setMenuPosition(null); }}><Edit3 size={15} />Edit rule</button>
-          <button className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800" onClick={() => toggleRule(rule)}><CheckCircle2 size={15} />{rule.enabled ? "Disable rule" : "Enable rule"}</button>
+        return <div data-firewall-menu className="fixed z-[60] w-44 rounded-md border border-neutral-200 bg-white py-1 text-left shadow-lg dark:border-neutral-700 dark:bg-neutral-900" style={menuPosition}>
+          <button className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800" onClick={() => { setModal(rule); setMenu(null); setMenuPosition(null); }}><Edit3 size={15} />Edit rule</button>
+          <button className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800" onClick={() => toggleRule(rule)}><CheckCircle2 size={15} />{rule.enabled ? "Disable rule" : "Enable rule"}</button>
           <button className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/30" onClick={() => deleteRule(rule)}><Trash2 size={15} />Delete rule</button>
         </div>;
       })()}

@@ -14,9 +14,30 @@ from pathlib import Path
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.auth import SESSION_COOKIE
-from app.services.service_runtime import composer_path, ensure_composer_launcher, ensure_php_terminal_launcher, service_root
+from app.services.job_service import job_store
+from app.services.service_runtime import composer_path, ensure_composer_launcher, ensure_php_terminal_launcher, prepare_mysql_runtime, service_root
 
 router = APIRouter(prefix="/api/v1/terminal", tags=["terminal"])
+
+
+def _audit_terminal(websocket: WebSocket, user: dict, action: str, target: str, detail: str, status: str = "info"):
+    """Record terminal lifecycle events without ever recording shell input.
+
+    Terminal input can contain passwords, API keys, and private data, so only
+    the connection kind and safe target are retained in the activity stream.
+    """
+    event = websocket.app.state.auth_service.store.record_activity(
+        "access",
+        action,
+        user.get("username", "unknown"),
+        target,
+        detail,
+        status,
+        metadata={"Terminal kind": target.split(":", 1)[0]},
+        actor_user_id=user.get("id"),
+        source_ip=websocket.client.host if websocket.client else None,
+    )
+    job_store.publish({"type": "activity", "event": event})
 
 
 def resize(fd: int, cols: int, rows: int):
@@ -32,6 +53,14 @@ def local_runtime_environment() -> dict[str, str]:
     """Expose installed isolated runtimes to the local management shell."""
     environment = os.environ.copy()
     tool_paths = []
+    mysql_client = service_root("mysql") / "bin/mysql"
+    if mysql_client.exists():
+        try:
+            environment.update(prepare_mysql_runtime(service_root("mysql")))
+        except Exception:
+            # Keep the terminal available even if optional MySQL libraries cannot
+            # be staged; the client will report its own dependency error.
+            pass
     composer = composer_path()
     ensure_composer_launcher()
     composer = composer_path()
@@ -122,6 +151,17 @@ async def terminal_socket(websocket: WebSocket):
         await websocket.send_text("\r\n\x1b[31mSSH client is not installed in the Server Engine container. Restart the core container after updating Docker dependencies.\x1b[0m\r\n")
         await websocket.close(code=1011, reason="SSH client unavailable")
         return
+
+    if kind == "remote":
+        safe_target = f"remote:{username}@{host}:{max(1, min(port, 65535))}"
+        target_detail = f"Opened an authenticated SSH terminal for {username}@{host}."
+    elif kind == "docker":
+        safe_target = f"docker:{container_id}"
+        target_detail = f"Opened an interactive terminal for Docker container {container_id}."
+    else:
+        safe_target = "local:server-engine"
+        target_detail = "Opened an interactive local Server Engine terminal."
+    _audit_terminal(websocket, user, "terminal.session.opened", safe_target, target_detail, "success")
 
     temporary_key = None
     if kind == "remote" and private_key.strip():
@@ -243,3 +283,11 @@ async def terminal_socket(websocket: WebSocket):
         if temporary_key:
             with suppress(OSError):
                 os.unlink(temporary_key.name)
+        _audit_terminal(
+            websocket,
+            user,
+            "terminal.session.closed",
+            safe_target,
+            f"Closed terminal session for {safe_target}.",
+            "info",
+        )

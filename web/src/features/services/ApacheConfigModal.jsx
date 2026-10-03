@@ -33,13 +33,13 @@ const tabs = [
 ];
 
 const inputClass =
-  "mt-1.5 w-full rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:text-slate-100";
+  "mt-1.5 w-full rounded-md border border-neutral-300 bg-transparent px-3 py-2 text-sm text-neutral-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-neutral-700 dark:text-neutral-100";
 const buttonClass =
   "inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 py-2 text-sm font-semibold";
 
 function Field({ label, children }) {
   return (
-    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+    <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
       {label}
       {children}
     </label>
@@ -48,12 +48,12 @@ function Field({ label, children }) {
 
 function Toggle({ label, description, checked, onChange }) {
   return (
-    <label className="flex cursor-pointer items-start justify-between gap-4 border-b border-slate-200 py-3 last:border-b-0 dark:border-slate-800">
+    <label className="flex cursor-pointer items-start justify-between gap-4 border-b border-neutral-200 py-3 last:border-b-0 dark:border-neutral-800">
       <span>
-        <span className="block text-sm font-medium text-slate-900 dark:text-slate-100">
+        <span className="block text-sm font-medium text-neutral-900 dark:text-neutral-100">
           {label}
         </span>
-        <span className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">
+        <span className="mt-1 block text-xs leading-5 text-neutral-500 dark:text-neutral-400">
           {description}
         </span>
       </span>
@@ -61,7 +61,7 @@ function Toggle({ label, description, checked, onChange }) {
         type="checkbox"
         checked={checked}
         onChange={(event) => onChange(event.target.checked)}
-        className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-slate-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-800"
+        className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-neutral-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500 dark:border-neutral-600 dark:bg-neutral-800"
       />
     </label>
   );
@@ -69,18 +69,18 @@ function Toggle({ label, description, checked, onChange }) {
 
 function SummaryRow({ label, value, hint }) {
   return (
-    <div className="flex items-start justify-between gap-4 border-b border-slate-200 py-3 last:border-b-0 dark:border-slate-800">
+    <div className="flex items-start justify-between gap-4 border-b border-neutral-200 py-3 last:border-b-0 dark:border-neutral-800">
       <div>
-        <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
+        <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
           {label}
         </p>
         {hint && (
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+          <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
             {hint}
           </p>
         )}
       </div>
-      <strong className="text-right text-sm font-semibold text-slate-700 dark:text-slate-300">
+      <strong className="text-right text-sm font-semibold text-neutral-700 dark:text-neutral-300">
         {value}
       </strong>
     </div>
@@ -101,10 +101,10 @@ function Overview({ config, onSave, busy, message }) {
   return (
     <div className="space-y-5">
       <div>
-        <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+        <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
           Apache web server configuration
         </h3>
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
           A production-ready starting point for websites, PHP applications,
           reverse proxies, and virtual hosts.
         </p>
@@ -122,7 +122,7 @@ function Overview({ config, onSave, busy, message }) {
         </Field>
         <Field label="Multi-processing module">
           <select
-            className={`${inputClass} bg-white dark:bg-slate-900`}
+            className={`${inputClass} bg-white dark:bg-neutral-900`}
             value={values.mpm}
             onChange={(event) => set("mpm", event.target.value)}
           >
@@ -140,7 +140,7 @@ function Overview({ config, onSave, busy, message }) {
         </Field>
         <Field label="PHP request handler">
           <select
-            className={`${inputClass} bg-white dark:bg-slate-900`}
+            className={`${inputClass} bg-white dark:bg-neutral-900`}
             value={values.phpHandler}
             onChange={(event) => set("phpHandler", event.target.value)}
           >
@@ -150,7 +150,7 @@ function Overview({ config, onSave, busy, message }) {
         </Field>
         <Field label="Keep-alive">
           <select
-            className={`${inputClass} bg-white dark:bg-slate-900`}
+            className={`${inputClass} bg-white dark:bg-neutral-900`}
             value={values.keepAlive}
             onChange={(event) => set("keepAlive", event.target.value)}
           >
@@ -160,7 +160,7 @@ function Overview({ config, onSave, busy, message }) {
         </Field>
         <Field label="Response compression">
           <select
-            className={`${inputClass} bg-white dark:bg-slate-900`}
+            className={`${inputClass} bg-white dark:bg-neutral-900`}
             value={values.compression}
             onChange={(event) => set("compression", event.target.value)}
           >
@@ -169,7 +169,7 @@ function Overview({ config, onSave, busy, message }) {
           </select>
         </Field>
       </div>
-      <div className="border-t border-slate-200 pt-2 dark:border-slate-800">
+      <div className="border-t border-neutral-200 pt-2 dark:border-neutral-800">
         <SummaryRow
           label="Configuration file"
           value={
@@ -189,7 +189,7 @@ function Overview({ config, onSave, busy, message }) {
         />
       </div>
       {message && (
-        <p className="text-sm text-slate-600 dark:text-slate-300">{message}</p>
+        <p className="text-sm text-neutral-600 dark:text-neutral-300">{message}</p>
       )}
       <div className="flex justify-end">
         <button
@@ -226,10 +226,10 @@ function Performance({ busy, message, onSave }) {
   return (
     <div className="space-y-5">
       <div>
-        <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+        <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
           Performance profile
         </h3>
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
           Tune connection capacity and response handling for live websites
           without editing Apache directives by hand.
         </p>
@@ -237,7 +237,7 @@ function Performance({ busy, message, onSave }) {
       <div className="grid gap-4 sm:grid-cols-3">
         <Field label="MPM worker model">
           <select
-            className={`${inputClass} bg-white dark:bg-slate-900`}
+            className={`${inputClass} bg-white dark:bg-neutral-900`}
             value={values.mpm}
             onChange={(event) => set("mpm", event.target.value)}
           >
@@ -330,7 +330,7 @@ function Performance({ busy, message, onSave }) {
           />
         </Field>
       </div>
-      <div className="border-t border-slate-200 dark:border-slate-800">
+      <div className="border-t border-neutral-200 dark:border-neutral-800">
         <Toggle
           label="HTTP/2"
           description="Enable multiplexed HTTPS connections for supported virtual hosts."
@@ -350,13 +350,13 @@ function Performance({ busy, message, onSave }) {
           onChange={(value) => set("sendfile", value)}
         />
       </div>
-      <p className="text-xs leading-5 text-slate-500 dark:text-slate-400">
+      <p className="text-xs leading-5 text-neutral-500 dark:text-neutral-400">
         Max concurrent requests should be sized for available memory. Apache’s
         event MPM requires MaxRequestWorkers to be compatible with
         ThreadsPerChild.
       </p>
       {message && (
-        <p className="text-sm text-slate-600 dark:text-slate-300">{message}</p>
+        <p className="text-sm text-neutral-600 dark:text-neutral-300">{message}</p>
       )}
       <div className="flex justify-end">
         <button
@@ -386,15 +386,15 @@ function Security() {
   return (
     <div className="space-y-5">
       <div>
-        <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+        <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
           Apache security profile
         </h3>
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
           Production defaults for information disclosure, TLS, headers, and
           request abuse limits.
         </p>
       </div>
-      <div className="border-t border-slate-200 dark:border-slate-800">
+      <div className="border-t border-neutral-200 dark:border-neutral-800">
         <Toggle
           label="Hide Apache version"
           description="Send a minimal Server header and keep module details out of error pages."
@@ -432,7 +432,7 @@ function Security() {
           onChange={(value) => set("directoryListing", value)}
         />
       </div>
-      <div className="flex items-start gap-3 border-t border-slate-200 pt-4 text-sm text-slate-600 dark:border-slate-800 dark:text-slate-400">
+      <div className="flex items-start gap-3 border-t border-neutral-200 pt-4 text-sm text-neutral-600 dark:border-neutral-800 dark:text-neutral-400">
         <LockKeyhole size={17} className="mt-0.5 shrink-0 text-blue-600" />
         <p>
           Apache security settings are applied per virtual host where a domain
@@ -494,25 +494,25 @@ function Modules() {
   return (
     <div className="space-y-5">
       <div>
-        <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+        <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
           Apache modules
         </h3>
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
           Keep the common web stack ready while making optional features
           explicit.
         </p>
       </div>
-      <div className="divide-y divide-slate-200 border-y border-slate-200 dark:divide-slate-800 dark:border-slate-800">
+      <div className="divide-y divide-neutral-200 border-y border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
         {modules.map(([id, name, description]) => (
           <div
             key={id}
             className="flex items-center justify-between gap-4 py-3"
           >
             <div>
-              <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
-                {name} <code className="ml-1 text-xs text-slate-500">{id}</code>
+              <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
+                {name} <code className="ml-1 text-xs text-neutral-500">{id}</code>
               </p>
-              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
                 {description}
               </p>
             </div>
@@ -521,7 +521,7 @@ function Modules() {
               onClick={() =>
                 setEnabled((current) => ({ ...current, [id]: !current[id] }))
               }
-              className={`${buttonClass} px-2.5 py-1.5 text-xs ${enabled[id] ? "text-emerald-600 dark:text-emerald-400" : "text-slate-500"}`}
+              className={`${buttonClass} px-2.5 py-1.5 text-xs ${enabled[id] ? "text-emerald-600 dark:text-emerald-400" : "text-neutral-500"}`}
             >
               {enabled[id] && <Check size={14} />}{" "}
               {enabled[id] ? "Enabled" : "Disabled"}
@@ -545,21 +545,21 @@ function VirtualHosts({ message, setMessage }) {
   return (
     <div className="space-y-5">
       <div>
-        <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+        <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
           Virtual hosts
         </h3>
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
           Each website gets an isolated Apache host definition, document root,
           logs, and optional TLS certificate.
         </p>
       </div>
-      <div className="flex items-start gap-3 border-y border-slate-200 py-5 dark:border-slate-800">
+      <div className="flex items-start gap-3 border-y border-neutral-200 py-5 dark:border-neutral-800">
         <Globe2 size={20} className="mt-0.5 text-blue-600" />
         <div>
-          <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+          <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
             No Apache websites configured yet
           </p>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+          <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
             Create a website to generate its virtual host automatically.
           </p>
           <button
@@ -576,7 +576,7 @@ function VirtualHosts({ message, setMessage }) {
         </div>
       </div>
       {message && (
-        <p className="text-sm text-slate-600 dark:text-slate-300">{message}</p>
+        <p className="text-sm text-neutral-600 dark:text-neutral-300">{message}</p>
       )}
     </div>
   );
@@ -604,6 +604,25 @@ export default function ApacheConfigModal({ service, installed, onClose }) {
   const [message, setMessage] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [action, setAction] = React.useState("");
+  React.useEffect(() => {
+    const update = (event) => {
+      const detail = event.detail || {};
+      if (detail.serviceId !== "apache") return;
+      if (["queued", "running"].includes(detail.status)) {
+        setAction(detail.action || "");
+        return;
+      }
+      if (!["succeeded", "failed", "cancelled"].includes(detail.status)) return;
+      if (detail.status === "succeeded") {
+        setRuntimeStatus(["start", "restart"].includes(detail.action) ? "running" : "stopped");
+      } else if (detail.job?.message) {
+        setMessage(detail.job.message);
+      }
+      setAction("");
+    };
+    window.addEventListener("serverengine:service-status", update);
+    return () => window.removeEventListener("serverengine:service-status", update);
+  }, []);
   const [apacheVersions, setApacheVersions] = React.useState([]);
   const [activeApacheVersion, setActiveApacheVersion] = React.useState("");
   const [showInstaller, setShowInstaller] = React.useState(false);
@@ -709,45 +728,20 @@ export default function ApacheConfigModal({ service, installed, onClose }) {
       setAction("");
       return;
     }
-    let finalJob;
-    for (let attempt = 0; attempt < 30; attempt += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 700));
-      const jobs = await apiRequest("/api/v1/jobs").then((result) =>
-        result.ok ? result.json() : [],
-      );
-      finalJob = jobs.find((job) => job.id === body.job_id);
-      if (
-        finalJob &&
-        ["succeeded", "failed", "cancelled"].includes(finalJob.status)
-      )
-        break;
-    }
-    if (finalJob?.status === "succeeded") {
-      const refreshed = await apiRequest("/api/v1/services/installed");
-      if (refreshed.ok) {
-        const detected = await refreshed.json();
-        const next = detected.find((item) => item.id === "apache");
-        setRuntimeStatus(next?.status || "stopped");
-        setRuntimeVersion(next?.version || runtimeVersion);
-      }
-    } else if (finalJob?.message) {
-      setMessage(finalJob.message);
-    }
-    setAction("");
   }
   const primary = running ? "stop" : "start";
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/60 p-4 sm:p-8"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8"
       onMouseDown={(event) => event.target === event.currentTarget && onClose()}
     >
-      <section className="w-full max-w-3xl rounded-xl bg-white p-6 shadow-xl dark:bg-slate-900">
+      <section className="w-full max-w-3xl rounded-xl bg-white p-6 shadow-xl dark:bg-neutral-900">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
+            <h2 className="text-xl font-semibold text-neutral-900 dark:text-neutral-100">
               Apache HTTP Server
             </h2>
-            <p className="mt-1 flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+            <p className="mt-1 flex items-center gap-2 text-sm text-neutral-500 dark:text-neutral-400">
               <span
                 className={`h-2 w-2 rounded-full ${running ? "bg-emerald-500" : "bg-amber-500"}`}
               />
@@ -758,19 +752,19 @@ export default function ApacheConfigModal({ service, installed, onClose }) {
           <button
             type="button"
             aria-label="Close Apache configuration"
-            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
             onClick={onClose}
           >
             <X size={18} />
           </button>
         </div>
-        <div className="mt-6 flex gap-5 overflow-x-auto border-b border-slate-200 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:border-slate-800">
+        <div className="mt-6 flex gap-5 overflow-x-auto border-b border-neutral-200 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:border-neutral-800">
           {tabs.map(([id, label, Icon]) => (
             <button
               type="button"
               key={id}
               onClick={() => setTab(id)}
-              className={`inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap border-b-2 px-1 pb-3 text-sm font-medium ${tab === id ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"}`}
+              className={`inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap border-b-2 px-1 pb-3 text-sm font-medium ${tab === id ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200"}`}
             >
               <Icon size={15} />
               {label}
@@ -799,10 +793,10 @@ export default function ApacheConfigModal({ service, installed, onClose }) {
             <div className="space-y-4">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                  <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
                     Apache versions
                   </h3>
-                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
                     Each release has its own configuration, modules, logs, and runtime directory. Only the selected default runs.
                   </p>
                 </div>
@@ -815,16 +809,16 @@ export default function ApacheConfigModal({ service, installed, onClose }) {
                   Install version
                 </button>
               </div>
-              <div className="divide-y divide-slate-200 border-y border-slate-200 dark:divide-slate-800 dark:border-slate-800">
+              <div className="divide-y divide-neutral-200 border-y border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
                 {apacheVersions.length ? apacheVersions.map((item) => (
                   <div key={`${item.version}-${item.path}`} className="flex items-center justify-between gap-4 py-4">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <p className="font-medium text-slate-900 dark:text-slate-100">Apache {item.version}</p>
+                        <p className="font-medium text-neutral-900 dark:text-neutral-100">Apache {item.version}</p>
                         {item.active && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">Default</span>}
-                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">{item.install_method === "source" ? "Build from source" : "Prebuilt package"}</span>
+                        <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">{item.install_method === "source" ? "Build from source" : "Prebuilt package"}</span>
                       </div>
-                      <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">{item.path}</p>
+                      <p className="mt-1 truncate text-xs text-neutral-500 dark:text-neutral-400">{item.path}</p>
                     </div>
                     {!item.active && (
                       <button type="button" className="shrink-0 cursor-pointer text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400" onClick={() => makeDefault(item.version)}>
@@ -833,7 +827,7 @@ export default function ApacheConfigModal({ service, installed, onClose }) {
                     )}
                   </div>
                 )) : (
-                  <p className="py-6 text-sm text-slate-500 dark:text-slate-400">No managed Apache versions are available yet.</p>
+                  <p className="py-6 text-sm text-neutral-500 dark:text-neutral-400">No managed Apache versions are available yet.</p>
                 )}
               </div>
             </div>
@@ -846,14 +840,14 @@ export default function ApacheConfigModal({ service, installed, onClose }) {
           {tab === "configuration" && (
             <div className="space-y-4">
               <div>
-                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
                   Apache configuration
                 </h3>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
                   Edit the main file here. Website-specific rules belong in each
                   virtual host.
                 </p>
-                <code className="mt-2 block text-xs text-slate-500 dark:text-slate-400">
+                <code className="mt-2 block text-xs text-neutral-500 dark:text-neutral-400">
                   {config?.config_path ||
                     "/opt/server-engine/services/apache/conf/httpd.conf"}
                 </code>
@@ -862,7 +856,7 @@ export default function ApacheConfigModal({ service, installed, onClose }) {
               <div className="flex justify-end gap-3">
                 <button
                   type="button"
-                  className={`${buttonClass} border border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800`}
+                  className={`${buttonClass} border border-neutral-300 text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800`}
                   disabled={busy}
                   onClick={() => setText(config?.content || "")}
                 >
@@ -878,7 +872,7 @@ export default function ApacheConfigModal({ service, installed, onClose }) {
                 </button>
               </div>
               {message && (
-                <p className="text-sm text-slate-600 dark:text-slate-300">
+                <p className="text-sm text-neutral-600 dark:text-neutral-300">
                   {message}
                 </p>
               )}
@@ -889,10 +883,10 @@ export default function ApacheConfigModal({ service, installed, onClose }) {
               <div className="flex items-start gap-3">
                 <Server size={19} className="mt-0.5 text-blue-600" />
                 <div className="min-w-0 flex-1">
-                  <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                  <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
                     Apache runtime
                   </h3>
-                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
                     Control the Apache parent process and keep its isolated
                     runtime healthy.
                   </p>
@@ -923,7 +917,7 @@ export default function ApacheConfigModal({ service, installed, onClose }) {
                     {running && (
                       <button
                         type="button"
-                        className={`${buttonClass} border border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300`}
+                        className={`${buttonClass} border border-neutral-300 text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300`}
                         disabled={Boolean(action)}
                         onClick={() => serviceAction("restart")}
                       >
@@ -934,7 +928,7 @@ export default function ApacheConfigModal({ service, installed, onClose }) {
                 </div>
               </div>
               {message && (
-                <p className="text-sm text-slate-600 dark:text-slate-300">
+                <p className="text-sm text-neutral-600 dark:text-neutral-300">
                   {message}
                 </p>
               )}
@@ -944,24 +938,24 @@ export default function ApacheConfigModal({ service, installed, onClose }) {
             <div className="space-y-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                  <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
                     Apache{" "}
                     {tab === "response-log" ? "response log" : "error log"}
                   </h3>
-                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
                     {logs?.path || "Loading…"}
                   </p>
                 </div>
                 <button
                   type="button"
-                  className={`${buttonClass} border border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300`}
+                  className={`${buttonClass} border border-neutral-300 text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300`}
                   onClick={loadLogs}
                 >
                   <RefreshCw size={14} />
                   Reload
                 </button>
               </div>
-              <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-md bg-slate-950 p-4 text-xs leading-5 text-slate-300">
+              <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-md bg-neutral-950 p-4 text-xs leading-5 text-neutral-300">
                 {logs?.available
                   ? logs.lines.join("\n") ||
                     `No ${tab === "response-log" ? "response" : "error"} log lines recorded.`

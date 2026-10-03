@@ -19,7 +19,7 @@ import { apiRequest, readApiError } from "../../lib/api";
 
 const STORAGE_KEY = "serverengine:stalwart-config";
 const inputClass =
-  "mt-1.5 block min-h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100";
+  "mt-1.5 block min-h-10 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100";
 const buttonClass =
   "inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60";
 
@@ -83,11 +83,11 @@ function readSettings() {
 
 function Field({ label, hint, children }) {
   return (
-    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+    <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
       {label}
       {children}
       {hint && (
-        <span className="mt-1 block text-xs font-normal leading-5 text-slate-500 dark:text-slate-400">
+        <span className="mt-1 block text-xs font-normal leading-5 text-neutral-500 dark:text-neutral-400">
           {hint}
         </span>
       )}
@@ -105,11 +105,11 @@ function Toggle({ label, description, checked, onChange }) {
         onChange={(event) => onChange(event.target.checked)}
       />
       <span>
-        <span className="block text-sm font-medium text-slate-900 dark:text-slate-100">
+        <span className="block text-sm font-medium text-neutral-900 dark:text-neutral-100">
           {label}
         </span>
         {description && (
-          <span className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">
+          <span className="mt-1 block text-xs leading-5 text-neutral-500 dark:text-neutral-400">
             {description}
           </span>
         )}
@@ -122,11 +122,11 @@ function Section({ title, description, children }) {
   return (
     <section className="space-y-4">
       <div>
-        <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+        <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
           {title}
         </h3>
         {description && (
-          <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
+          <p className="mt-1 text-sm leading-6 text-neutral-500 dark:text-neutral-400">
             {description}
           </p>
         )}
@@ -138,9 +138,9 @@ function Section({ title, description, children }) {
 
 function Row({ label, value }) {
   return (
-    <div className="flex items-start justify-between gap-4 border-b border-slate-100 py-3 text-sm last:border-0 dark:border-slate-800">
-      <span className="text-slate-500 dark:text-slate-400">{label}</span>
-      <span className="max-w-[72%] break-all text-right font-medium text-slate-900 dark:text-slate-100">
+    <div className="flex items-start justify-between gap-4 border-b border-neutral-100 py-3 text-sm last:border-0 dark:border-neutral-800">
+      <span className="text-neutral-500 dark:text-neutral-400">{label}</span>
+      <span className="max-w-[72%] break-all text-right font-medium text-neutral-900 dark:text-neutral-100">
         {value || "—"}
       </span>
     </div>
@@ -240,7 +240,7 @@ export default function StalwartConfigModal({ service, installed, onClose }) {
             </div>
           </Section>
           <Section title="Managed files" description="The startup datastore file and service directories are kept under the Server Engine service root.">
-            <div className="border-y border-slate-200 dark:border-slate-800">
+            <div className="border-y border-neutral-200 dark:border-neutral-800">
               <Row label="Version" value={version} />
               <Row label="Startup configuration" value={settings.configPath} />
               <Row label="Data directory" value={settings.dataDirectory} />
@@ -318,7 +318,7 @@ export default function StalwartConfigModal({ service, installed, onClose }) {
             </div>
           </Section>
           <Section title="Backup boundary" description="Back up the datastore and the managed configuration together. Mailbox data is not protected by a log retention policy.">
-            <div className="border-y border-slate-200 dark:border-slate-800">
+            <div className="border-y border-neutral-200 dark:border-neutral-800">
               <Row label="Configuration backup" value={`${root}/conf`} />
               <Row label="Mailbox data backup" value={settings.dataDirectory} />
               <Row label="Recommended schedule" value="Daily, with an off-server copy" />
@@ -333,7 +333,7 @@ export default function StalwartConfigModal({ service, installed, onClose }) {
       return (
         <div className="space-y-6">
           <Section title="Runtime status" description="Start, stop, or restart Stalwart without leaving the service configuration modal.">
-            <div className="border-y border-slate-200 dark:border-slate-800">
+            <div className="border-y border-neutral-200 dark:border-neutral-800">
               <Row label="Status" value={running ? "Running" : "Installed · stopped"} />
               <Row label="Version" value={version} />
               <Row label="Binary" value={`${root}/bin/stalwart`} />
@@ -342,8 +342,8 @@ export default function StalwartConfigModal({ service, installed, onClose }) {
             </div>
             <div className="flex flex-wrap gap-2 pt-1">
               {!running && <button type="button" className={`${buttonClass} bg-blue-600 text-white hover:bg-blue-700`} disabled={Boolean(action)} onClick={() => runAction("start")}><Activity size={15} />{action === "start" ? "Starting…" : "Start"}</button>}
-              {running && <button type="button" className={`${buttonClass} bg-slate-900 text-white hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900`} disabled={Boolean(action)} onClick={() => runAction("stop")}><X size={15} />{action === "stop" ? "Stopping…" : "Stop"}</button>}
-              {running && <button type="button" className={`${buttonClass} border border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800`} disabled={Boolean(action)} onClick={() => runAction("restart")}><RefreshCw size={15} />{action === "restart" ? "Restarting…" : "Restart"}</button>}
+              {running && <button type="button" className={`${buttonClass} bg-neutral-900 text-white hover:bg-neutral-700 dark:bg-neutral-100 dark:text-neutral-900`} disabled={Boolean(action)} onClick={() => runAction("stop")}><X size={15} />{action === "stop" ? "Stopping…" : "Stop"}</button>}
+              {running && <button type="button" className={`${buttonClass} border border-neutral-300 text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800`} disabled={Boolean(action)} onClick={() => runAction("restart")}><RefreshCw size={15} />{action === "restart" ? "Restarting…" : "Restart"}</button>}
             </div>
           </Section>
           <Section title="Startup policy" description="Control whether the panel starts Stalwart when the Server Engine control plane starts.">
@@ -356,7 +356,7 @@ export default function StalwartConfigModal({ service, installed, onClose }) {
     return (
       <div className="space-y-6">
         <Section title="Stalwart logs" description="Review mail delivery, authentication, TLS, listener, and storage errors from the managed service area.">
-          <div className="border-y border-slate-200 dark:border-slate-800">
+          <div className="border-y border-neutral-200 dark:border-neutral-800">
             <Row label="Error log" value={`${root}/logs/error.log`} />
             <Row label="Mail delivery log" value={`${root}/logs/stalwart.log`} />
             <Row label="Tail" value="50 lines" />
@@ -365,7 +365,7 @@ export default function StalwartConfigModal({ service, installed, onClose }) {
           </div>
         </Section>
         <Section title="Diagnostics" description="Use the service logs when a listener cannot bind, TLS cannot load, or mail delivery is rejected.">
-          <div className="rounded-md bg-slate-950 p-4 font-mono text-xs leading-6 text-slate-200">
+          <div className="rounded-md bg-neutral-950 p-4 font-mono text-xs leading-6 text-neutral-200">
             <p>{root}/bin/stalwart --config {settings.configPath}</p>
             <p>tail -n 50 {root}/logs/error.log</p>
           </div>
@@ -375,22 +375,22 @@ export default function StalwartConfigModal({ service, installed, onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/60 p-4 sm:p-8">
-      <section className="w-full max-w-3xl rounded-xl bg-white shadow-xl dark:bg-slate-900" role="dialog" aria-modal="true" aria-labelledby="stalwart-title">
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5 dark:border-slate-800">
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8">
+      <section className="w-full max-w-3xl rounded-xl bg-white shadow-xl dark:bg-neutral-900" role="dialog" aria-modal="true" aria-labelledby="stalwart-title">
+        <div className="flex items-start justify-between gap-4 border-b border-neutral-200 px-6 py-5 dark:border-neutral-800">
           <div>
-            <div className="flex items-center gap-2"><Mail size={19} className="text-blue-600 dark:text-blue-400" /><h2 id="stalwart-title" className="text-xl font-semibold text-slate-900 dark:text-slate-100">Stalwart Mail Server</h2></div>
-            <p className="mt-1 flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400"><span className={`h-2 w-2 rounded-full ${running ? "bg-emerald-500" : "bg-amber-500"}`} />{running ? "Running" : "Stopped"} · v{version}</p>
+            <div className="flex items-center gap-2"><Mail size={19} className="text-blue-600 dark:text-blue-400" /><h2 id="stalwart-title" className="text-xl font-semibold text-neutral-900 dark:text-neutral-100">Stalwart Mail Server</h2></div>
+            <p className="mt-1 flex items-center gap-2 text-sm text-neutral-500 dark:text-neutral-400"><span className={`h-2 w-2 rounded-full ${running ? "bg-emerald-500" : "bg-amber-500"}`} />{running ? "Running" : "Stopped"} · v{version}</p>
           </div>
-          <button type="button" aria-label="Close Stalwart configuration" className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200" onClick={onClose}><X size={18} /></button>
+          <button type="button" aria-label="Close Stalwart configuration" className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200" onClick={onClose}><X size={18} /></button>
         </div>
-        <div className="flex gap-5 overflow-x-auto border-b border-slate-200 px-6 pt-4 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:border-slate-800">
-          {tabs.map(([id, label, Icon]) => <button type="button" key={id} onClick={() => setTab(id)} className={`${buttonClass} rounded-none border-b-2 px-1 pb-3 pt-0 ${tab === id ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"}`}><Icon size={15} />{label}</button>)}
+        <div className="flex gap-5 overflow-x-auto border-b border-neutral-200 px-6 pt-4 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:border-neutral-800">
+          {tabs.map(([id, label, Icon]) => <button type="button" key={id} onClick={() => setTab(id)} className={`${buttonClass} rounded-none border-b-2 px-1 pb-3 pt-0 ${tab === id ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200"}`}><Icon size={15} />{label}</button>)}
         </div>
         <div className="px-6 py-5">{renderTab()}</div>
-        <div className="flex items-center justify-between gap-3 border-t border-slate-200 px-6 py-4 dark:border-slate-800">
-          <button type="button" className={`${buttonClass} text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800`} onClick={reset}><Save size={15} />Restore defaults</button>
-          <span className="text-xs text-slate-500 dark:text-slate-400">Changes are saved per tab.</span>
+        <div className="flex items-center justify-between gap-3 border-t border-neutral-200 px-6 py-4 dark:border-neutral-800">
+          <button type="button" className={`${buttonClass} text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800`} onClick={reset}><Save size={15} />Restore defaults</button>
+          <span className="text-xs text-neutral-500 dark:text-neutral-400">Changes are saved per tab.</span>
         </div>
       </section>
       <Toast message={toast?.message} type={toast?.type} onClose={() => setToast(null)} />

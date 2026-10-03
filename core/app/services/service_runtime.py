@@ -98,7 +98,7 @@ def version_sort_key(value: str) -> tuple:
 
 def service_root(service_id: str, version: str | None = None) -> Path:
     root = None
-    if service_id in {"apache", "caddy", "redis"}:
+    if service_id in {"nginx", "apache", "openlitespeed", "caddy", "redis"}:
         base = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / service_id
         if version:
             safe_version = version.replace("/", "-").replace("\\", "-")
@@ -215,6 +215,61 @@ def prepare_mysql_runtime(root: Path) -> dict[str, str]:
     aio_link = next((path.parent / "libaio.so.1" for path in aio_candidates), None)
     if aio_link and not aio_link.exists():
         aio_link.symlink_to(aio_candidates[0].name)
+    library_paths = [library_dir, *[path for path in library_dir.rglob("*") if path.is_dir()]]
+    environment = os.environ.copy()
+    environment["LD_LIBRARY_PATH"] = ":".join(str(path) for path in library_paths)
+    return environment
+
+
+def prepare_postgresql_runtime(root: Path) -> dict[str, str]:
+    """Stage PostgreSQL's shared ICU libraries inside its managed root."""
+    library_dir = root / ".runtime-libraries"
+    library_dir.mkdir(parents=True, exist_ok=True)
+    required_libraries = ("libicuuc.so*", "libicui18n.so*", "libicudata.so*")
+    if any(not any(library_dir.rglob(pattern)) for pattern in required_libraries):
+        apt = shutil.which("apt")
+        dpkg_deb = shutil.which("dpkg-deb")
+        if not apt or not dpkg_deb:
+            raise RuntimeError("PostgreSQL needs ICU runtime libraries, but the isolated package tools are unavailable")
+        for archive in library_dir.glob("*.deb"):
+            archive.unlink(missing_ok=True)
+        download = subprocess.run([apt, "download", "libicu74"], cwd=library_dir, capture_output=True, text=True, check=False)
+        if download.returncode != 0:
+            raise RuntimeError("Unable to stage PostgreSQL ICU runtime libraries: " + (download.stderr or download.stdout).strip())
+        archives = sorted(library_dir.glob("*.deb"))
+        if not archives:
+            raise RuntimeError("PostgreSQL ICU runtime package was not downloaded")
+        for archive in archives:
+            subprocess.run([dpkg_deb, "-x", str(archive), str(library_dir)], check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            archive.unlink(missing_ok=True)
+    library_paths = [library_dir, *[path for path in library_dir.rglob("*") if path.is_dir()]]
+    environment = os.environ.copy()
+    environment["LD_LIBRARY_PATH"] = ":".join(str(path) for path in library_paths)
+    return environment
+
+
+def prepare_mongodb_runtime(root: Path) -> dict[str, str]:
+    """Stage MongoDB's shared client and TLS libraries inside its root."""
+    library_dir = root / ".runtime-libraries"
+    library_dir.mkdir(parents=True, exist_ok=True)
+    required_libraries = ("libcurl.so*", "libssl.so*", "libcrypto.so*")
+    if any(not any(library_dir.rglob(pattern)) for pattern in required_libraries):
+        apt = shutil.which("apt")
+        dpkg_deb = shutil.which("dpkg-deb")
+        if not apt or not dpkg_deb:
+            raise RuntimeError("MongoDB needs runtime libraries, but the isolated package tools are unavailable")
+        for archive in library_dir.glob("*.deb"):
+            archive.unlink(missing_ok=True)
+        packages = ["libcurl4t64", "libssl3t64", "liblzma5", "libsnappy1v5", "libzstd1", "libnghttp2-14", "libidn2-0", "libpsl5t64", "libssh-4", "libldap2", "libsasl2-2", "libgssapi-krb5-2", "libkrb5-3", "libcom-err2", "libk5crypto3", "libkrb5support0", "libbrotli1"]
+        download = subprocess.run([apt, "download", *packages], cwd=library_dir, capture_output=True, text=True, check=False)
+        if download.returncode != 0:
+            raise RuntimeError("Unable to stage MongoDB runtime libraries: " + (download.stderr or download.stdout).strip())
+        archives = sorted(library_dir.glob("*.deb"))
+        if not archives:
+            raise RuntimeError("MongoDB runtime packages were not downloaded")
+        for archive in archives:
+            subprocess.run([dpkg_deb, "-x", str(archive), str(library_dir)], check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            archive.unlink(missing_ok=True)
     library_paths = [library_dir, *[path for path in library_dir.rglob("*") if path.is_dir()]]
     environment = os.environ.copy()
     environment["LD_LIBRARY_PATH"] = ":".join(str(path) for path in library_paths)
@@ -798,10 +853,11 @@ def ensure_php_fpm_layout(version: str) -> dict[str, Path]:
     return paths
 
 
-def nginx_paths() -> dict[str, Path]:
-    root = service_root("nginx")
+def nginx_paths(version: str | None = None) -> dict[str, Path]:
+    root = service_root("nginx", version)
+    shared_root = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / "nginx"
     binary = root / "bin/nginx" if (root / "bin/nginx").exists() else root / "usr/sbin/nginx"
-    return {"root": root, "binary": binary, "config": root / "conf/nginx.conf", "pid": root / "run/nginx.pid", "access_log": root / "logs/access.log", "error_log": root / "logs/error.log", "www": Path(os.getenv("SE_WEB_ROOT", "/server-engine/www"))}
+    return {"root": root, "shared_root": shared_root, "binary": binary, "config": shared_root / "conf/nginx.conf", "pid": shared_root / "run/nginx.pid", "access_log": shared_root / "logs/access.log", "error_log": shared_root / "logs/error.log", "www": Path(os.getenv("SE_WEB_ROOT", "/server-engine/www"))}
 
 
 def nginx_default_configuration(paths: dict[str, Path] | None = None) -> str:
@@ -824,7 +880,7 @@ events {{
 }}
 
 http {{
-    include {paths["root"] / "conf/mime.types"};
+    include {paths["shared_root"] / "conf/mime.types"};
     default_type application/octet-stream;
 
     server_names_hash_bucket_size 128;
@@ -848,6 +904,12 @@ http {{
     fastcgi_buffers 4 32k;
     fastcgi_busy_buffers_size 64k;
 
+    client_body_temp_path {paths["root"] / "data/client_temp"};
+    proxy_temp_path {paths["root"] / "data/proxy_temp"};
+    fastcgi_temp_path {paths["root"] / "data/fastcgi_temp"};
+    uwsgi_temp_path {paths["root"] / "data/uwsgi_temp"};
+    scgi_temp_path {paths["root"] / "data/scgi_temp"};
+
     gzip on;
     gzip_min_length 1k;
     gzip_comp_level 4;
@@ -857,13 +919,13 @@ http {{
 
     server_tokens off;
     access_log {paths["access_log"]};
-    include {paths["root"] / "conf/sites/*.conf"};
+    include {paths["shared_root"] / "conf/sites/*.conf"};
 }}
 '''
 
 
-def ensure_nginx_layout() -> dict[str, Path]:
-    paths = nginx_paths()
+def ensure_nginx_layout(paths: dict[str, Path] | None = None) -> dict[str, Path]:
+    paths = paths or nginx_paths()
     for key in ("config", "pid", "access_log", "error_log", "www"):
         paths[key].parent.mkdir(parents=True, exist_ok=True)
     paths["www"].mkdir(parents=True, exist_ok=True)
@@ -873,24 +935,66 @@ def ensure_nginx_layout() -> dict[str, Path]:
         paths["root"] / "data/fastcgi_temp",
         paths["root"] / "data/uwsgi_temp",
         paths["root"] / "data/scgi_temp",
-        paths["root"] / "run",
-        paths["root"] / "logs",
+        paths["shared_root"] / "run",
+        paths["shared_root"] / "logs",
     ):
         directory.mkdir(parents=True, exist_ok=True)
     if not paths["config"].exists():
-        paths["config"].write_text(nginx_default_configuration(paths))
-    (paths["root"] / "conf/sites").mkdir(parents=True, exist_ok=True)
-    mime_types = paths["root"] / "conf/mime.types"
+        legacy_config = paths["root"] / "conf/nginx.conf"
+        if legacy_config.exists() and legacy_config != paths["config"]:
+            migrated = legacy_config.read_text(errors="replace")
+            migrated = migrated.replace(str(paths["root"] / "conf"), str(paths["shared_root"] / "conf"))
+            migrated = migrated.replace(str(paths["root"] / "logs"), str(paths["shared_root"] / "logs"))
+            migrated = migrated.replace(str(paths["root"] / "run"), str(paths["shared_root"] / "run"))
+            paths["config"].write_text(migrated)
+        else:
+            paths["config"].write_text(nginx_default_configuration(paths))
+    (paths["shared_root"] / "conf/sites").mkdir(parents=True, exist_ok=True)
+    mime_types = paths["shared_root"] / "conf/mime.types"
     if not mime_types.exists():
         mime_types.write_text('''types {\n    text/html html htm;\n    text/css css;\n    application/javascript js;\n    application/json json;\n    image/png png;\n    image/jpeg jpg jpeg;\n    image/svg+xml svg;\n    image/x-icon ico;\n    font/woff woff;\n    font/woff2 woff2;\n}\n''')
     if paths["config"].exists():
         config = paths["config"].read_text().replace(str(paths["root"] / "etc/nginx/mime.types"), str(mime_types))
+        shield_attached = any(
+            (candidate / ".serverengine-application-shield-attached").exists()
+            for candidate in (paths["shared_root"], paths["root"])
+        )
+        if not shield_attached:
+            # A connector is compiled against one exact Nginx ABI. Never let
+            # a stale module from a previous version prevent the selected
+            # runtime from starting when Shield is not attached.
+            config = re.sub(r"(?mi)^\s*load_module\s+[^;]*modsecurity[^;]*;\s*\n?", "", config)
         try:
             pwd.getpwnam("serverengine")
             user_line = "user serverengine;\n"
         except KeyError:
             user_line = ""
         config = config.replace("user serverengine;\n", user_line)
+        temp_directives = {
+            "client_body_temp_path": paths["root"] / "data/client_temp",
+            "proxy_temp_path": paths["root"] / "data/proxy_temp",
+            "fastcgi_temp_path": paths["root"] / "data/fastcgi_temp",
+            "uwsgi_temp_path": paths["root"] / "data/uwsgi_temp",
+            "scgi_temp_path": paths["root"] / "data/scgi_temp",
+        }
+        missing_temp_directives = [
+            f"    {directive} {path};"
+            for directive, path in temp_directives.items()
+            if not re.search(rf"(?m)^\s*{re.escape(directive)}\s+", config)
+        ]
+        if missing_temp_directives and re.search(r"(?m)^\s*http\s*\{", config):
+            config = re.sub(r"(?m)^(\s*http\s*\{)", r"\1\n" + "\n".join(missing_temp_directives), config, count=1)
+        if not re.search(r"(?m)^\s*(?!#)error_log\s+", config):
+            config = f"error_log {paths['error_log']} warn;\n" + config
+        if not re.search(r"(?m)^\s*(?!#)pid\s+", config):
+            config = f"pid {paths['pid']};\n" + config
+        if not re.search(r"(?m)^\s*(?!#)access_log\s+", config) and re.search(r"(?m)^\s*http\s*\{", config):
+            config = re.sub(
+                r"(?m)^(\s*http\s*\{)",
+                r"\1\n    access_log " + str(paths["access_log"]) + ";",
+                config,
+                count=1,
+            )
         legacy_signature = f"worker_processes auto;\nerror_log {paths['error_log']} warn;\npid {paths['pid']};\n\nevents {{ worker_connections 4096; }}"
         if legacy_signature in config and "gzip on;" not in config and "client_max_body_size" not in config:
             config = nginx_default_configuration(paths)
@@ -899,9 +1003,9 @@ def ensure_nginx_layout() -> dict[str, Path]:
         owner = pwd.getpwnam("serverengine")
         for directory in (
             paths["root"] / "data",
-            paths["root"] / "run",
-            paths["root"] / "logs",
-            paths["root"] / "conf/sites",
+            paths["shared_root"] / "run",
+            paths["shared_root"] / "logs",
+            paths["shared_root"] / "conf/sites",
             paths["www"],
         ):
             for current, directories, files in os.walk(directory):

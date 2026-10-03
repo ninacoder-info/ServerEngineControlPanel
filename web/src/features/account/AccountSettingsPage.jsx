@@ -9,36 +9,33 @@ import {
 } from "lucide-react";
 import { apiRequest, readApiError } from "../../lib/api";
 import { createPasskey, supportsPasskeys } from "../../lib/passkeys";
+import FormField from "../../components/FormField";
+import { z } from "zod";
 
 const input =
-  "mt-2 block min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100";
+  "mt-2 block min-h-11 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2.5 text-sm text-neutral-900 shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100";
 const tabs = [
   ["profile", "Profile", UserRound],
   ["security", "Security", ShieldCheck],
   ["preferences", "Preferences", Monitor],
   ["recovery", "Recovery", Bell],
 ];
-function Field({ label, description, children }) {
-  return (
-    <label className="block">
-      <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-        {label}
-      </span>
-      <span className="mt-1 block text-sm text-slate-500 dark:text-slate-400">
-        {description}
-      </span>
-      {children}
-    </label>
-  );
+function Field({ label, description, error, children }) {
+  return <FormField label={label} hint={description} error={error}>{children}</FormField>;
 }
+
+const profileSchema = z.object({
+  name: z.string().trim().min(1, "Display name is required.").max(120, "Display name is too long."),
+  email: z.string().trim().email("Enter a valid email address."),
+});
 function Toggle({ label, description, checked, onChange }) {
   return (
-    <label className="flex items-start justify-between gap-5 border-b border-slate-200 py-5 last:border-b-0 dark:border-slate-800">
+    <label className="flex items-start justify-between gap-5 border-b border-neutral-200 py-5 last:border-b-0 dark:border-neutral-800">
       <span>
-        <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+        <span className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
           {label}
         </span>
-        <span className="mt-1 block text-sm text-slate-500 dark:text-slate-400">
+        <span className="mt-1 block text-sm text-neutral-500 dark:text-neutral-400">
           {description}
         </span>
       </span>
@@ -46,7 +43,7 @@ function Toggle({ label, description, checked, onChange }) {
         type="checkbox"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
-        className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 dark:border-slate-600 dark:bg-slate-800 dark:focus:ring-offset-slate-900"
+        className="mt-1 h-4 w-4 shrink-0 rounded border-neutral-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 dark:border-neutral-600 dark:bg-neutral-800 dark:focus:ring-offset-neutral-900"
       />
     </label>
   );
@@ -71,6 +68,7 @@ export default function AccountSettingsPage({ user }) {
   const [tab, setTab] = React.useState("profile");
   const [name, setName] = React.useState(user?.username || "Administrator");
   const [email, setEmail] = React.useState("admin@example.com");
+  const [profileErrors, setProfileErrors] = React.useState({});
   const [message, setMessage] = React.useState("");
   const [passkeyBusy, setPasskeyBusy] = React.useState(false);
   const [security, setSecurity] = React.useState({
@@ -105,6 +103,16 @@ export default function AccountSettingsPage({ user }) {
     setSecurity((values) => ({ ...values, [key]: value }));
   const updateValue = (key, value) =>
     setSecurityValues((values) => ({ ...values, [key]: value }));
+  function saveProfile() {
+    const validation = profileSchema.safeParse({ name, email });
+    if (!validation.success) {
+      setProfileErrors(Object.fromEntries(validation.error.issues.map((issue) => [issue.path[0], issue.message])));
+      setMessage("");
+      return;
+    }
+    setProfileErrors({});
+    save("Profile");
+  }
   async function registerPasskey() {
     if (!supportsPasskeys()) {
       setMessage("This browser does not support passkeys.");
@@ -133,10 +141,10 @@ export default function AccountSettingsPage({ user }) {
     <div className="space-y-7">
       <header>
         <p className="text-sm text-blue-500">Account</p>
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">
+        <h1 className="mt-1 text-3xl font-semibold tracking-tight text-neutral-950 dark:text-white">
           Account settings
         </h1>
-        <p className="mt-2 max-w-2xl text-sm text-slate-500 dark:text-slate-400">
+        <p className="mt-2 max-w-2xl text-sm text-neutral-500 dark:text-neutral-400">
           Manage your administrator profile, sign-in security, and personal
           panel preferences.
         </p>
@@ -146,9 +154,9 @@ export default function AccountSettingsPage({ user }) {
           {message}
         </div>
       )}
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+      <div className="overflow-hidden rounded-xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
         <nav
-          className="flex overflow-x-auto border-b border-slate-200 bg-transparent px-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:border-slate-800"
+          className="flex overflow-x-auto border-b border-neutral-200 bg-transparent px-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:border-neutral-800"
           aria-label="Account settings tabs"
         >
           {tabs.map(([id, label, Icon]) => (
@@ -158,7 +166,7 @@ export default function AccountSettingsPage({ user }) {
                 setTab(id);
                 setMessage("");
               }}
-              className={`inline-flex shrink-0 items-center gap-2 border-b-2 px-5 py-4 text-sm font-medium ${tab === id ? "border-blue-600 text-blue-600" : "border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-white"}`}
+              className={`inline-flex shrink-0 items-center gap-2 border-b-2 px-5 py-4 text-sm font-medium ${tab === id ? "border-blue-600 text-blue-600" : "border-transparent text-neutral-500 hover:text-neutral-900 dark:hover:text-white"}`}
             >
               <Icon size={16} />
               {label}
@@ -173,22 +181,30 @@ export default function AccountSettingsPage({ user }) {
                   <Field
                     label="Display name"
                     description="Use a recognizable name for administrative actions."
+                    error={profileErrors.name}
                   >
                     <input
                       className={input}
                       value={name}
-                      onChange={(e) => setName(e.target.value)}
+                      onChange={(e) => {
+                        setName(e.target.value);
+                        setProfileErrors((current) => ({ ...current, name: "" }));
+                      }}
                     />
                   </Field>
                   <Field
                     label="Email address"
                     description="Used for account notices and recovery workflows."
+                    error={profileErrors.email}
                   >
                     <input
                       className={input}
                       type="email"
                       value={email}
-                      onChange={(e) => setEmail(e.target.value)}
+                      onChange={(e) => {
+                        setEmail(e.target.value);
+                        setProfileErrors((current) => ({ ...current, email: "" }));
+                      }}
                     />
                   </Field>
                   <Field
@@ -196,20 +212,20 @@ export default function AccountSettingsPage({ user }) {
                     description="Permissions are managed by the hosting account administrator."
                   >
                     <input
-                      className={`${input} text-slate-500`}
+                      className={`${input} text-neutral-500`}
                       value="Administrator"
                       disabled
                     />
                   </Field>
                 </div>
               </Block>
-              <SaveButton label="profile" onSave={() => save("Profile")} />
+              <SaveButton label="profile" onSave={saveProfile} />
             </div>
           )}
           {tab === "security" && (
             <div className="space-y-6">
               <Block>
-                <p className="mb-4 text-sm font-semibold text-slate-900 dark:text-slate-100">
+                <p className="mb-4 text-sm font-semibold text-neutral-900 dark:text-neutral-100">
                   Multi-factor authentication
                 </p>
                 <Toggle
@@ -229,18 +245,18 @@ export default function AccountSettingsPage({ user }) {
                     type="button"
                     disabled={passkeyBusy}
                     onClick={registerPasskey}
-                    className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                    className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 disabled:cursor-wait disabled:opacity-60 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800"
                   >
                     <KeyRound size={15} />
                     {passkeyBusy ? "Waiting for passkey…" : "Register passkey"}
                   </button>
-                  <button className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">
+                  <button className="rounded-lg border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800">
                     Regenerate recovery codes
                   </button>
                 </div>
               </Block>
               <Block>
-                <p className="mb-4 text-sm font-semibold text-slate-900 dark:text-slate-100">
+                <p className="mb-4 text-sm font-semibold text-neutral-900 dark:text-neutral-100">
                   Password policy
                 </p>
                 <div className="grid gap-5 md:grid-cols-2">
@@ -290,7 +306,7 @@ export default function AccountSettingsPage({ user }) {
                 </div>
               </Block>
               <Block>
-                <p className="mb-4 text-sm font-semibold text-slate-900 dark:text-slate-100">
+                <p className="mb-4 text-sm font-semibold text-neutral-900 dark:text-neutral-100">
                   Login protection
                 </p>
                 <Toggle
@@ -346,7 +362,7 @@ export default function AccountSettingsPage({ user }) {
                 </Field>
               </Block>
               <Block>
-                <p className="mb-4 text-sm font-semibold text-slate-900 dark:text-slate-100">
+                <p className="mb-4 text-sm font-semibold text-neutral-900 dark:text-neutral-100">
                   API and access policy
                 </p>
                 <Toggle
@@ -383,7 +399,7 @@ export default function AccountSettingsPage({ user }) {
                 </Field>
               </Block>
               <Block>
-                <p className="mb-4 text-sm font-semibold text-slate-900 dark:text-slate-100">
+                <p className="mb-4 text-sm font-semibold text-neutral-900 dark:text-neutral-100">
                   Security notifications
                 </p>
                 <Toggle
@@ -454,28 +470,28 @@ export default function AccountSettingsPage({ user }) {
               <Block>
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
                       Recovery email verified
                     </p>
-                    <p className="mt-1 text-sm text-slate-500">{email}</p>
+                    <p className="mt-1 text-sm text-neutral-500">{email}</p>
                   </div>
                   <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
                     Verified
                   </span>
                 </div>
-                <button className="mt-5 rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">
+                <button className="mt-5 rounded-lg border border-neutral-300 px-4 py-2.5 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800">
                   Change recovery email
                 </button>
               </Block>
               <Block>
-                <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
                   Recovery codes
                 </p>
-                <p className="mt-1 text-sm text-slate-500">
+                <p className="mt-1 text-sm text-neutral-500">
                   Keep a fresh offline set of one-time codes in case your
                   authenticator is unavailable.
                 </p>
-                <button className="mt-4 rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">
+                <button className="mt-4 rounded-lg border border-neutral-300 px-4 py-2.5 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800">
                   Generate new codes
                 </button>
               </Block>

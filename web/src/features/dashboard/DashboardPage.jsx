@@ -1,11 +1,10 @@
 import React from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Activity, Globe2, HardDrive, Server } from "lucide-react";
 import Sidebar from "../../components/Sidebar";
 import Topbar from "../../components/Topbar";
 import { useTheme } from "../../hooks/useTheme";
 import ActivityPanel from "./ActivityPanel";
-import MetricCard from "./MetricCard";
+import OverviewSummary from "./OverviewSummary";
 import ServerPanel from "./ServerPanel";
 import ServicesPage from "../services/ServicesPage";
 import NodeRuntimesPage from "../services/NodeRuntimesPage";
@@ -18,6 +17,8 @@ import DashboardWorkspace from "./DashboardWorkspace";
 import DatabasesPage from "../databases/DatabasesPage";
 import LogsPage from "../logs/LogsPage";
 import UsersPage from "../users/UsersPage";
+import PanelUsersPage from "../users/PanelUsersPage";
+import RolesPage from "../users/RolesPage";
 import FirewallPage from "../firewall/FirewallPage";
 import BackupsPage from "../backups/BackupsPage";
 import ServerHealthPage from "../health/ServerHealthPage";
@@ -46,20 +47,20 @@ function OverviewSkeleton() {
   return (
     <div className="animate-pulse space-y-8" aria-label="Loading overview">
       <header className="space-y-3">
-        <div className="h-4 w-28 rounded bg-slate-200 dark:bg-slate-800" />
-        <div className="h-9 w-36 rounded bg-slate-200 dark:bg-slate-800" />
-        <div className="h-4 w-80 max-w-full rounded bg-slate-100 dark:bg-slate-800/70" />
+        <div className="h-4 w-28 rounded bg-neutral-200 dark:bg-neutral-800" />
+        <div className="h-9 w-36 rounded bg-neutral-200 dark:bg-neutral-800" />
+        <div className="h-4 w-80 max-w-full rounded bg-neutral-100 dark:bg-neutral-800/70" />
       </header>
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {Array.from({ length: 4 }).map((_, index) => (
           <div
             key={index}
-            className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900"
+            className="rounded-xl border border-neutral-200 bg-white p-5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900"
           >
-            <div className="h-4 w-24 rounded bg-slate-100 dark:bg-slate-800/70" />
-            <div className="mt-5 h-8 w-24 rounded bg-slate-200 dark:bg-slate-800" />
-            <div className="mt-2 h-3 w-32 rounded bg-slate-100 dark:bg-slate-800/70" />
-            <div className="mt-4 h-10 rounded bg-slate-100 dark:bg-slate-800/70" />
+            <div className="h-4 w-24 rounded bg-neutral-100 dark:bg-neutral-800/70" />
+            <div className="mt-5 h-8 w-24 rounded bg-neutral-200 dark:bg-neutral-800" />
+            <div className="mt-2 h-3 w-32 rounded bg-neutral-100 dark:bg-neutral-800/70" />
+            <div className="mt-4 h-10 rounded bg-neutral-100 dark:bg-neutral-800/70" />
           </div>
         ))}
       </section>
@@ -67,18 +68,18 @@ function OverviewSkeleton() {
         {Array.from({ length: 2 }).map((_, index) => (
           <div
             key={index}
-            className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900"
+            className="rounded-xl border border-neutral-200 bg-white p-5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900"
           >
             <div className="space-y-2">
-              <div className="h-4 w-28 rounded bg-slate-100 dark:bg-slate-800/70" />
-              <div className="h-5 w-40 rounded bg-slate-200 dark:bg-slate-800" />
-              <div className="h-3 w-64 rounded bg-slate-100 dark:bg-slate-800/70" />
+              <div className="h-4 w-28 rounded bg-neutral-100 dark:bg-neutral-800/70" />
+              <div className="h-5 w-40 rounded bg-neutral-200 dark:bg-neutral-800" />
+              <div className="h-3 w-64 rounded bg-neutral-100 dark:bg-neutral-800/70" />
             </div>
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
               {Array.from({ length: index ? 3 : 4 }).map((__, item) => (
                 <div
                   key={item}
-                  className="h-20 rounded-lg border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-800/40"
+                  className="h-20 rounded-lg border border-neutral-200 bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-800/40"
                 />
               ))}
             </div>
@@ -89,14 +90,14 @@ function OverviewSkeleton() {
         {Array.from({ length: 2 }).map((_, index) => (
           <div
             key={index}
-            className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900"
+            className="rounded-xl border border-neutral-200 bg-white p-5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900"
           >
-            <div className="h-5 w-40 rounded bg-slate-200 dark:bg-slate-800" />
+            <div className="h-5 w-40 rounded bg-neutral-200 dark:bg-neutral-800" />
             <div className="mt-5 space-y-4">
               {Array.from({ length: 3 }).map((__, row) => (
                 <div key={row} className="flex items-center gap-3">
-                  <div className="h-8 w-8 rounded bg-slate-100 dark:bg-slate-800/70" />
-                  <div className="h-4 flex-1 rounded bg-slate-100 dark:bg-slate-800/70" />
+                  <div className="h-8 w-8 rounded bg-neutral-100 dark:bg-neutral-800/70" />
+                  <div className="h-4 flex-1 rounded bg-neutral-100 dark:bg-neutral-800/70" />
                 </div>
               ))}
             </div>
@@ -111,7 +112,7 @@ export default function DashboardPage({ user, onLogout }) {
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [panelPreferences, setPanelPreferences] =
     React.useState(readPanelPreferences);
-  const [overviewLoading, setOverviewLoading] = React.useState(true);
+  const overviewLoading = false;
   const location = useLocation();
   const navigate = useNavigate();
   const theme = useTheme();
@@ -123,21 +124,6 @@ export default function DashboardPage({ user, onLogout }) {
     return () =>
       window.removeEventListener("serverengine:panel-settings-change", update);
   }, []);
-  React.useEffect(() => {
-    if (location.pathname !== "/") {
-      setOverviewLoading(false);
-      return undefined;
-    }
-    let active = true;
-    apiRequest("/api/v1/metrics")
-      .catch(() => null)
-      .finally(() => {
-        if (active) setOverviewLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [location.pathname]);
   React.useEffect(() => {
     let active = true;
     apiRequest("/api/v1/settings/panel")
@@ -203,8 +189,12 @@ export default function DashboardPage({ user, onLogout }) {
                                   ? "Terminal"
                                   : location.pathname === "/logs"
                                     ? "Logs"
-                                    : location.pathname === "/users"
-                                      ? "Accounts"
+                                      : location.pathname === "/users"
+                                      ? "Panel users"
+                                      : location.pathname === "/roles"
+                                        ? "Roles & permissions"
+                                      : location.pathname === "/hosting-accounts"
+                                        ? "Hosting accounts"
                                       : location.pathname === "/plans"
                                         ? "Hosting plans"
                                         : location.pathname === "/firewall"
@@ -260,6 +250,10 @@ export default function DashboardPage({ user, onLogout }) {
   ) : location.pathname === "/logs" ? (
     <LogsPage />
   ) : location.pathname === "/users" ? (
+    <PanelUsersPage />
+  ) : location.pathname === "/roles" ? (
+    <RolesPage />
+  ) : location.pathname === "/hosting-accounts" ? (
     <UsersPage />
   ) : location.pathname === "/plans" ? (
     <PlansPage />
@@ -288,36 +282,10 @@ export default function DashboardPage({ user, onLogout }) {
         <h2 className="mt-1 text-3xl font-semibold tracking-tight">
           {location.pathname === "/" ? t("nav.overview") : active}
         </h2>
-        <p className="mt-2 text-slate-400">{t("dashboard.apiOnline")}</p>
+        <p className="mt-2 text-neutral-400">{t("dashboard.apiOnline")}</p>
       </div>
       <ResourceMetricCards />
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard
-          label={t("dashboard.servers")}
-          value="1"
-          detail={t("dashboard.developmentNode")}
-          icon={Server}
-        />
-        <MetricCard
-          label={t("dashboard.websites")}
-          value="0"
-          detail={t("dashboard.noSites")}
-          icon={Globe2}
-        />
-        <MetricCard
-          label={t("dashboard.storage")}
-          value="—"
-          detail={t("dashboard.agentNotConnected")}
-          icon={HardDrive}
-        />
-        <MetricCard
-          label={t("dashboard.systemHealth")}
-          value={t("dashboard.ready")}
-          detail={t("dashboard.coreApiOnline")}
-          icon={Activity}
-          good
-        />
-      </section>
+      <OverviewSummary onNavigate={navigate} />
       <DashboardWorkspace onNavigate={navigate} />
       <section className="grid gap-5 xl:grid-cols-[1.4fr_1fr]">
         <ServerPanel />
@@ -327,7 +295,7 @@ export default function DashboardPage({ user, onLogout }) {
   );
   return (
     <div
-      className={`app-shell ${theme.light ? "theme-light" : "dark"} density-${panelPreferences.panel_density || "comfortable"}`}
+      className="min-h-screen bg-[var(--se-bg)] text-[var(--se-text)]"
       data-show-hints={panelPreferences.panel_show_hints !== false}
     >
       <Sidebar

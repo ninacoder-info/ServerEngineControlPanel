@@ -204,6 +204,18 @@ class WebsiteService:
             self._write_site(site, sites)
             return site
 
+    def mark_error(self, website_id: str) -> Website | None:
+        """Mark a deployment as unhealthy without deleting its recoverable files."""
+        with self._lock:
+            sites = [Website.model_validate(item) for item in self._read()]
+            site = next((item for item in sites if item.id == website_id), None)
+            if site is None:
+                return None
+            site.status = "error"
+            site.updated_at = self._now()
+            self._write_site(site, sites)
+            return site
+
     def directories(self, path: str | None = None, recursive: bool = False) -> dict:
         current = self._safe_project_path(path or str(self.web_root))
         if not current.exists():
@@ -223,6 +235,16 @@ class WebsiteService:
             raise HTTPException(400, f"This folder cannot be read: {exc}")
         parent = str(current.parent) if current != self.web_root else None
         return {"path": str(current), "parent": parent, "root": str(self.web_root), "directories": folders}
+
+    def project_path_status(self, path: str) -> dict:
+        target = self._safe_project_path(path)
+        exists = target.exists()
+        return {
+            "path": str(target),
+            "exists": exists,
+            "is_directory": target.is_dir() if exists else False,
+            "is_empty": target.is_dir() and not any(target.iterdir()) if exists else True,
+        }
 
     def create_directory(self, path: str, name: str) -> dict:
         if "/" in name or "\\" in name or name in {".", ".."}:

@@ -21,6 +21,8 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import ActionDialog from "../../components/ActionDialog";
+import FormField from "../../components/FormField";
+import { z } from "zod";
 
 const starter = {
   id: "local",
@@ -34,7 +36,7 @@ const starter = {
   password: "",
 };
 const input =
-  "mt-2 block min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100";
+  "mt-2 block min-h-11 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2.5 text-sm text-neutral-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100";
 const wsUrl = () => {
   // Use the page origin so development goes through Vite's /api WebSocket
   // proxy and production uses the same authenticated reverse-proxy route.
@@ -49,9 +51,9 @@ function Button({ label, onClick, children }) {
     <button
       onClick={onClick}
       aria-label={label}
-      className="group relative rounded-md p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+      className="group relative rounded-md p-2 text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
     >
-      <span className="pointer-events-none absolute right-0 top-11 z-10 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-xs text-white opacity-0 shadow-lg group-hover:opacity-100 dark:bg-white dark:text-slate-900">
+      <span className="pointer-events-none absolute right-0 top-11 z-10 whitespace-nowrap rounded-md bg-neutral-900 px-2 py-1 text-xs text-white opacity-0 shadow-lg group-hover:opacity-100 dark:bg-white dark:text-neutral-900">
         {label}
       </span>
       {children}
@@ -59,20 +61,25 @@ function Button({ label, onClick, children }) {
   );
 }
 function Field({ label, error, children }) {
-  return (
-    <label
-      className={`block text-sm font-semibold ${error ? "text-rose-600 dark:text-rose-400" : "text-slate-900 dark:text-slate-100"}`}
-    >
-      {label}
-      {children}
-      {error && (
-        <span className="mt-1 block text-xs font-normal text-rose-600 dark:text-rose-400">
-          {error}
-        </span>
-      )}
-    </label>
-  );
+  return <FormField label={label} error={error}>{children}</FormField>;
 }
+
+const connectionSchema = z.object({
+  name: z.string().trim().min(1, "Connection name is required."),
+  kind: z.enum(["local", "remote"]),
+  host: z.string().trim(),
+  port: z.coerce.number().int().min(1, "Enter a valid port.").max(65535, "Enter a valid port."),
+  username: z.string().trim(),
+  auth_method: z.enum(["password", "key"]),
+  password: z.string(),
+  private_key: z.string(),
+}).superRefine((value, context) => {
+  if (value.kind !== "remote") return;
+  if (!value.host) context.addIssue({ code: z.ZodIssueCode.custom, path: ["host"], message: "Host or IP address is required." });
+  if (!value.username) context.addIssue({ code: z.ZodIssueCode.custom, path: ["username"], message: "Username is required." });
+  if (value.auth_method === "password" && !value.password.trim()) context.addIssue({ code: z.ZodIssueCode.custom, path: ["password"], message: "Password is required." });
+  if (value.auth_method === "key" && !value.private_key.trim()) context.addIssue({ code: z.ZodIssueCode.custom, path: ["private_key"], message: "Upload or paste a private key." });
+});
 
 export function TerminalSession({
   profile,
@@ -134,6 +141,9 @@ export function TerminalSession({
       );
   }, []);
   React.useEffect(() => {
+    const darkMode = document.documentElement.classList.contains("dark");
+    const surface = darkMode ? "#171717" : "#ffffff";
+    const foreground = darkMode ? "#d4d4d4" : "#1f1f1f";
     const terminal = new Terminal({
       cursorBlink: true,
       convertEol: true,
@@ -142,9 +152,9 @@ export function TerminalSession({
       fontFamily:
         "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
       theme: {
-        background: "#0f172a",
-        foreground: "#e2e8f0",
-        cursor: "#60a5fa",
+        background: surface,
+        foreground,
+        cursor: foreground,
       },
     });
     const addon = new FitAddon();
@@ -152,6 +162,21 @@ export function TerminalSession({
     terminal.open(root.current);
     term.current = terminal;
     fit.current = addon;
+    const applyTheme = () => {
+      const darkMode = document.documentElement.classList.contains("dark");
+      const foreground = darkMode ? "#d4d4d4" : "#1f1f1f";
+      terminal.options.theme = {
+        ...terminal.options.theme,
+        background: darkMode ? "#171717" : "#ffffff",
+        foreground,
+        cursor: foreground,
+      };
+    };
+    const themeObserver = new MutationObserver(applyTheme);
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
     const observer = new ResizeObserver(() => {
       addon.fit();
       resize();
@@ -178,6 +203,7 @@ export function TerminalSession({
     });
     if (enabled) open();
     return () => {
+      themeObserver.disconnect();
       observer.disconnect();
       inputDisposable.dispose();
       socket.current?.close();
@@ -206,7 +232,7 @@ export function TerminalSession({
     <div
       ref={root}
       onClick={() => term.current?.focus()}
-      className={`${visible ? "" : "hidden"} box-border h-[32rem] max-h-[32rem] min-h-0 w-full overflow-hidden rounded-lg bg-slate-900 p-3`}
+      className={`${visible ? "" : "hidden"} box-border h-[32rem] max-h-[32rem] min-h-0 w-full overflow-hidden rounded-lg bg-white p-3 dark:bg-neutral-900`}
     />
   );
 }
@@ -327,21 +353,9 @@ export default function TerminalPage({ autoConnect = false }) {
     );
   };
   const save = () => {
-    const nextErrors = {};
-    if (!form.name.trim()) nextErrors.name = "Connection name is required.";
-    if (form.kind === "remote") {
-      if (!form.host.trim())
-        nextErrors.host = "Host or IP address is required.";
-      if (!form.username.trim()) nextErrors.username = "Username is required.";
-      if (!form.port || form.port < 1 || form.port > 65535)
-        nextErrors.port = "Enter a valid port.";
-      if (form.auth_method === "password" && !form.password.trim())
-        nextErrors.password = "Password is required.";
-      if (form.auth_method === "key" && !form.private_key.trim())
-        nextErrors.private_key = "Upload or paste a private key.";
-    }
-    if (Object.keys(nextErrors).length) {
-      setErrors(nextErrors);
+    const validation = connectionSchema.safeParse(form);
+    if (!validation.success) {
+      setErrors(Object.fromEntries(validation.error.issues.map((issue) => [issue.path[0], issue.message])));
       return;
     }
     const profile = {
@@ -394,17 +408,9 @@ export default function TerminalPage({ autoConnect = false }) {
     setModal("edit");
   };
   const testConnection = () => {
-    const nextErrors = {};
-    if (!form.host.trim()) nextErrors.host = "Host or IP address is required.";
-    if (!form.username.trim()) nextErrors.username = "Username is required.";
-    if (!form.port || form.port < 1 || form.port > 65535)
-      nextErrors.port = "Enter a valid port.";
-    if (form.auth_method === "password" && !form.password.trim())
-      nextErrors.password = "Password is required.";
-    if (form.auth_method === "key" && !form.private_key.trim())
-      nextErrors.private_key = "Upload or paste a private key.";
-    if (Object.keys(nextErrors).length) {
-      setErrors(nextErrors);
+    const validation = connectionSchema.safeParse({ ...form, name: form.name || "Connection test" });
+    if (!validation.success) {
+      setErrors(Object.fromEntries(validation.error.issues.map((issue) => [issue.path[0], issue.message])));
       return;
     }
     testSocket.current?.close();
@@ -478,15 +484,15 @@ export default function TerminalPage({ autoConnect = false }) {
       <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <p className="text-sm text-blue-500">Tools / Terminal management</p>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">
+          <h1 className="mt-1 text-3xl font-semibold tracking-tight text-neutral-950 dark:text-white">
             Terminal
           </h1>
-          <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+          <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
             Save server connections once and open them whenever you need a
             shell.
           </p>
         </div>
-        <span className="flex items-center gap-2 text-sm text-slate-500">
+        <span className="flex items-center gap-2 text-sm text-neutral-500">
           <i
             className={`h-2 w-2 rounded-full ${connected ? "bg-emerald-500" : "bg-amber-500"}`}
           />
@@ -497,9 +503,9 @@ export default function TerminalPage({ autoConnect = false }) {
         className={`grid gap-6 ${dockerMode ? "" : "xl:grid-cols-[18rem_minmax(0,1fr)]"}`}
       >
         {!dockerMode && (
-          <aside className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
+          <aside className="rounded-xl border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900">
             <div className="flex items-center justify-between px-2 pb-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
                 Saved connections
               </p>
               <button onClick={openNew} className="p-1.5 text-blue-600">
@@ -514,14 +520,14 @@ export default function TerminalPage({ autoConnect = false }) {
               >
                 <button
                   onClick={() => choose(profile.id)}
-                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-3 pr-10 text-left ${activeId === profile.id ? "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300" : "text-slate-600 dark:text-slate-300"}`}
+                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-3 pr-10 text-left ${activeId === profile.id ? "bg-neutral-100 text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100" : "text-neutral-600 dark:text-neutral-300"}`}
                 >
                   <Server size={16} />
                   <span className="min-w-0 flex-1">
                     <strong className="block truncate text-sm">
                       {profile.name}
                     </strong>
-                    <small className="block truncate text-xs text-slate-500">
+                    <small className="block truncate text-xs text-neutral-500">
                       {profile.kind === "local"
                         ? "Docker local"
                         : `${profile.username}@${profile.host}`}
@@ -545,15 +551,15 @@ export default function TerminalPage({ autoConnect = false }) {
                         setMenuId(menuId === profile.id ? null : profile.id)
                       }
                       aria-label={`More actions for ${profile.name}`}
-                      className="absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded-full p-1.5 text-slate-400 opacity-0 hover:bg-slate-200 hover:text-slate-700 group-hover:opacity-100 dark:hover:bg-slate-700 dark:hover:text-slate-200"
+                      className="absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded-full p-1.5 text-neutral-400 opacity-0 hover:bg-neutral-200 hover:text-neutral-700 group-hover:opacity-100 dark:hover:bg-neutral-700 dark:hover:text-neutral-200"
                     >
                       <MoreHorizontal size={17} />
                     </button>
                     {menuId === profile.id && (
-                      <div className="absolute right-2 top-12 z-20 w-36 rounded-lg border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                      <div className="absolute right-2 top-12 z-20 w-36 rounded-lg border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
                         <button
                           onClick={() => editProfile(profile)}
-                          className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+                          className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
                         >
                           <Pencil size={14} /> Edit
                         </button>
@@ -571,21 +577,21 @@ export default function TerminalPage({ autoConnect = false }) {
             ))}
             <button
               onClick={openNew}
-              className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-2.5 text-sm font-semibold text-slate-600 dark:border-slate-700 dark:text-slate-300"
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-neutral-300 px-3 py-2.5 text-sm font-semibold text-neutral-600 dark:border-neutral-700 dark:text-neutral-300"
             >
               <Plus size={15} /> Add server
             </button>
           </aside>
         )}
-        <section className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-800">
+        <section className="min-w-0 overflow-hidden rounded-xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
             <div className="flex items-center gap-3">
               <TerminalIcon size={17} />
               <div>
-                <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
                   {current.name}
                 </p>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-neutral-500">
                   {current.kind === "local"
                     ? "Local Docker shell"
                     : current.kind === "docker"
@@ -654,20 +660,20 @@ export default function TerminalPage({ autoConnect = false }) {
         />
       )}
       {modal && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4">
-          <div className="max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-6 shadow-xl dark:bg-slate-900">
+        <div className="fixed inset-0 z-50 grid place-items-center bg-neutral-950/50 p-4">
+          <div className="max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-6 shadow-xl dark:bg-neutral-900">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-slate-950 dark:text-white">
+                <h2 className="text-lg font-semibold text-neutral-950 dark:text-white">
                   {modal === "edit"
                     ? "Edit connection"
                     : "Add server connection"}
                 </h2>
-                <p className="mt-1 text-sm text-slate-500">
+                <p className="mt-1 text-sm text-neutral-500">
                   Save an SSH profile for one-click access.
                 </p>
               </div>
-              <button onClick={() => setModal(null)} className="text-slate-400">
+              <button onClick={() => setModal(null)} className="text-neutral-400">
                 <X size={18} />
               </button>
             </div>
@@ -723,7 +729,7 @@ export default function TerminalPage({ autoConnect = false }) {
                     <div className="mt-2 flex gap-5">
                       <label className="flex items-center gap-2 text-sm">
                         <input
-                          className="h-4 w-4 shrink-0 border-slate-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 dark:border-slate-600 dark:bg-slate-800 dark:focus:ring-offset-slate-900"
+                          className="h-4 w-4 shrink-0 border-neutral-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 dark:border-neutral-600 dark:bg-neutral-800 dark:focus:ring-offset-neutral-900"
                           type="radio"
                           name="auth"
                           checked={form.auth_method === "password"}
@@ -735,7 +741,7 @@ export default function TerminalPage({ autoConnect = false }) {
                       </label>
                       <label className="flex items-center gap-2 text-sm">
                         <input
-                          className="h-4 w-4 shrink-0 border-slate-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 dark:border-slate-600 dark:bg-slate-800 dark:focus:ring-offset-slate-900"
+                          className="h-4 w-4 shrink-0 border-neutral-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 dark:border-neutral-600 dark:bg-neutral-800 dark:focus:ring-offset-neutral-900"
                           type="radio"
                           name="auth"
                           checked={form.auth_method === "key"}
@@ -765,7 +771,7 @@ export default function TerminalPage({ autoConnect = false }) {
                           aria-label={
                             showPassword ? "Hide password" : "Show password"
                           }
-                          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
                         >
                           {showPassword ? (
                             <EyeOff size={17} />
@@ -786,7 +792,7 @@ export default function TerminalPage({ autoConnect = false }) {
                         placeholder="Paste OpenSSH private key"
                       />
                       <input
-                        className="mt-3 block w-full text-sm text-slate-500"
+                        className="mt-3 block w-full text-sm text-neutral-500"
                         type="file"
                         accept=".pem,.key"
                         onChange={(event) => {
@@ -810,7 +816,7 @@ export default function TerminalPage({ autoConnect = false }) {
               )}
             </div>
             <span
-              className={`mt-4 block text-left text-sm ${testState === "Connected" ? "text-emerald-600 dark:text-emerald-400" : testState === "Connection failed" ? "text-rose-600 dark:text-rose-400" : "text-slate-700 dark:text-slate-200"}`}
+              className={`mt-4 block text-left text-sm ${testState === "Connected" ? "text-emerald-600 dark:text-emerald-400" : testState === "Connection failed" ? "text-rose-600 dark:text-rose-400" : "text-neutral-700 dark:text-neutral-200"}`}
             >
               {testState}
             </span>
@@ -818,7 +824,7 @@ export default function TerminalPage({ autoConnect = false }) {
               <button
                 onClick={testConnection}
                 disabled={!!testState && testState.startsWith("Testing")}
-                className="mr-auto rounded-md px-0 py-2 text-sm font-normal text-slate-800 hover:text-slate-950 disabled:cursor-wait disabled:opacity-60 dark:text-slate-100 dark:hover:text-white"
+                className="mr-auto rounded-md px-0 py-2 text-sm font-normal text-neutral-800 hover:text-neutral-950 disabled:cursor-wait disabled:opacity-60 dark:text-neutral-100 dark:hover:text-white"
               >
                 {testState === "Testing connection…"
                   ? "Testing…"

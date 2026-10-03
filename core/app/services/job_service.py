@@ -12,17 +12,23 @@ import urllib.request
 import re
 import shutil
 import shlex
+import socket
 import subprocess
 import tempfile
 import time
+import uuid
 import zipfile
 from pathlib import Path
 from threading import Event, Thread
 from threading import Lock
 
 from app.models.job import JobSummary
+from app.models.website import Website, WebsiteUpdateRequest
+from app.models.projects import NodeProject
+from app.services.website_service import website_service
 from app.services.service_catalog import apache_source_for, bind9_source_for, certbot_source_for, caddy_source_for, clamav_source_for, dovecot_source_for, ffmpeg_source_for, git_source_for, haproxy_source_for, imagemagick_source_for, lynis_source_for, mariadb_source_for, memcached_source_for, mongodb_prebuilt_for, mongodb_source_for, mysql_release_for, nginx_source_for, opensearch_source_for, openlitespeed_prebuilt_for, openlitespeed_source_for, php_source_for, postfix_source_for, powerdns_source_for, postgresql_source_for, prebuilt_package_for, python_asset_for, python_source_for, rabbitmq_source_for, redis_source_for, refresh_service_versions, rspamd_source_for, ruby_source_for, stalwart_prebuilt_for, stalwart_source_for, supervisor_source_for, unbound_source_for, valkey_source_for, vsftpd_source_for, wpcli_source_for
-from app.services.service_runtime import PHP_BASELINE_MODULES, PHP_REQUIRED_EXTENSIONS, SERVICE_PACKAGES, binary_path, enable_php_baseline_extensions, ensure_composer_cache, ensure_nginx_layout, ensure_node_runtime, ensure_php_fpm_layout, ensure_php_runtime_configuration, ensure_php_runtime_launcher, managed_library_environment, nginx_paths, normalize_php_runtime_layout, package_for, php_cli_path, php_fpm_paths, php_runtime_library_path, prepare_mysql_runtime, service_root, startup_enabled, version_sort_key
+from app.services.service_runtime import PHP_BASELINE_MODULES, PHP_REQUIRED_EXTENSIONS, SERVICE_PACKAGES, binary_path, enable_php_baseline_extensions, ensure_composer_cache, ensure_nginx_layout, ensure_node_runtime, ensure_php_fpm_layout, ensure_php_runtime_configuration, ensure_php_runtime_launcher, managed_library_environment, nginx_paths, normalize_php_runtime_layout, package_for, php_cli_path, php_fpm_paths, php_runtime_library_path, prepare_mongodb_runtime, prepare_mysql_runtime, prepare_postgresql_runtime, service_root, startup_enabled, version_sort_key
+from app.services.database_credentials import database_credentials
 
 
 class InstallCancelled(Exception):
@@ -63,6 +69,27 @@ class JobStore:
 
     def _broadcast(self, job: JobSummary | None = None):
         payload = {"type": "job", "job": job.model_dump(mode="json")} if job else {"type": "snapshot", "jobs": self.snapshot()}
+        with self._lock:
+            subscribers = list(self._subscribers)
+        for loop, queue in subscribers:
+            loop.call_soon_threadsafe(queue.put_nowait, payload)
+
+    def _broadcast_service_status(self, service_id: str, action: str, status: str, message: str = ""):
+        payload = {
+            "type": "service-status",
+            "serviceId": service_id,
+            "action": action,
+            "status": status,
+            "running": status == "succeeded" and action in {"start", "restart"},
+            "message": message,
+        }
+        with self._lock:
+            subscribers = list(self._subscribers)
+        for loop, queue in subscribers:
+            loop.call_soon_threadsafe(queue.put_nowait, payload)
+
+    def publish(self, payload: dict):
+        """Publish a small authenticated state event on the shared jobs socket."""
         with self._lock:
             subscribers = list(self._subscribers)
         for loop, queue in subscribers:
@@ -245,6 +272,555 @@ class JobStore:
         Thread(target=self._run_serialized, args=(self._run_provider_shield_connector, job_id, provider), daemon=True).start()
         return job
 
+    def enqueue_malware_scan(self, job_id: str, target: str) -> JobSummary:
+        job = self.create(job_id, f"Scan {target} with ClamAV")
+        Thread(target=self._run_serialized, args=(self._run_malware_scan, job_id, target), daemon=True).start()
+        return job
+
+    def enqueue_malware_quarantine(self, job_id: str, source: str, detection_id: str) -> JobSummary:
+        job = self.create(job_id, "Quarantine malware detection")
+        Thread(target=self._run_serialized, args=(self._run_malware_quarantine, job_id, source, detection_id), daemon=True).start()
+        return job
+
+    def _run_malware_quarantine(self, job_id: str, source: str, detection_id: str):
+        source_path = Path(source).resolve()
+        allowed_roots = [
+            Path(os.getenv("SE_WEB_ROOT", "/server-engine/www")).resolve(),
+            Path(os.getenv("SE_BACKUP_ROOT", "/server-engine/backups")).resolve(),
+            Path(os.getenv("SE_MAIL_ROOT", "/server-engine/mail")).resolve(),
+        ]
+        if not any(source_path == root or root in source_path.parents for root in allowed_roots):
+            raise RuntimeError("Only managed website, backup, and mail files can be quarantined.")
+        if not source_path.is_file():
+            raise RuntimeError("The detected file no longer exists or is not a regular file.")
+        quarantine = service_root("clamav") / "data/quarantine"
+        quarantine.mkdir(parents=True, exist_ok=True)
+        destination = quarantine / f"{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}-{source_path.name}"
+        self._update(job_id, status="running", progress=20, message=f"Moving {source_path.name} to quarantine…", log=[f"Source: {source_path}", f"Destination: {destination}"])
+        shutil.move(str(source_path), str(destination))
+        manifest_file = Path(os.getenv("SE_STATE_DIR", "/var/lib/server-engine")) / "malware/quarantine.json"
+        manifest_file.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            manifest = json.loads(manifest_file.read_text()) if manifest_file.exists() else []
+            if not isinstance(manifest, list):
+                manifest = []
+        except (OSError, json.JSONDecodeError):
+            manifest = []
+        timestamp = datetime.now(timezone.utc).isoformat()
+        manifest.insert(0, {"id": detection_id, "source": str(source_path), "quarantine_path": str(destination), "quarantined_at": timestamp})
+        manifest_file.write_text(json.dumps(manifest[:500], indent=2) + "\n")
+        try:
+            owner = pwd.getpwnam("serverengine")
+            os.chown(destination, owner.pw_uid, owner.pw_gid)
+            os.chown(manifest_file, owner.pw_uid, owner.pw_gid)
+        except (KeyError, OSError):
+            pass
+        self._update(job_id, status="succeeded", progress=100, message=f"Moved {source_path.name} to quarantine.", log=[f"Quarantined: {destination}"])
+
+    def _run_malware_scan(self, job_id: str, target: str):
+        """Prepare the managed ClamAV runtime and scan one supported area."""
+        root = service_root("clamav")
+        scanner = next((candidate for candidate in (root / "bin/clamscan", root / "usr/bin/clamscan") if candidate.exists()), None)
+        freshclam = next((candidate for candidate in (root / "bin/freshclam", root / "usr/bin/freshclam") if candidate.exists()), None)
+        if scanner is None:
+            raise RuntimeError("ClamAV is installed but clamscan is missing. Reinstall ClamAV, then try again.")
+        runtime_env = managed_library_environment(root)
+        targets = {
+            "websites": Path(os.getenv("SE_WEB_ROOT", "/server-engine/www")),
+            "backups": Path(os.getenv("SE_BACKUP_ROOT", "/server-engine/backups")),
+            "mail": Path(os.getenv("SE_MAIL_ROOT", "/server-engine/mail")),
+        }
+        scan_path = targets.get(target)
+        if scan_path is None:
+            raise RuntimeError("Choose a supported scan target.")
+        if not scan_path.exists():
+            raise RuntimeError(f"The selected scan folder does not exist: {scan_path}")
+        database = root / "data/database"
+        logs = Path(os.getenv("SE_LOG_ROOT", "/server-engine/logs")) / "clamav"
+        run = root / "run"
+        quarantine = root / "data/quarantine"
+        certs = root / "etc/certs"
+        conf = root / "conf"
+        for directory in (database, logs, run, quarantine, certs, conf):
+            directory.mkdir(parents=True, exist_ok=True)
+        try:
+            owner = pwd.getpwnam("serverengine")
+            for directory in (database, logs, run, quarantine, certs, conf):
+                os.chown(directory, owner.pw_uid, owner.pw_gid)
+        except (KeyError, OSError):
+            pass
+        if not any(certs.iterdir()):
+            for candidate in root.rglob("*"):
+                if candidate.parent == certs or not candidate.is_file() or candidate.suffix.lower() not in {".crt", ".pem"}:
+                    continue
+                try:
+                    shutil.copy2(candidate, certs / candidate.name)
+                except OSError:
+                    pass
+        if not any(certs.iterdir()):
+            certificate_url = "https://raw.githubusercontent.com/Cisco-Talos/clamav/main/certs/clamav.crt"
+            certificate = certs / "clamav.crt"
+            try:
+                with urllib.request.urlopen(certificate_url, timeout=60) as response:
+                    content = response.read()
+                if b"BEGIN CERTIFICATE" not in content:
+                    raise RuntimeError("The downloaded ClamAV certificate was not valid PEM data.")
+                certificate.write_bytes(content)
+            except Exception as error:
+                raise RuntimeError(f"ClamAV certificate setup failed: {error}") from error
+        freshclam_config = conf / "freshclam.conf"
+        freshclam_config.write_text(
+            "DatabaseDirectory " + str(database) + "\n"
+            + "CVDCertsDirectory " + str(certs) + "\n"
+            + "DatabaseMirror database.clamav.net\n"
+            + "UpdateLogFile " + str(logs / "freshclam.log") + "\n"
+            + "LogTime yes\n"
+            + "DatabaseOwner serverengine\n"
+        )
+        log_path = logs / "scanner.log"
+        runtime_env["CVD_CERTS_DIR"] = str(certs)
+        self._update(job_id, status="running", progress=5, message="Preparing ClamAV scan controls…", log=[f"ClamAV root: {root}", f"Scanner: {scanner}", f"Target: {scan_path}"])
+        signature_files = [item for pattern in ("*.cvd", "*.cld", "*.cud") for item in database.glob(pattern)]
+        signatures = bool(signature_files)
+        newest_signature = max((item.stat().st_mtime for item in signature_files), default=0)
+        signatures_current = signatures and (time.time() - newest_signature) < 86400
+        if freshclam and not signatures_current:
+            self._update(job_id, progress=18, message="Refreshing ClamAV virus signatures…", log=[f"$ {freshclam} --config-file={freshclam_config} --cvdcertsdir={certs}"])
+            update = subprocess.run([str(freshclam), f"--config-file={freshclam_config}", f"--cvdcertsdir={certs}"], capture_output=True, text=True, check=False, timeout=900, env=runtime_env)
+            output = (update.stdout or "") + (update.stderr or "")
+            if output.strip():
+                self._update(job_id, log=output.splitlines()[-80:])
+            signatures = any(database.glob(pattern) for pattern in ("*.cvd", "*.cld", "*.cud"))
+            if update.returncode != 0 and not signatures:
+                raise RuntimeError("ClamAV could not download virus signatures. Open the job output and check network access to the signature mirror.")
+            try:
+                owner = pwd.getpwnam("serverengine")
+                for item in database.iterdir():
+                    os.chown(item, owner.pw_uid, owner.pw_gid)
+            except (KeyError, OSError):
+                pass
+        elif signatures_current:
+            self._update(job_id, progress=18, message="Using the current ClamAV virus signatures.", log=[f"Signature database: {database}", "FreshClam refresh skipped; signatures are less than 24 hours old."])
+        if not signatures:
+            raise RuntimeError(f"No usable ClamAV virus signatures were found in {database}. FreshClam must complete before scanning.")
+        # Keep CVD certificate verification inside the managed runtime rather
+        # than allowing libclamav to fall back to the host configuration.
+        total_files = 0
+        for current, _directories, files in os.walk(scan_path):
+            total_files += len(files)
+        command = [str(scanner), "--database", str(database), "--cvdcertsdir", str(certs), "--recursive", "--infected", "--verbose", f"--log={log_path}", str(scan_path)]
+        self._update(job_id, progress=30, message=f"Scanning {scan_path}… {total_files:,} files found", log=[f"Indexed {total_files:,} files under {scan_path}", f"$ {' '.join(shlex.quote(item) for item in command)}"])
+        output = []
+        scanned_files = 0
+        reported_files = None
+        threats_found = 0
+        detections = []
+        with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, env=runtime_env) as process:
+            for line in process.stdout or []:
+                if line.strip():
+                    output.append(line.rstrip())
+                    if len(output) > 1000:
+                        del output[:-1000]
+                    if not line.startswith(("-----------", "Known viruses:", "Engine version:", "Scanned directories:", "Scanned files:", "Infected files:", "Data scanned:", "Data read:", "Time:", "Start Date:", "End Date:")):
+                        scanned_files += 1
+                    if line.startswith("Scanned files:"):
+                        try:
+                            reported_files = int(line.split(":", 1)[1].strip().replace(",", ""))
+                        except (IndexError, ValueError):
+                            pass
+                    if " FOUND" in line:
+                        threats_found += 1
+                        detection_line = line.strip()
+                        if detection_line not in detections:
+                            detections.append(detection_line)
+                    progress = min(95, 30 + round((scanned_files / max(total_files, 1)) * 65))
+                    if scanned_files == 1 or scanned_files % 25 == 0 or "FOUND" in line:
+                        self._update(job_id, progress=progress, message=f"Scanning {scan_path}… {min(scanned_files, total_files):,}/{total_files:,} files", log=output[-120:])
+            return_code = process.wait()
+        try:
+            owner = pwd.getpwnam("serverengine")
+            if log_path.exists():
+                os.chown(log_path, owner.pw_uid, owner.pw_gid)
+        except (KeyError, OSError):
+            pass
+        result_file = Path(os.getenv("SE_STATE_DIR", "/var/lib/server-engine")) / "malware" / "latest.json"
+        result_file.parent.mkdir(parents=True, exist_ok=True)
+        files_scanned = reported_files if reported_files is not None else total_files
+        completed_at = datetime.now(timezone.utc).isoformat()
+        result = {"target": target, "path": str(scan_path), "return_code": return_code, "files_found": total_files, "files_scanned": files_scanned, "files_reported": scanned_files, "threats_found": threats_found, "detections": detections[-500:], "completed_at": completed_at, "log": output[-1000:]}
+        result_file.write_text(json.dumps(result, indent=2) + "\n")
+        history_file = result_file.with_name("history.json")
+        try:
+            history = json.loads(history_file.read_text()) if history_file.exists() else []
+            if not isinstance(history, list):
+                history = []
+        except (OSError, json.JSONDecodeError):
+            history = []
+        history = [item for item in history if item.get("id") != job_id]
+        history.insert(0, {"id": job_id, "target": target, "path": str(scan_path), "status": "succeeded" if return_code <= 1 else "failed", "return_code": return_code, "files_scanned": files_scanned, "threats_found": threats_found, "created_at": completed_at, "updated_at": completed_at, "message": "Scan completed with detections." if threats_found else "Scan completed cleanly."})
+        history_file.write_text(json.dumps(history[:100], indent=2) + "\n")
+        try:
+            owner = pwd.getpwnam("serverengine")
+            os.chown(result_file, owner.pw_uid, owner.pw_gid)
+            os.chown(history_file, owner.pw_uid, owner.pw_gid)
+        except (KeyError, OSError):
+            pass
+        if return_code > 1:
+            raise RuntimeError(output[-1] if output else "ClamAV scan failed.")
+        message = f"ClamAV scan completed cleanly. Scanned {total_files:,} files." if return_code == 0 else f"ClamAV scan completed and found one or more threats after scanning {total_files:,} files. Review the scan output before quarantine."
+        self._update(job_id, status="succeeded", progress=100, message=message, log=[message])
+
+    def enqueue_application_deploy(self, job_id: str, site: Website, template: str, database_engine: str = "", database_password: str = "", wordpress_version: str = "latest", wordpress_admin_user: str = "", wordpress_admin_password: str = "", wordpress_database_prefix: str = "wp_", wordpress_site_title: str = "") -> JobSummary:
+        job = self.create(job_id, f"Deploy {template.title()} · {site.domain}")
+        Thread(target=self._run_serialized, args=(self._run_application_deploy, job_id, site, template, database_engine, database_password, wordpress_version, wordpress_admin_user, wordpress_admin_password, wordpress_database_prefix, wordpress_site_title), daemon=True).start()
+        return job
+
+    def enqueue_node_project_action(self, job_id: str, project: NodeProject, action: str) -> JobSummary:
+        job = self.create(job_id, f"{action.title()} Node.js project · {project.domain}")
+        Thread(target=self._run_serialized, args=(self._run_node_project_action, job_id, project, action), daemon=True).start()
+        return job
+
+    def enqueue_node_project_setup(self, job_id: str, project: NodeProject) -> JobSummary:
+        job = self.create(job_id, f"Prepare Node.js project · {project.domain}")
+        Thread(target=self._run_serialized, args=(self._run_node_project_setup, job_id, project), daemon=True).start()
+        return job
+
+    def _run_node_project_setup(self, job_id: str, project: NodeProject):
+        try:
+            node_root = service_root("nodejs", project.node_version)
+            node_bin = node_root / "bin"
+            npm = node_bin / ("npm.cmd" if os.name == "nt" else "npm")
+            if not npm.exists():
+                npm = node_bin / "npm"
+            if not npm.exists():
+                raise RuntimeError(f"Node.js {project.node_version} does not contain npm.")
+            env = {**os.environ, "PATH": f"{node_bin}:{os.environ.get('PATH', '')}", "NODE_ENV": "production", "PORT": str(project.port)}
+            project_path = Path(project.project_path)
+            project_path.mkdir(parents=True, exist_ok=True)
+            self._update(job_id, status="running", progress=5, message=f"Preparing {project.template_id} project…", log=[f"Project: {project_path}", f"Node.js: {node_root}"])
+            scaffold = {
+                "react": [str(npm), "create", "vite@latest", ".", "--", "--template", "react"],
+                "vue": [str(npm), "create", "vite@latest", ".", "--", "--template", "vue"],
+                "svelte": [str(npm), "create", "vite@latest", ".", "--", "--template", "svelte"],
+                "express": [str(npm), "init", "-y"],
+                "nextjs": [str(npm), "exec", "create-next-app@latest", ".", "--", "--use-npm", "--yes"],
+                "nestjs": [str(npm), "exec", "@nestjs/cli", "new", ".", "--package-manager", "npm", "--skip-git", "--language", "TS"],
+            }.get(project.template_id)
+            if scaffold and not (project_path / "package.json").exists():
+                self._run_project_command(job_id, scaffold, project_path, env, 10, 40, "Creating project files")
+            package_json = project_path / "package.json"
+            if not package_json.exists():
+                raise RuntimeError("The project template did not create package.json.")
+            install = shlex.split(project.install_command)
+            if install and install[0] in {"npm", "pnpm", "yarn"}:
+                install[0] = str(node_bin / install[0])
+            self._run_project_command(job_id, install, project_path, env, 45, 75, "Installing Node.js dependencies")
+            if project.build_command.strip():
+                build = shlex.split(project.build_command)
+                if build and build[0] in {"npm", "pnpm", "yarn"}:
+                    build[0] = str(node_bin / build[0])
+                self._run_project_command(job_id, build, project_path, env, 80, 95, "Building the Node.js project")
+            self._set_application_owner(project_path)
+            project_service = __import__("app.services.project_service", fromlist=["project_service"]).project_service
+            project_service.set_node_status(project.id, "disabled")
+            self.enqueue_action(f"provider-reload-node-{project.id}-{uuid.uuid4().hex[:8]}", project.server_type, "restart")
+            self._update(job_id, status="succeeded", progress=100, message=f"Node.js project {project.domain} is ready. Start it from the project list.", log=["Node.js project setup completed successfully."])
+        except Exception as error:
+            from app.services.project_service import project_service
+            project_service.set_node_status(project.id, "error")
+            self._update(job_id, status="failed", message=str(error))
+
+    def _run_project_command(self, job_id: str, command: list[str], cwd: Path, env: dict[str, str], start: int, end: int, message: str):
+        if not command:
+            return
+        self._update(job_id, progress=start, message=message, log=[f"$ {' '.join(shlex.quote(item) for item in command)}"])
+        process = subprocess.Popen(command, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        output = []
+        for line in process.stdout or []:
+            output.append(line.rstrip())
+            self._update(job_id, progress=min(end, start + max(1, len(output) // 4)), message=message, log=output[-80:])
+        if process.wait() != 0:
+            raise RuntimeError(output[-1] if output else f"{message} failed.")
+
+    def _run_node_project_action(self, job_id: str, project: NodeProject, action: str):
+        from app.services.project_service import project_service
+        try:
+            if project.process_manager == "none":
+                raise RuntimeError("This project is configured for manual process management.")
+            config = Path(project.process_config_path)
+            if not config.exists():
+                raise RuntimeError("The process definition is missing. Recreate the project configuration first.")
+            if project.process_manager == "pm2":
+                manager = binary_path("pm2")
+                command = [str(manager), action if action != "restart" else "restart", project.name if action != "start" else str(config)]
+            else:
+                root = service_root("supervisor")
+                manager = root / "venv/bin/supervisorctl"
+                if not manager.exists():
+                    manager = root / "bin/supervisorctl"
+                command = [str(manager), "-c", str(root / "conf/supervisord.conf"), action, project.name]
+            self._update(job_id, status="running", progress=20, message=f"{action.title()}ing {project.domain}…", log=[f"$ {' '.join(shlex.quote(item) for item in command)}"])
+            result = subprocess.run(command, cwd=project.project_path, capture_output=True, text=True, check=False, timeout=60)
+            output = (result.stdout + result.stderr).strip()
+            if result.returncode != 0:
+                raise RuntimeError(output or f"The {project.process_manager} action failed.")
+            status = "running" if action in {"start", "restart"} else "disabled"
+            project_service.set_node_status(project.id, status)
+            self._update(job_id, status="succeeded", progress=100, message=f"Node.js project {action} completed.", log=[output] if output else [])
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+
+    @staticmethod
+    def _safe_extract_tarball(archive: Path, destination: Path) -> None:
+        destination = destination.resolve()
+        with tarfile.open(archive, "r:gz") as package:
+            for member in package.getmembers():
+                target = (destination / member.name).resolve()
+                if destination not in target.parents and target != destination:
+                    raise RuntimeError("The application archive contains an unsafe path.")
+                if member.isdir():
+                    target.mkdir(parents=True, exist_ok=True)
+                elif member.isfile():
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    stream = package.extractfile(member)
+                    if stream is not None:
+                        with stream, target.open("wb") as output:
+                            shutil.copyfileobj(stream, output)
+
+    @staticmethod
+    def _set_application_owner(path: Path) -> None:
+        try:
+            owner = pwd.getpwnam("serverengine")
+        except KeyError:
+            return
+        for item in [path, *path.rglob("*")]:
+            try:
+                os.chown(item, owner.pw_uid, owner.pw_gid)
+            except OSError:
+                pass
+
+    def _provision_mysql_database(self, job_id: str, site: Website, database_name: str, database_user: str, database_password: str) -> tuple[str, str, str]:
+        if not re.fullmatch(r"[A-Za-z0-9_$-]{1,64}", database_name or ""):
+            raise RuntimeError("The application database name is invalid.")
+        if not re.fullmatch(r"[A-Za-z0-9_$-]{1,32}", database_user or ""):
+            raise RuntimeError("The application database user is invalid.")
+        root = service_root("mysql")
+        client = root / "bin/mysql"
+        socket = root / "run/mysql.sock"
+        if not client.exists() or not socket.exists():
+            raise RuntimeError("MySQL must be installed and running before database provisioning.")
+        password = database_password or secrets.token_urlsafe(18)
+        escaped_name = database_name.replace("`", "``")
+        escaped_user = database_user.replace("'", "''")
+        escaped_password = password.replace("\\", "\\\\").replace("'", "\\'")
+        sql = (
+            f"CREATE DATABASE IF NOT EXISTS `{escaped_name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; "
+            f"CREATE USER IF NOT EXISTS '{escaped_user}'@'localhost' IDENTIFIED BY '{escaped_password}'; "
+            f"ALTER USER '{escaped_user}'@'localhost' IDENTIFIED BY '{escaped_password}'; "
+            f"GRANT ALL PRIVILEGES ON `{escaped_name}`.* TO '{escaped_user}'@'localhost'; FLUSH PRIVILEGES;"
+        )
+        self._update(job_id, progress=88, message=f"Creating the MySQL database {database_name}…", log=[f"$ {client} --socket={socket} -uroot -e 'provision application database'"])
+        result = subprocess.run(
+            [str(client), "--protocol=SOCKET", f"--socket={socket}", "-uroot", "--batch", "--skip-column-names", "-e", sql],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=prepare_mysql_runtime(root),
+            timeout=30,
+        )
+        if result.returncode != 0:
+            raise RuntimeError((result.stderr or result.stdout).strip() or "MySQL rejected the application database setup.")
+        database_credentials.save("mysql", database_name, database_user, password)
+        return database_name, database_user, password
+
+    @staticmethod
+    def _write_application_database_config(site: Website, template: str, credentials: tuple[str, str, str] | None, wordpress_database_prefix: str = "wp_") -> None:
+        if not credentials:
+            return
+        database_name, database_user, database_password = credentials
+        project = Path(site.project_path)
+        if template == "laravel":
+            env_file = project / ".env"
+            if not env_file.exists():
+                return
+            values = {
+                "DB_CONNECTION": "mysql",
+                "DB_HOST": "127.0.0.1",
+                "DB_PORT": "3306",
+                "DB_DATABASE": database_name,
+                "DB_USERNAME": database_user,
+                "DB_PASSWORD": database_password,
+            }
+            lines = env_file.read_text(errors="replace").splitlines()
+            for key, value in values.items():
+                pattern = re.compile(rf"^{re.escape(key)}=")
+                replacement = f"{key}={value}"
+                for index, line in enumerate(lines):
+                    if pattern.match(line):
+                        lines[index] = replacement
+                        break
+                else:
+                    lines.append(replacement)
+            env_file.write_text("\n".join(lines) + "\n")
+        elif template == "wordpress":
+            sample = project / "wp-config-sample.php"
+            if not sample.exists() or (project / "wp-config.php").exists():
+                return
+            content = sample.read_text(errors="replace")
+            replacements = {
+                "database_name_here": database_name,
+                "username_here": database_user,
+                "password_here": database_password,
+                "localhost": "127.0.0.1",
+            }
+            for old, new in replacements.items():
+                content = content.replace(old, new.replace("\\", "\\\\").replace("'", "\\'"))
+            content = re.sub(r"\$table_prefix\s*=\s*'[^']*';", f"$table_prefix = '{wordpress_database_prefix}';", content)
+            (project / "wp-config.php").write_text(content)
+
+    def _finalize_laravel(self, job_id: str, site: Website) -> None:
+        artisan = Path(site.project_path) / "artisan"
+        if not artisan.exists():
+            raise RuntimeError("Laravel was downloaded, but its artisan file is missing.")
+        php = php_cli_path(site.php_version) if site.php_version else None
+        if not php or not php.exists():
+            raise RuntimeError("Laravel was installed, but the selected PHP CLI runtime is unavailable.")
+        php_root = service_root("php", site.php_version)
+        ensure_php_runtime_configuration(site.php_version)
+        command = [str(php), str(artisan), "key:generate", "--force", "--no-interaction"]
+        self._update(job_id, progress=86, message="Generating the Laravel application key…", log=[f"$ {' '.join(shlex.quote(item) for item in command)}"])
+        result = subprocess.run(
+            command,
+            cwd=site.project_path,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+            env={
+                **os.environ,
+                "LD_LIBRARY_PATH": php_runtime_library_path(php_root),
+                "PHP_INI_SCAN_DIR": str(php_root / "conf/conf.d"),
+            },
+        )
+        if result.returncode != 0:
+            raise RuntimeError((result.stderr or result.stdout).strip() or "Laravel could not generate its application key.")
+
+    def _install_wordpress_core(self, job_id: str, site: Website, admin_user: str, admin_password: str, site_title: str, credentials: tuple[str, str, str] | None) -> None:
+        if not credentials:
+            raise RuntimeError("WordPress deployment requires a database before the administrator account can be created.")
+        php = php_cli_path(site.php_version) if site.php_version else None
+        if not php or not php.exists():
+            raise RuntimeError("WordPress was downloaded, but the selected PHP CLI runtime is unavailable.")
+        wp_root = service_root("wp-cli") / "versions"
+        candidates = sorted([*wp_root.glob("*/bin/wp"), *wp_root.glob("*/wp-cli.phar")], key=lambda path: version_sort_key(path.parent.parent.name if path.parent.name == "bin" else path.parent.name), reverse=True)
+        if not candidates:
+            raise RuntimeError("Install WP-CLI before deploying WordPress so Server Engine can create the administrator account.")
+        wp = candidates[0]
+        scheme = "https" if site.ssl_enabled else "http"
+        command = [str(php), str(wp), "core", "install", f"--path={site.project_path}", f"--url={scheme}://{site.domain}", f"--title={site_title.strip() or site.domain}", f"--admin_user={admin_user}", f"--admin_password={admin_password}", f"--admin_email=admin@{site.domain}", "--skip-email", "--quiet", "--allow-root"]
+        php_root = service_root("php", site.php_version)
+        ensure_php_runtime_configuration(site.php_version)
+        display_command = ["--admin_password=********" if item.startswith("--admin_password=") else item for item in command]
+        self._update(job_id, progress=96, message="Creating the WordPress administrator account…", log=[f"$ {' '.join(shlex.quote(item) for item in display_command)}"])
+        result = subprocess.run(command, cwd=site.project_path, capture_output=True, text=True, check=False, timeout=120, env={**os.environ, "LD_LIBRARY_PATH": php_runtime_library_path(php_root), "PHP_INI_SCAN_DIR": str(php_root / "conf/conf.d")})
+        if result.returncode != 0:
+            raise RuntimeError((result.stderr or result.stdout).strip() or "WP-CLI could not complete the WordPress installation.")
+        description = site.notes.strip()
+        if description:
+            description_command = [str(php), str(wp), "option", "update", "blogdescription", description, f"--path={site.project_path}", "--quiet", "--allow-root"]
+            self._update(job_id, progress=97, message="Saving the WordPress site description…", log=[f"$ {' '.join(shlex.quote(item) for item in description_command)}"])
+            description_result = subprocess.run(description_command, cwd=site.project_path, capture_output=True, text=True, check=False, timeout=60, env={**os.environ, "LD_LIBRARY_PATH": php_runtime_library_path(php_root), "PHP_INI_SCAN_DIR": str(php_root / "conf/conf.d")})
+            if description_result.returncode != 0:
+                raise RuntimeError((description_result.stderr or description_result.stdout).strip() or "WP-CLI could not save the WordPress site description.")
+
+    @staticmethod
+    def _verify_application_layout(site: Website, template: str) -> None:
+        project = Path(site.project_path)
+        if template == "wordpress":
+            required = [project / "index.php", project / "wp-admin", project / "wp-includes"]
+        else:
+            required = [project / "vendor"]
+            if template == "laravel":
+                required.append(project / "artisan")
+            else:
+                roots = {"drupal": "web", "yii": "web", "symfony": "public", "cakephp": "webroot", "codeigniter4": "public", "slim": "public", "laminas": "public"}
+                required.append(project / roots.get(template, "public") / "index.php")
+        missing = [str(item.relative_to(project)) for item in required if not item.exists()]
+        if missing:
+            raise RuntimeError(f"{template.title()} deployment is incomplete; missing {', '.join(missing)}.")
+        if site.web_root != "." and not (project / site.web_root).is_dir():
+            raise RuntimeError(f"The configured document root {site.web_root} does not exist.")
+
+    def _run_application_deploy(self, job_id: str, site: Website, template: str, database_engine: str = "", database_password: str = "", wordpress_version: str = "latest", wordpress_admin_user: str = "", wordpress_admin_password: str = "", wordpress_database_prefix: str = "wp_", wordpress_site_title: str = ""):
+        project = Path(site.project_path)
+        staging = project.parent / f".server-engine-{template}-{job_id}-staging"
+        archive = staging / "application.tar.gz"
+        try:
+            staging.mkdir(parents=True, exist_ok=True)
+            project.mkdir(parents=True, exist_ok=True)
+            self._update(job_id, status="running", progress=5, message=f"Preparing {template.title()} for {site.domain}…", log=[f"Project: {project}"])
+            self._raise_if_cancelled(job_id)
+            if template == "wordpress":
+                requested_version = wordpress_version.strip() or "latest"
+                url = "https://wordpress.org/latest.tar.gz" if requested_version.lower() == "latest" else f"https://wordpress.org/wordpress-{requested_version}.tar.gz"
+                self._update(job_id, progress=15, message="Downloading the current WordPress release…", log=[f"$ curl -fL {url} -o {archive}"])
+                request = urllib.request.Request(url, headers={"User-Agent": "Server-Engine-Control-Panel"})
+                with urllib.request.urlopen(request, timeout=180) as response, archive.open("wb") as output:
+                    shutil.copyfileobj(response, output)
+                self._update(job_id, progress=45, message="Extracting WordPress into the project folder…")
+                self._safe_extract_tarball(archive, staging / "extracted")
+                source = staging / "extracted" / "wordpress"
+                for item in source.iterdir():
+                    target = project / item.name
+                    if target.exists():
+                        raise RuntimeError(f"The project folder already contains {item.name}; deployment stopped to avoid overwriting it.")
+                    shutil.move(str(item), str(target))
+            elif template in {"laravel", "drupal", "symfony", "cakephp", "codeigniter4", "yii", "slim", "laminas"}:
+                composer = service_root("composer") / "bin/composer"
+                if not composer.exists():
+                    raise RuntimeError("This PHP application requires Composer. Install Composer, then retry.")
+                if any(project.iterdir()):
+                    raise RuntimeError(f"{template.title()} deployment requires an empty project folder to protect existing files.")
+                packages = {"laravel": "laravel/laravel", "drupal": "drupal/recommended-project", "symfony": "symfony/skeleton", "cakephp": "cakephp/app", "codeigniter4": "codeigniter4/appstarter", "yii": "yiisoft/yii2-app-basic", "slim": "slim/slim-skeleton", "laminas": "laminas/laminas-mvc-skeleton"}
+                command = [str(composer), "create-project", packages[template], str(project), "--no-interaction", "--prefer-dist"]
+                self._update(job_id, progress=15, message=f"Installing {template.title()} with the managed Composer runtime…", log=[f"$ {' '.join(shlex.quote(item) for item in command)}"])
+                process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env={**os.environ, "COMPOSER_MEMORY_LIMIT": "-1"})
+                output = []
+                for line in process.stdout or []:
+                    output.append(line.rstrip())
+                    self._update(job_id, progress=min(85, 20 + len(output) // 2), message=f"Installing {template.title()} dependencies…", log=output[-80:])
+                if process.wait() != 0:
+                    raise RuntimeError(output[-1] if output else "Composer could not install Laravel.")
+                if template == "laravel":
+                    self._finalize_laravel(job_id, site)
+            else:
+                raise RuntimeError(f"Unsupported application template: {template}")
+            credentials = None
+            if site.database_enabled:
+                if database_engine != "mysql":
+                    raise RuntimeError("One-click database provisioning currently supports running MySQL. Choose MySQL or deploy without a database.")
+                database_user = site.database_user or re.sub(r"[^A-Za-z0-9_$-]", "_", site.domain.split(".")[0])[:32]
+                credentials = self._provision_mysql_database(job_id, site, site.database_name, database_user, database_password)
+                if database_user != site.database_user:
+                    website_service.update(site.id, WebsiteUpdateRequest(database_user=database_user))
+                self._write_application_database_config(site, template, credentials, wordpress_database_prefix)
+                if template == "wordpress":
+                    self._install_wordpress_core(job_id, site, wordpress_admin_user, wordpress_admin_password, wordpress_site_title, credentials)
+                self._update(job_id, progress=94, message=f"Database {credentials[0]} is ready and application credentials were saved securely.")
+            else:
+                self._update(job_id, progress=90, message="Application files are ready. No database was requested.")
+            self._set_application_owner(project)
+            self._verify_application_layout(site, template)
+            self._update(job_id, progress=97, message="Verifying application files and document root…")
+            self.enqueue_action(f"provider-reload-site-{site.id}-{uuid.uuid4().hex[:8]}", site.server_type, "restart")
+            self._update(job_id, status="succeeded", progress=100, message=f"{template.title()} is ready at {project}.", log=["Application deployment completed successfully."])
+        except Exception as error:
+            website_service.mark_error(site.id)
+            self._update(job_id, status="failed", message=str(error))
+        finally:
+            archive.unlink(missing_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+
     def _run_serialized(self, runner, job_id: str, *args):
         """Run exactly one privileged job at a time.
 
@@ -310,7 +886,16 @@ class JobStore:
         installed = [provider for provider in providers if binary_path(provider).exists() or (service_root(provider) / ".serverengine-version").exists()]
         if not installed:
             raise RuntimeError("Install a web server before installing Application Shield.")
-        non_prebuilt = [provider for provider in installed if not (service_root(provider) / ".serverengine-install-method").exists() or (service_root(provider) / ".serverengine-install-method").read_text(errors="replace").strip() != "prebuilt"]
+        # Nginx and Apache connectors are compiled against the exact managed
+        # server ABI, so both prebuilt and source-built runtimes are supported.
+        # Caddy/OpenLiteSpeed still require their supported prebuilt path.
+        non_prebuilt = [
+            provider
+            for provider in installed
+            if provider in {"caddy", "openlitespeed"}
+            and (not (service_root(provider) / ".serverengine-install-method").exists()
+                 or (service_root(provider) / ".serverengine-install-method").read_text(errors="replace").strip() != "prebuilt")
+        ]
         if non_prebuilt:
             names = ", ".join(provider.title() for provider in non_prebuilt)
             raise RuntimeError(f"Application Shield currently supports prebuilt runtimes only. Install or reinstall {names} using the Prebuilt package method, then install Shield again.")
@@ -389,7 +974,7 @@ class JobStore:
             message += " " + "; ".join(provider_warnings) + "."
         self._update(job_id, status="succeeded", progress=100, message=message)
 
-    def _run_nginx_shield_connector(self, job_id: str):
+    def _run_nginx_shield_connector(self, job_id: str, attach: bool = True, finish_job: bool = True):
         """Compile ModSecurity-nginx against the installed managed Nginx."""
         root = service_root("nginx")
         marker = root / ".serverengine-version"
@@ -463,6 +1048,10 @@ class JobStore:
                 "libmaxminddb0", "libmaxminddb-dev",
                 "libyajl2", "libyajl-dev",
                 "libpcre2-8-0", "libpcre2-dev",
+                "libcurl4t64", "libcurl4-openssl-dev",
+                "libxml2", "libxml2-dev",
+                "zlib1g", "zlib1g-dev",
+                "libstdc++6", "libgcc-s1",
             ):
                 support_result = subprocess.run([apt, "download", support_name], cwd=dependencies, capture_output=True, text=True, check=False, timeout=180)
                 support_package = next(iter(sorted(dependencies.glob(f"{support_name}_*.deb"))), None)
@@ -474,28 +1063,95 @@ class JobStore:
             # The connector includes <modsecurity/modsecurity.h>, therefore
             # MODSECURITY_INC must be the include root, not the modsecurity
             # subdirectory itself.
-            include = next((path.parent.parent for path in dependency_root.rglob("modsecurity/modsecurity.h")), None)
-            library = next((path.parent for path in dependency_root.rglob("libmodsecurity.so*")), None)
+            include = next(
+                (
+                    path.parent.parent
+                    for path in dependency_root.rglob("*")
+                    if path.is_file() and path.as_posix().lower().endswith("/modsecurity/modsecurity.h")
+                ),
+                None,
+            )
+            # Ubuntu/Debian package names are inconsistent by release:
+            # some ship libmodsecurity.so.3 while others ship
+            # libModSecurity.so.3. The linker/configure probe is not
+            # case-insensitive, so discover either spelling and expose both
+            # conventional names inside the staging tree only.
+            library = next(
+                (
+                    path.parent
+                    for path in dependency_root.rglob("*")
+                    if path.is_file() or path.is_symlink()
+                    if path.name.lower().startswith("libmodsecurity.so")
+                ),
+                None,
+            )
             if not include or not library:
                 raise RuntimeError("The ModSecurity development package did not provide headers and a shared library.")
             # Some distro packages expose only the soname (for example
             # libmodsecurity.so.3.0.12).  The connector configure test links
             # with -lmodsecurity, so provide the normal development name in
             # the staged tree instead of relying on a host-wide -dev package.
-            linker_name = library / "libmodsecurity.so"
-            if not linker_name.exists():
-                candidates = sorted(library.glob("libmodsecurity.so.*"))
-                if candidates:
-                    linker_name.symlink_to(candidates[0].name)
-            if not linker_name.exists():
+            candidates = sorted(
+                path
+                for path in library.iterdir()
+                if path.name.lower().startswith("libmodsecurity.so.")
+            )
+            if not candidates:
                 raise RuntimeError("The staged ModSecurity library has no linkable libmodsecurity.so file.")
-            library_dirs = sorted({path.parent for path in dependency_root.rglob("lib*.so*") if path.is_file() or path.is_symlink()})
+            versioned_library = candidates[0]
+            for linker_name in (library / "libmodsecurity.so", library / "libModSecurity.so"):
+                if linker_name.is_symlink() or linker_name.exists():
+                    linker_name.unlink()
+                if not linker_name.exists():
+                    linker_name.symlink_to(versioned_library.name)
+            if not (library / "libmodsecurity.so").exists() or not (library / "libModSecurity.so").exists():
+                raise RuntimeError("The staged ModSecurity library could not expose both libModSecurity.so and libmodsecurity.so.")
+            library_dirs = sorted(
+                {
+                    path.parent
+                    for path in dependency_root.rglob("*")
+                    if (path.is_file() or path.is_symlink())
+                    and path.name.lower().startswith("lib")
+                    and ".so" in path.name.lower()
+                }
+            )
             library_flags = " ".join(f"-L{path}" for path in library_dirs)
             runtime_paths = ":".join(str(path) for path in library_dirs)
+            private_library_flags = ""
+            for pkgconfig in dependency_root.rglob("modsecurity.pc"):
+                for line in pkgconfig.read_text(errors="replace").splitlines():
+                    if line.startswith(("Libs:", "Libs.private:")):
+                        private_library_flags += " " + line.split(":", 1)[1].strip()
+            # Debian's pkg-config file uses ${prefix}; Nginx configure does
+            # not expand it when it is embedded in --with-ld-opt. Resolve it
+            # to the staged /usr tree so the host is never consulted.
+            private_library_flags = (
+                private_library_flags
+                .replace("${prefix}", str(dependency_root / "usr"))
+                .replace("${exec_prefix}", str(dependency_root / "usr"))
+                .replace("${libdir}", str(library))
+                .strip()
+            )
+            # libxml2's static fallback requires zlib explicitly. Keep this
+            # in the staged link command even when the distro pkg-config file
+            # omits Libs.private.
+            if " -lz" not in f" {private_library_flags}":
+                private_library_flags = f"{private_library_flags} -lz".strip()
             include_root = dependency_root / "usr/include"
             include_dirs = [include_root] + ([path for path in include_root.iterdir() if path.is_dir()] if include_root.exists() else [])
             include_flags = " ".join(f"-I{path}" for path in include_dirs)
-            self._update(job_id, progress=35, message=f"Compiling the ModSecurity connector for Nginx {version}…", log=[])
+            self._update(
+                job_id,
+                progress=35,
+                message=f"Compiling the ModSecurity connector for Nginx {version}…",
+                log=[
+                    f"ModSecurity headers: {include}",
+                    f"ModSecurity library: {versioned_library}",
+                    f"Link aliases: {library / 'libmodsecurity.so'}, {library / 'libModSecurity.so'}",
+                    f"Library paths: {runtime_paths}",
+                    f"ModSecurity link dependencies: {private_library_flags or 'package defaults'}",
+                ],
+            )
             # Read the exact profile from the installed binary. Nginx's
             # --with-compat option is not retroactive: a module built with it
             # is still incompatible with a target binary that was built
@@ -518,7 +1174,13 @@ class JobStore:
                     "--with-http_ssl_module", "--with-http_v2_module", "--with-http_gzip_static_module",
                     "--with-threads", "--with-stream",
                 ]
-            configure = [str(nginx_source / "configure"), *profile, f"--add-dynamic-module={connector_source}", f"--with-cc-opt={include_flags} -I{include}", f"--with-ld-opt={library_flags} -Wl,-rpath,{runtime_paths}"]
+            configure = [
+                str(nginx_source / "configure"),
+                *profile,
+                f"--add-dynamic-module={connector_source}",
+                f"--with-cc-opt={include_flags} -I{include}",
+                f"--with-ld-opt={library_flags} {private_library_flags} -Wl,-rpath,{runtime_paths}",
+            ]
             connector_env = {
                 **os.environ,
                 # ModSecurity-nginx's configure script uses these variables
@@ -534,12 +1196,18 @@ class JobStore:
                 "CFLAGS": f"{include_flags} -I{include} {os.environ.get('CFLAGS', '')}".strip(),
                 "CPPFLAGS": f"{include_flags} -I{include} {os.environ.get('CPPFLAGS', '')}".strip(),
                 "LDFLAGS": f"{library_flags} -Wl,-rpath,{runtime_paths} {os.environ.get('LDFLAGS', '')}".strip(),
-                "LIBS": f"-lmodsecurity {os.environ.get('LIBS', '')}".strip(),
+                "LIBS": f"-lmodsecurity {private_library_flags} {os.environ.get('LIBS', '')}".strip(),
             }
             configured = subprocess.run(configure, cwd=nginx_source, env=connector_env, capture_output=True, text=True, check=False, timeout=180)
             self._update(job_id, progress=45, message=f"Configuring the Nginx {version} connector…", log=(configured.stdout + configured.stderr).splitlines()[-80:])
             if configured.returncode:
-                raise RuntimeError((configured.stderr or configured.stdout).strip()[-1600:] or "Nginx connector configure failed.")
+                diagnostics = []
+                for diagnostic_name in ("objs/autoconf.err", "objs/autoconf.log", "config.log"):
+                    diagnostic = nginx_source / diagnostic_name
+                    if diagnostic.exists():
+                        diagnostics.extend(diagnostic.read_text(errors="replace").splitlines()[-80:])
+                detail = "\n".join(diagnostics) or (configured.stderr or configured.stdout).strip()
+                raise RuntimeError(detail[-4000:] or "Nginx connector configure failed.")
             build = subprocess.run([make, "-j2", "modules"], cwd=nginx_source, capture_output=True, text=True, check=False, timeout=600)
             self._update(job_id, progress=80, message=f"Finishing the Nginx {version} connector…", log=(build.stdout + build.stderr).splitlines()[-100:])
             if build.returncode:
@@ -550,22 +1218,38 @@ class JobStore:
             target = root / "usr/lib/nginx/modules/ngx_http_modsecurity_module.so"
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(module, target)
-            from app.services.application_shield_service import application_shield_service
-            application_shield_service.attach("nginx")
-            self._update(job_id, status="succeeded", progress=100, message=f"Nginx ModSecurity connector was compiled for Nginx {version} and attached successfully.", log=[str(target)])
+            if attach:
+                from app.services.application_shield_service import application_shield_service
+                application_shield_service.attach("nginx")
+                message = f"Nginx ModSecurity connector was compiled for Nginx {version} and attached successfully."
+            else:
+                (root / ".serverengine-application-shield-ready").write_text("ready\n")
+                message = f"Nginx ModSecurity connector was compiled for Nginx {version} and staged for the next Shield attach."
+            if finish_job:
+                self._update(job_id, status="succeeded", progress=100, message=message, log=[str(target)])
+            else:
+                self._update(job_id, progress=98, message=message, log=[str(target)])
         except Exception as error:
-            self._update(job_id, status="failed", message=str(error))
+            if finish_job:
+                self._update(job_id, status="failed", message=str(error))
+            else:
+                raise
         finally:
             shutil.rmtree(staging, ignore_errors=True)
 
     def _run_provider_shield_connector(self, job_id: str, provider: str):
         try:
-            if provider in {"nginx", "apache", "openlitespeed", "caddy"}:
+            if provider in {"nginx", "apache", "openlitespeed", "caddy"} and provider in {"openlitespeed", "caddy"}:
                 marker = service_root(provider) / ".serverengine-install-method"
                 method = marker.read_text(errors="replace").strip() if marker.exists() else "source"
                 if method != "prebuilt":
                     raise RuntimeError(f"Application Shield currently supports prebuilt {provider.title()} runtimes only. Install or reinstall {provider.title()} using the Prebuilt package method, then attach Shield again.")
             if provider == "nginx":
+                install_method = (service_root("nginx") / ".serverengine-install-method").read_text(errors="replace").strip() if (service_root("nginx") / ".serverengine-install-method").exists() else "source"
+                if install_method == "prebuilt" and self._install_application_shield_nginx_connector(job_id):
+                    return
+                if install_method == "prebuilt":
+                    self._update(job_id, progress=8, message="No exact prebuilt Nginx connector is available; compiling a matching connector…", log=["Prebuilt Nginx/ModSecurity module pair was not published for this version."])
                 self._run_nginx_shield_connector(job_id)
                 return
             from app.services.application_shield_service import application_shield_service
@@ -650,11 +1334,12 @@ class JobStore:
             if extracted.returncode or not any(library_root.rglob(required[package_name])):
                 raise RuntimeError((extracted.stderr or extracted.stdout).strip() or f"Unable to stage Apache runtime library {required[package_name]}.")
 
-    def _install_application_shield_nginx_connector(self, job_id: str):
+    def _install_application_shield_nginx_connector(self, job_id: str) -> bool:
+        """Use Ubuntu's module only when its package version matches Nginx exactly."""
         apt = shutil.which("apt")
         dpkg_deb = shutil.which("dpkg-deb")
         if not apt or not dpkg_deb:
-            raise RuntimeError("The isolated package tools are unavailable; cannot install the Nginx Application Shield connector.")
+            return False
         provider_root = service_root("nginx")
         staging = provider_root.parent / f".nginx-modsecurity-{job_id}"
         try:
@@ -662,17 +1347,75 @@ class JobStore:
             extracted = staging / "root"
             packages.mkdir(parents=True, exist_ok=True)
             extracted.mkdir(parents=True, exist_ok=True)
-            self._update(job_id, progress=94, message="Installing the managed Nginx Application Shield connector…", log=["$ apt download libnginx-mod-http-modsecurity"])
-            result = subprocess.run([apt, "download", "libnginx-mod-http-modsecurity"], cwd=packages, capture_output=True, text=True, check=False, timeout=180)
+            nginx_marker = provider_root / ".serverengine-version"
+            nginx_version = nginx_marker.read_text(errors="replace").strip() if nginx_marker.exists() else ""
+            if not nginx_version:
+                return False
+            module_package = "libnginx-mod-http-modsecurity"
+            apt_cache = shutil.which("apt-cache")
+            module_version = None
+            module_abi = None
+            if apt_cache:
+                metadata = subprocess.run(
+                    [apt_cache, "show", module_package],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=8,
+                )
+                depends = next(
+                    (line.split(":", 1)[1].strip() for line in metadata.stdout.splitlines() if line.startswith("Depends:")),
+                    "",
+                )
+                abi_match = re.search(r"nginx-abi-([0-9]+\.[0-9]+\.[0-9]+)-", depends)
+                module_abi = abi_match.group(1) if abi_match else None
+                active_abi = re.match(r"([0-9]+\.[0-9]+\.[0-9]+)", nginx_version)
+                catalog = subprocess.run(
+                    [apt_cache, "madison", module_package],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=8,
+                )
+                if module_abi and active_abi and module_abi == active_abi.group(1):
+                    for line in catalog.stdout.splitlines():
+                        parts = [part.strip() for part in line.split("|")]
+                        if len(parts) >= 2 and parts[1]:
+                            module_version = parts[1]
+                            break
+            # Module package versions differ from Nginx package versions;
+            # the declared nginx-abi dependency is the compatibility key.
+            if not module_version:
+                return False
+            package_request = f"{module_package}={module_version}"
+            ndk_package = "libnginx-mod-http-ndk"
+            self._update(job_id, progress=18, message=f"Using the prebuilt ModSecurity connector for Nginx ABI {module_abi}…", log=[f"$ apt download {package_request} {ndk_package}"])
+            result = subprocess.run([apt, "download", package_request, ndk_package], cwd=packages, capture_output=True, text=True, check=False, timeout=180)
             archives = sorted(packages.glob("*.deb"))
             if result.returncode or not archives:
-                raise RuntimeError((result.stderr or result.stdout).strip() or "The Nginx ModSecurity connector is not available for this host.")
+                return False
             for archive in archives:
                 unpacked = subprocess.run([dpkg_deb, "-x", str(archive), str(extracted)], capture_output=True, text=True, check=False)
                 if unpacked.returncode:
-                    raise RuntimeError((unpacked.stderr or unpacked.stdout).strip() or "Nginx ModSecurity connector extraction failed")
-            for item in extracted.iterdir():
-                self._merge_managed_tree(item, provider_root / item.name)
+                    return False
+            module = next(extracted.rglob("ngx_http_modsecurity_module.so"), None)
+            if not module:
+                return False
+            target = provider_root / "usr/lib/nginx/modules/ngx_http_modsecurity_module.so"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            previous = target.read_bytes() if target.exists() else None
+            shutil.copy2(module, target)
+            try:
+                from app.services.application_shield_service import application_shield_service
+                application_shield_service.attach("nginx")
+            except Exception:
+                if previous is None:
+                    target.unlink(missing_ok=True)
+                else:
+                    target.write_bytes(previous)
+                raise
+            self._update(job_id, status="succeeded", progress=100, message=f"The prebuilt Nginx ModSecurity connector for {nginx_version} was validated and attached.", log=[str(target)])
+            return True
         finally:
             shutil.rmtree(staging, ignore_errors=True)
 
@@ -889,6 +1632,14 @@ class JobStore:
         self._update(job_id, status="succeeded", progress=100, message=f"Compose project {project_dir.name} is running.", log=log)
 
     def _run_action(self, job_id: str, service_id: str, action: str, version: str | None = None):
+        if action == "start" and self._managed_service_process_alive(service_id, version):
+            self._update(
+                job_id,
+                status="succeeded",
+                message=f"{service_id} is already running.",
+                log=[],
+            )
+            return
         if service_id == "docker":
             self._run_docker_container_action(job_id, version or "", action)
             return
@@ -1020,6 +1771,42 @@ class JobStore:
             self._update(job_id, status="succeeded", message=f"{service_id} {action} completed.")
         except Exception as error:
             self._update(job_id, status="failed", message=str(error))
+
+    def _managed_service_process_alive(self, service_id: str, version: str | None = None) -> bool:
+        """Return whether the managed executable for a service is alive.
+
+        Start requests can arrive from an old browser tab or a startup policy
+        while the service is already running. Check the actual managed process
+        before dispatching to a controller so a second daemon is never created.
+        """
+        if service_id in {"docker", "nodejs", "python", "ruby", "certbot", "git", "imagemagick", "ffmpeg", "lynis"}:
+            return False
+        try:
+            binary = php_fpm_paths(version)["binary"] if service_id == "php" and version else binary_path(service_id)
+        except (KeyError, OSError, TypeError):
+            return False
+        if not binary.exists():
+            return False
+        pgrep = shutil.which("pgrep")
+        if pgrep:
+            result = subprocess.run(
+                [pgrep, "-f", str(binary)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            return any(item.isdigit() for item in result.stdout.split())
+        proc_root = Path("/proc")
+        if not proc_root.exists():
+            return False
+        for command_line in proc_root.glob("[0-9]*/cmdline"):
+            try:
+                command = command_line.read_bytes().replace(b"\x00", b" ").decode(errors="replace")
+            except OSError:
+                continue
+            if str(binary) in command:
+                return True
+        return False
 
     def _run_vsftpd_action(self, job_id: str, action: str):
         root = service_root("vsftpd")
@@ -1259,10 +2046,12 @@ class JobStore:
         config = config_dir / "postgresql.conf"
         hba = config_dir / "pg_hba.conf"
         log_file = root / "logs/postgresql.log"
-        pid_file = root / "run/postmaster.pid"
+        run = root / "run"
+        pid_file = run / "postmaster.pid"
         try:
             if not binary.exists():
                 raise RuntimeError("PostgreSQL is not installed in the managed service root")
+            runtime_environment = prepare_postgresql_runtime(root)
             initdb = binary.parent / "initdb"
             user = self._ensure_service_user()
             for path in (data, config_dir, log_file.parent, pid_file.parent):
@@ -1276,27 +2065,53 @@ class JobStore:
             if action == "stop":
                 self._update(job_id, status="succeeded", message="PostgreSQL stopped.", log=[])
                 return
+            if os.geteuid() == 0:
+                subprocess.run(["chown", "-R", f"{user}:{user}", str(data)], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             if not (data / "PG_VERSION").exists():
                 if not initdb.exists():
                     raise RuntimeError("PostgreSQL initdb was not found in the managed service root")
-                initialize_command = [str(initdb), "-D", str(data), "--auth-local=scram-sha-256", "--auth-host=scram-sha-256", "--no-locale", "--encoding=UTF8"]
+                saved_credentials = database_credentials.secret_for("postgresql", "postgres")
+                superuser_password = saved_credentials["password"] if saved_credentials else secrets.token_urlsafe(32)
+                password_file = run / ".initdb-password"
+                password_file.write_text(superuser_password + "\n")
+                password_file.chmod(0o600)
+                if os.geteuid() == 0:
+                    subprocess.run(["chown", f"{user}:{user}", str(password_file)], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                initialize_command = [str(initdb), "-D", str(data), f"--pwfile={password_file}", "--auth-local=scram-sha-256", "--auth-host=scram-sha-256", "--no-locale", "--encoding=UTF8"]
                 if os.geteuid() == 0 and shutil.which("runuser"):
                     initialize_command = ["runuser", "-u", user, "--", *initialize_command]
-                initialize = subprocess.run(initialize_command, capture_output=True, text=True, check=False)
+                try:
+                    initialize = subprocess.run(initialize_command, capture_output=True, text=True, check=False, env=runtime_environment)
+                finally:
+                    password_file.unlink(missing_ok=True)
                 if initialize.returncode != 0:
                     raise RuntimeError((initialize.stderr or initialize.stdout).strip() or "PostgreSQL data directory initialization failed")
-            subprocess.run(["chown", "-R", f"{user}:{user}", str(data), str(config_dir), str(log_file.parent)], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            command = [str(binary), "-D", str(data), "-c", f"config_file={config}", "-c", f"hba_file={hba}", "-k", str(root / "run")]
+                database_credentials.save("postgresql", "postgres", user, superuser_password)
+            subprocess.run(["chown", "-R", f"{user}:{user}", str(data), str(config_dir), str(log_file.parent), str(run)], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            command = [str(binary), "-D", str(data), "-c", f"config_file={config}", "-c", f"hba_file={hba}", "-c", "logging_collector=off", "-k", str(run)]
             if os.geteuid() == 0 and shutil.which("runuser"):
                 command = ["runuser", "-u", user, "--", *command]
             self._update(job_id, status="running", message=f"Starting PostgreSQL with {config}…", log=[])
             with log_file.open("a") as stream:
-                process = subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True)
+                process = subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True, env=runtime_environment)
+            pg_isready = binary.parent / "pg_isready"
+            ready = False
+            probe_details = ""
             import time
-            time.sleep(0.8)
-            if process.poll() is not None:
+            for _ in range(12):
+                if pg_isready.exists():
+                    probe = subprocess.run([str(pg_isready), "-h", "127.0.0.1", "-p", "5432"], capture_output=True, text=True, check=False, env=runtime_environment)
+                    ready = probe.returncode == 0
+                    probe_details = (probe.stdout or probe.stderr).strip()
+                else:
+                    ready = (data / "postmaster.pid").exists()
+                if ready:
+                    break
+                time.sleep(0.4)
+            if not ready:
                 details = log_file.read_text(errors="replace").splitlines()[-20:]
-                raise RuntimeError(f"PostgreSQL exited during startup: {' | '.join(details) if details else process.returncode}")
+                suffix = f" | readiness: {probe_details}" if probe_details else ""
+                raise RuntimeError(f"PostgreSQL did not become ready: {' | '.join(details) if details else process.returncode}{suffix}")
             self._update(job_id, status="succeeded", message=f"PostgreSQL {action} completed.", log=log_file.read_text(errors="replace").splitlines()[-80:])
         except Exception as error:
             details = log_file.read_text(errors="replace").splitlines()[-80:] if log_file.exists() else []
@@ -1395,6 +2210,30 @@ class JobStore:
             if action == "stop":
                 self._update(job_id, status="succeeded", message="Redis stopped.", log=[])
                 return
+            if action == "start":
+                # A stale browser state must not create a second Redis process.
+                # Confirm that the listener is Redis before treating Start as
+                # idempotently complete; otherwise report a real port conflict
+                # before launching another process.
+                cli_candidates = [root / "usr/bin/redis-cli", root / "bin/redis-cli"]
+                redis_cli = next((candidate for candidate in cli_candidates if candidate.exists()), None)
+                if redis_cli:
+                    ping = subprocess.run(
+                        [str(redis_cli), "-h", "127.0.0.1", "-p", "6379", "ping"],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        env=managed_library_environment(root),
+                        timeout=3,
+                    )
+                    if ping.returncode == 0 and ping.stdout.strip().upper() == "PONG":
+                        self._update(job_id, status="succeeded", message="Redis is already running on 127.0.0.1:6379.", log=[])
+                        return
+                try:
+                    with socket.create_connection(("127.0.0.1", 6379), timeout=0.5):
+                        raise RuntimeError("Redis cannot start because 127.0.0.1:6379 is already in use by another process")
+                except (ConnectionRefusedError, TimeoutError, OSError):
+                    pass
             subprocess.run(["chown", "-R", f"{user}:{user}", str(data), str(log_file.parent), str(pid_file.parent)], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             # Redis opens its configured logfile after dropping to the
             # service account. Touch it before launch and transfer ownership;
@@ -1576,6 +2415,7 @@ class JobStore:
                 pid_file.unlink(missing_ok=True)
                 self._update(job_id, status="succeeded", message="MongoDB stopped.", log=[])
                 return
+            runtime_environment = prepare_mongodb_runtime(root)
             self._stop_process_by_binary(binary, pid_file)
             runtime_user = self._ensure_service_user()
             # The child runs as serverengine.  Create the rotatable log before
@@ -1595,7 +2435,7 @@ class JobStore:
                 command = ["runuser", "-u", runtime_user, "--", *command]
             self._update(job_id, status="running", message=f"Starting MongoDB with {config}…", log=[f"$ {' '.join(command)}"])
             with log_file.open("a") as stream:
-                process = subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True)
+                process = subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True, env=runtime_environment)
             time.sleep(0.8)
             if process.poll() is not None:
                 details = log_file.read_text(errors="replace").splitlines()[-30:] if log_file.exists() else []
@@ -1795,6 +2635,8 @@ class JobStore:
     def _force_stop_apache_runtime(self, job_id: str):
         """Stop the active managed Apache before replacing or adding a version."""
         root = service_root("apache")
+        if root.exists():
+            self._share_versioned_service_paths("apache", root)
         binary = binary_path("apache")
         pid_file = root / "run/httpd.pid"
         if not binary.exists() and not _managed_process_alive(pid_file):
@@ -1808,6 +2650,38 @@ class JobStore:
             except (OSError, ValueError):
                 pass
         pid_file.unlink(missing_ok=True)
+        self._broadcast_service_status("apache", "stop", "succeeded", "Apache stopped before version installation.")
+
+    def _force_stop_nginx_runtime(self, job_id: str):
+        """Stop the active managed Nginx before replacing or switching versions."""
+        paths = nginx_paths()
+        if not paths["binary"].exists() and not _managed_process_alive(paths["pid"]):
+            return
+        self._update(job_id, progress=1, message="Stopping the current Nginx version before installation…", log=[f"$ {paths['binary']} -p {paths['root']} -c {paths['config']} -s stop"])
+        self._stop_process_by_binary(paths["binary"], paths["pid"])
+        paths["pid"].unlink(missing_ok=True)
+        self._broadcast_service_status("nginx", "stop", "succeeded", "Nginx stopped before version installation.")
+
+    def _share_versioned_service_paths(self, service_id: str, root: Path):
+        """Keep configuration, logs, and PID state shared across versions."""
+        base = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / service_id
+        for name in ("conf", "logs", "run"):
+            shared = base / name
+            versioned = root / name
+            if versioned == shared:
+                shared.mkdir(parents=True, exist_ok=True)
+                continue
+            if not shared.exists() and versioned.exists() and not versioned.is_symlink():
+                shared.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(versioned), str(shared))
+            elif versioned.exists() or versioned.is_symlink():
+                if versioned.is_dir() and not versioned.is_symlink():
+                    shutil.rmtree(versioned)
+                else:
+                    versioned.unlink(missing_ok=True)
+            shared.mkdir(parents=True, exist_ok=True)
+            versioned.parent.mkdir(parents=True, exist_ok=True)
+            versioned.symlink_to(Path("../..") / name, target_is_directory=True)
 
     def _stop_mysql_process(self, binary: Path, pid_file: Path):
         self._stop_process_by_binary(binary, pid_file)
@@ -1835,7 +2709,10 @@ class JobStore:
                     for size in range(1, min(len(existing), len(incoming)) + 1):
                         if existing[-size:] == incoming[:size]:
                             overlap = size
-                    changes["log"] = existing + incoming[overlap:]
+            changes["log"] = existing + incoming[overlap:]
+            # Keep the browser payload and in-memory job state bounded even
+            # when a scan or build emits millions of lines.
+            changes["log"] = changes["log"][-1000:]
             updated = current.model_copy(update={"updated_at": datetime.now(timezone.utc), **changes})
             self._jobs[job_id] = updated
         self._broadcast(updated)
@@ -1945,8 +2822,24 @@ class JobStore:
                     if any(line.strip().startswith("Candidate:") and line.split(":", 1)[1].strip() not in {"", "(none)"} for line in policy.stdout.splitlines()):
                         package = candidate
                         break
-        root = service_root(service_id)
-        staging = root.parent / f".{service_id}-{job_id}-prebuilt"
+        root = service_root(service_id, requested_version) if service_id in {"nginx", "apache", "openlitespeed"} else service_root(service_id)
+        base_root = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / service_id
+        nginx_shield_was_attached = False
+        if service_id == "nginx":
+            # Preserve the operator's Shield choice across a version swap.
+            # The connector itself is rebuilt below against the newly
+            # extracted Nginx binary; we never carry an ABI-specific module
+            # from the previous version into the new runtime.
+            active_root = service_root("nginx")
+            nginx_shield_was_attached = any(
+                marker.exists()
+                for marker in (
+                    base_root / ".serverengine-application-shield-attached",
+                    active_root / ".serverengine-application-shield-attached",
+                )
+            )
+            self._force_stop_nginx_runtime(job_id)
+        staging = base_root / f".{service_id}-{job_id}-prebuilt"
         package_dir = staging / "packages"
         try:
             shutil.rmtree(staging, ignore_errors=True)
@@ -1985,6 +2878,11 @@ class JobStore:
             package_request = f"{package}={versioned_package}" if versioned_package else package
             self._update(job_id, status="running", progress=5, message=f"Downloading prebuilt {service_id} {requested_version}…", log=[f"$ apt download {package_request}"])
             packages = [package_request]
+            if service_id == "nginx":
+                # Ubuntu splits the executable into nginx-core. Downloading
+                # only the metapackage can leave an apparently installed
+                # runtime without a usable nginx binary.
+                packages.append(f"nginx-core={versioned_package}" if versioned_package else "nginx-core")
             apt_cache = shutil.which("apt-cache")
             if apt_cache:
                 pending = [package]
@@ -2043,7 +2941,29 @@ class JobStore:
                 directory.mkdir(parents=True, exist_ok=True)
             self._prepare_service_runtime(root, "conf", "data", "logs", "run")
             if service_id == "nginx":
-                ensure_nginx_layout()
+                nginx_binary = next((candidate for candidate in (root / "usr/sbin/nginx", root / "sbin/nginx", root / "bin/nginx") if candidate.exists()), None)
+                if nginx_binary is None:
+                    raise RuntimeError("The Nginx package was extracted, but it did not contain a usable nginx executable.")
+                if nginx_binary != root / "bin/nginx":
+                    (root / "bin").mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(nginx_binary, root / "bin/nginx")
+                    (root / "bin/nginx").chmod((root / "bin/nginx").stat().st_mode | 0o111)
+                ensure_nginx_layout(nginx_paths(requested_version))
+                (base_root / ".serverengine-active-version").write_text(requested_version + "\n")
+                shield_root = service_root("modsecurity")
+                shield_installed = (shield_root / ".serverengine-version").exists()
+                if shield_installed:
+                    self._update(
+                        job_id,
+                        progress=90,
+                        message=f"Refreshing the Nginx {requested_version} Application Shield connector…",
+                        log=["$ build exact-version ModSecurity-nginx connector"],
+                    )
+                    self._run_nginx_shield_connector(
+                        job_id,
+                        attach=nginx_shield_was_attached,
+                        finish_job=False,
+                    )
             elif service_id == "apache":
                 apache_conf = root / "conf/httpd.conf"
                 if not apache_conf.exists():
@@ -2061,6 +2981,11 @@ class JobStore:
                         "DocumentRoot /server-engine/www\n"
                         "<Directory /server-engine/www>\n  AllowOverride All\n  Require all granted\n</Directory>\n"
                     )
+                self._share_versioned_service_paths("apache", root)
+                (base_root / ".serverengine-active-version").write_text(requested_version + "\n")
+            elif service_id == "openlitespeed":
+                self._share_versioned_service_paths("openlitespeed", root)
+                (base_root / ".serverengine-active-version").write_text(requested_version + "\n")
             elif service_id == "php":
                 self._ensure_service_user()
                 ensure_php_fpm_layout(requested_version)
@@ -2751,9 +3676,13 @@ class JobStore:
         if missing:
             self._update(job_id, status="failed", message=f"OpenLiteSpeed source builds require these build tools: {', '.join(missing)}. Install the Server Engine build dependencies, then retry.")
             return
-        root = service_root("openlitespeed")
-        staging = root.parent / f".openlitespeed-{job_id}-staging"
-        archive = root.parent / f"openlitespeed-{requested_version}.tar.gz"
+        service_base = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / "openlitespeed"
+        active_root = service_root("openlitespeed")
+        if active_root.exists():
+            self._share_versioned_service_paths("openlitespeed", active_root)
+        root = service_root("openlitespeed", requested_version)
+        staging = service_base / f".openlitespeed-{job_id}-staging"
+        archive = service_base / f"openlitespeed-{requested_version}.tar.gz"
         try:
             root.parent.mkdir(parents=True, exist_ok=True)
             shutil.rmtree(staging, ignore_errors=True)
@@ -2808,7 +3737,9 @@ class JobStore:
             vhost = root / "conf/vhosts/default/vhost.conf"
             if not vhost.exists():
                 vhost.write_text("docRoot $VH_ROOT/www\nindex {\n  useServer 0\n  indexFiles index.php, index.html\n}\n")
+            self._share_versioned_service_paths("openlitespeed", root)
             (root / ".serverengine-version").write_text(requested_version + "\n")
+            (root.parent.parent / ".serverengine-active-version").write_text(requested_version + "\n")
             self._update(job_id, status="succeeded", progress=100, message=f"OpenLiteSpeed {requested_version} was built from source in {root}; no host OpenLiteSpeed package was changed.")
         except Exception as error:
             self._update(job_id, status="failed", message=str(error))
@@ -2829,8 +3760,12 @@ class JobStore:
         if not archive_url:
             self._update(job_id, status="failed", message=f"OpenLiteSpeed {requested_version} has no official prebuilt binary for this OS and architecture. Choose source build instead.")
             return
-        root = service_root("openlitespeed")
-        staging = root.parent / f".openlitespeed-{job_id}-prebuilt"
+        service_base = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / "openlitespeed"
+        active_root = service_root("openlitespeed")
+        if active_root.exists():
+            self._share_versioned_service_paths("openlitespeed", active_root)
+        root = service_root("openlitespeed", requested_version)
+        staging = service_base / f".openlitespeed-{job_id}-prebuilt"
         archive = staging / "openlitespeed.tgz"
         try:
             shutil.rmtree(staging, ignore_errors=True)
@@ -2890,8 +3825,10 @@ class JobStore:
             vhost = root / "conf/vhosts/default/vhost.conf"
             vhost.write_text("docRoot $VH_ROOT/www\nindex {\n  useServer 0\n  indexFiles index.php, index.html\n}\n")
             self._prepare_service_runtime(root, "conf", "logs", "run", "www")
+            self._share_versioned_service_paths("openlitespeed", root)
             (root / ".serverengine-version").write_text(requested_version + "\n")
             (root / ".serverengine-install-method").write_text("prebuilt\n")
+            (root.parent.parent / ".serverengine-active-version").write_text(requested_version + "\n")
             self._update(job_id, status="succeeded", progress=100, message=f"OpenLiteSpeed {requested_version} was installed from the official prebuilt archive in {root}; no host OpenLiteSpeed package was changed.")
         except Exception as error:
             self._update(job_id, status="failed", message=str(error))
@@ -3899,6 +4836,8 @@ class JobStore:
             (root / ".serverengine-version").write_text(requested_version)
             for directory in (root / "conf", root / "data", root / "logs", root / "run"):
                 directory.mkdir(parents=True, exist_ok=True)
+            self._update(job_id, progress=96, message="Preparing PostgreSQL runtime libraries…")
+            prepare_postgresql_runtime(root)
             self._update(job_id, status="succeeded", progress=100, message=f"PostgreSQL {requested_version} is installed in {root}; the host PostgreSQL package and service were not changed.")
         except Exception as error:
             self._update(job_id, status="failed", message=str(error))
@@ -5055,6 +5994,8 @@ class JobStore:
                 f"systemLog:\n  destination: file\n  path: {root / 'logs/mongod.log'}\n  logAppend: true\nstorage:\n  dbPath: {root / 'data'}\nnet:\n  bindIp: 127.0.0.1\n  port: 27017\nprocessManagement:\n  fork: false\n"
             )
             self._prepare_service_runtime(root, "conf", "data", "logs", "run")
+            self._update(job_id, progress=96, message="Preparing MongoDB runtime libraries…")
+            prepare_mongodb_runtime(root)
             self._update(job_id, status="succeeded", progress=100, message=f"MongoDB {requested_version} was installed from an official prebuilt archive in {root}; no host MongoDB package was changed.")
         except Exception as error:
             self._update(job_id, status="failed", message=str(error))
@@ -5165,6 +6106,8 @@ class JobStore:
                 f"systemLog:\n  destination: file\n  path: {root / 'logs/mongod.log'}\n  logAppend: true\nstorage:\n  dbPath: {root / 'data'}\nnet:\n  bindIp: 127.0.0.1\n  port: 27017\nprocessManagement:\n  fork: false\n"
             )
             (root / ".serverengine-version").write_text(requested_version + "\n")
+            self._update(job_id, progress=96, message="Preparing MongoDB runtime libraries…")
+            prepare_mongodb_runtime(root)
             self._update(job_id, status="succeeded", progress=100, message=f"MongoDB {requested_version} was built from source in {root}; no host MongoDB package was changed.")
         except Exception as error:
             self._update(job_id, status="failed", message=str(error))
@@ -5193,8 +6136,9 @@ class JobStore:
         if not make or not compiler:
             self._update(job_id, status="failed", message="Nginx needs a compiler and make to build its isolated binary. Install the host build tools, then retry; no Nginx system package is required.")
             return
-        root = service_root("nginx")
-        staging = root.parent / f".nginx-{job_id}-staging"
+        self._force_stop_nginx_runtime(job_id)
+        root = service_root("nginx", requested_version)
+        staging = root.parent.parent / f".nginx-{job_id}-staging"
         archive = root.parent / f"nginx-{requested_version}.tar.gz"
         try:
             root.parent.mkdir(parents=True, exist_ok=True)
@@ -5221,10 +6165,11 @@ class JobStore:
                     raise RuntimeError("The Nginx archive contains an unsafe path")
                 package.extractall(staging)
             source = next((item for item in staging.iterdir() if item.is_dir()), staging)
+            shared_paths = nginx_paths(requested_version)
             configure = [
                 str(source / "configure"), f"--prefix={root}", f"--sbin-path={root / 'bin/nginx'}",
-                f"--conf-path={root / 'conf/nginx.conf'}", f"--pid-path={root / 'run/nginx.pid'}",
-                f"--error-log-path={root / 'logs/error.log'}", f"--http-log-path={root / 'logs/access.log'}",
+                f"--conf-path={shared_paths['config']}", f"--pid-path={shared_paths['pid']}",
+                f"--error-log-path={shared_paths['error_log']}", f"--http-log-path={shared_paths['access_log']}",
                 f"--http-client-body-temp-path={root / 'data/client_temp'}", f"--http-proxy-temp-path={root / 'data/proxy_temp'}",
                 f"--http-fastcgi-temp-path={root / 'data/fastcgi_temp'}", "--with-compat", "--with-http_ssl_module", "--with-http_v2_module",
                 "--with-http_gzip_static_module", "--with-threads", "--with-stream",
@@ -5258,8 +6203,12 @@ class JobStore:
                     self._update(job_id, progress=95, message=f"Installing Nginx {requested_version}…", log=output[-80:])
             if install.wait() != 0:
                 raise RuntimeError("Nginx installation into the managed directory failed: " + (output[-1] if output else "make install returned a non-zero exit code"))
-            (root / ".serverengine-version").write_text(requested_version)
-            ensure_nginx_layout()
+            (root / ".serverengine-version").write_text(requested_version + "\n")
+            (root / ".serverengine-install-method").write_text("source\n")
+            ensure_nginx_layout(nginx_paths(requested_version))
+            base = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / "nginx"
+            base.mkdir(parents=True, exist_ok=True)
+            (base / ".serverengine-active-version").write_text(requested_version + "\n")
             self._update(job_id, status="succeeded", progress=100, message=f"Nginx {requested_version} is installed in {root}; the host Nginx package and service were not changed.")
         except Exception as error:
             self._update(job_id, status="failed", message=str(error))
@@ -5414,6 +6363,7 @@ class JobStore:
                     self._update(job_id, progress=95, message=f"Installing Apache {requested_version}…", log=output[-80:])
             if install.wait() != 0:
                 raise RuntimeError("Apache installation into the managed directory failed: " + (output[-1] if output else "make install returned a non-zero exit code"))
+            self._share_versioned_service_paths("apache", root)
             (root / ".serverengine-version").write_text(requested_version)
             (root / ".serverengine-install-method").write_text("source\n")
             active_root = service_root("apache")
@@ -5731,7 +6681,7 @@ class JobStore:
             self._update(job_id, status="failed", message=f"Unable to install official MySQL {release}: {error}")
 
     def _run_nginx_install(self, job_id: str, requested_version: str):
-        paths = nginx_paths()
+        paths = nginx_paths(requested_version)
         if os.geteuid() != 0:
             self._update(job_id, status="failed", message="The app-root installer must run with privileges to stage the service binary.")
             return
@@ -5740,6 +6690,7 @@ class JobStore:
         if not apt or not dpkg:
             self._update(job_id, status="failed", message="The isolated Nginx adapter currently supports Debian/Ubuntu package extraction.")
             return
+        self._force_stop_nginx_runtime(job_id)
         try:
             paths["root"].mkdir(parents=True, exist_ok=True)
             self._update(job_id, status="running", message=f"Staging Nginx {requested_version} inside {paths['root']} (no global nginx package).", log=[])
@@ -5756,7 +6707,10 @@ class JobStore:
             if not debs:
                 raise RuntimeError("Nginx package archive was not downloaded")
             subprocess.run([dpkg, "-x", str(debs[-1]), str(paths["root"])], check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-            ensure_nginx_layout()
+            ensure_nginx_layout(paths)
+            base = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / "nginx"
+            base.mkdir(parents=True, exist_ok=True)
+            (base / ".serverengine-active-version").write_text(requested_version + "\n")
             for deb in debs:
                 deb.unlink(missing_ok=True)
             self._update(job_id, status="succeeded", message=f"Nginx staged in {paths['root']}. The host global Nginx configuration was not modified.")

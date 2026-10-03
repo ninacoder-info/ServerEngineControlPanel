@@ -68,6 +68,7 @@ export default function Topbar({
   const languageRef = React.useRef(null);
   const jobOutputRef = React.useRef(null);
   const jobOutputFollowRef = React.useRef(true);
+  const previousJobSnapshots = React.useRef(new Map());
   React.useEffect(() => {
     const closeMenus = (event) => {
       if (!jobsRef.current?.contains(event.target)) setJobsOpen(false);
@@ -97,18 +98,29 @@ export default function Topbar({
     const applySnapshot = (items) => {
       if (!alive) return;
       previousJobStatuses.current = new Map(items.map((job) => [job.id, job.status]));
+      previousJobSnapshots.current = new Map(items.map((job) => [job.id, job]));
       activeJobsRef.current = items.filter(
         (job) => job.status === "queued" || job.status === "running",
       ).length;
       setJobFavicon(activeJobsRef.current ? "processing" : "idle");
       jobsInitialized.current = true;
       setJobs(items);
+      window.dispatchEvent(
+        new CustomEvent("serverengine:jobs-snapshot", { detail: { jobs: items } }),
+      );
     };
     const applyJob = (job) => {
       if (!alive) return;
       const previous = previousJobStatuses.current.get(job.id);
+      const previousSnapshot = previousJobSnapshots.current.get(job.id);
       const finished = ["succeeded", "failed", "cancelled"].includes(job.status);
       const statusChanged = previous !== job.status;
+      const jobChanged = !previousSnapshot
+        || previousSnapshot.status !== job.status
+        || previousSnapshot.progress !== job.progress
+        || previousSnapshot.message !== job.message
+        || previousSnapshot.updated_at !== job.updated_at
+        || (previousSnapshot.log || []).length !== (job.log || []).length;
       const nextStatuses = new Map(previousJobStatuses.current);
       nextStatuses.set(job.id, job.status);
       activeJobsRef.current = [...nextStatuses.values()].filter(
@@ -130,13 +142,14 @@ export default function Topbar({
         });
       }
       previousJobStatuses.current.set(job.id, job.status);
+      previousJobSnapshots.current.set(job.id, job);
       setJobs((current) => {
         const next = current.filter((item) => item.id !== job.id);
         next.unshift(job);
         return next;
       });
-      if (jobsInitialized.current && statusChanged) {
-        window.dispatchEvent(new CustomEvent("serverengine:jobs-updated"));
+      if (jobsInitialized.current && jobChanged) {
+        window.dispatchEvent(new CustomEvent("serverengine:jobs-updated", { detail: { job } }));
       }
       if (statusChanged) {
         const actionMatch = String(job.type || "").match(/^(Start|Stop|Restart|Install|Uninstall)\s+([^\s·]+)/i);
@@ -168,6 +181,41 @@ export default function Topbar({
           const message = JSON.parse(event.data);
           if (message.type === "snapshot") applySnapshot(message.jobs || []);
           if (message.type === "job" && message.job) applyJob(message.job);
+          if (message.type === "service-status") {
+            window.dispatchEvent(
+              new CustomEvent("serverengine:service-status", {
+                detail: message,
+              }),
+            );
+          }
+          if (message.type === "malware-schedule") {
+            window.dispatchEvent(
+              new CustomEvent("serverengine:malware-schedule", {
+                detail: message,
+              }),
+            );
+          }
+          if (message.type === "users") {
+            window.dispatchEvent(new CustomEvent("serverengine:users", { detail: message }));
+          }
+          if (message.type === "roles") {
+            window.dispatchEvent(new CustomEvent("serverengine:roles", { detail: message }));
+          }
+        if (message.type === "activity" && message.event) {
+          window.dispatchEvent(new CustomEvent("serverengine:activity", { detail: message.event }));
+        }
+        if (message.type === "plans") {
+          window.dispatchEvent(new CustomEvent("serverengine:plans", { detail: message }));
+        }
+          if (message.type === "hosting-accounts") {
+            window.dispatchEvent(new CustomEvent("serverengine:hosting-accounts", { detail: message }));
+          }
+          if (message.type === "metrics" && message.metrics) {
+            window.dispatchEvent(new CustomEvent("serverengine:metrics-updated", { detail: message.metrics }));
+          }
+          if (message.type === "health-thresholds") {
+            window.dispatchEvent(new CustomEvent("serverengine:health-thresholds", { detail: message.thresholds }));
+          }
         } catch {}
       };
       socket.onclose = () => {
@@ -238,14 +286,14 @@ export default function Topbar({
     setLanguageOpen(false);
   };
   return (
-    <header className="topbar sticky top-0 z-30 !h-14 !bg-white dark:!bg-[#0b1220]">
-      <button className="text-slate-400 md:hidden" onClick={onMenu}>
+    <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-neutral-200 bg-white px-5 dark:border-dark-border dark:bg-dark">
+      <button className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 dark:text-neutral-400 dark:hover:bg-dark-hover dark:hover:text-neutral-100 md:hidden" onClick={onMenu}>
         <Menu size={22} />
       </button>
       <div className="ml-auto flex items-center gap-2">
         <a
           href="/terminal"
-          className="icon-button !rounded-full relative"
+          className="relative inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 dark:text-neutral-400 dark:hover:bg-dark-hover dark:hover:text-neutral-100"
           aria-label="Open terminal"
           title="Open terminal"
           onClick={(event) => {
@@ -262,7 +310,7 @@ export default function Topbar({
         </a>
         <div className="relative" ref={jobsRef}>
           <button
-            className={`icon-button !rounded-full job-button ${activeJobs ? "job-button-active" : ""}`}
+            className={`relative inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full hover:bg-neutral-100 dark:hover:bg-dark-hover ${activeJobs ? "text-blue-600 dark:text-blue-400" : "text-neutral-500 dark:text-neutral-400"}`}
             aria-label="View operations"
             onClick={() => {
               setJobsOpen((value) => !value);
@@ -271,24 +319,24 @@ export default function Topbar({
           >
             <Bell size={18} />
             {activeJobs > 0 && (
-              <span className="job-badge">
+              <span className="absolute -right-1 -top-1 grid min-h-4 min-w-4 place-items-center rounded-full border-2 border-white bg-blue-600 px-1 text-[9px] font-bold leading-4 text-white dark:border-neutral-900">
                 {activeJobs > 99 ? "99+" : activeJobs}
               </span>
             )}
           </button>
           {jobsOpen && (
-            <div className="jobs-popover">
-              <div className="jobs-popover-header">
+            <div className="absolute right-0 top-11 z-50 w-96 max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-xl dark:border-dark-border dark:bg-dark">
+              <div className="flex items-start justify-between gap-3 border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
                 <div>
-                  <strong>Operations</strong>
-                  <p>
+                  <strong className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Operations</strong>
+                  <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
                     {activeJobs
                       ? `${activeJobs} active job${activeJobs === 1 ? "" : "s"}`
                       : "No active jobs"}
                   </p>
                 </div>
                 <button
-                  className="icon-button"
+                  className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 hover:text-neutral-800 dark:hover:bg-dark-hover dark:hover:text-neutral-100"
                   onClick={() => setJobsOpen(false)}
                   aria-label="Close operations"
                 >
@@ -296,14 +344,14 @@ export default function Topbar({
                 </button>
               </div>
               {jobs.length === 0 ? (
-                <div className="jobs-empty">
+                <div className="px-4 py-5 text-xs text-neutral-500 dark:text-neutral-400">
                   Install and maintenance activity will appear here.
                 </div>
               ) : (
-                <div className="jobs-list">
+                <div className="max-h-96 overflow-y-auto">
                   {jobs.map((job) => (
                     <div
-                      className="job-row cursor-pointer"
+                      className="flex cursor-pointer gap-3 border-b border-neutral-100 px-4 py-3 hover:bg-neutral-50 dark:border-dark-border dark:hover:bg-dark-hover"
                       key={job.id}
                       role="button"
                       tabIndex={0}
@@ -319,12 +367,12 @@ export default function Topbar({
                         }
                       }}
                     >
-                      <span className={`job-status job-status-${job.status}`}>
+                      <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-full ${job.status === "succeeded" ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" : job.status === "failed" ? "bg-rose-500/15 text-rose-600 dark:text-rose-400" : job.status === "running" || job.status === "queued" ? "bg-blue-500/15 text-blue-600 dark:text-blue-400" : "bg-neutral-500/15 text-neutral-500"}`}>
                         <JobIcon status={job.status} />
                       </span>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-3">
-                          <strong>{job.type}</strong>
+                            <strong className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{job.type}</strong>
                           {(job.status === "running" ||
                             job.status === "queued") && (
                             <button
@@ -338,7 +386,7 @@ export default function Topbar({
                             </button>
                           )}
                         </div>
-                        <p>
+                        <p className="mt-1 text-xs capitalize text-neutral-500 dark:text-neutral-400">
                           {job.status} ·{" "}
                           {formatPanelDate(job.created_at)}
                         </p>
@@ -346,20 +394,20 @@ export default function Topbar({
                           (job.status === "running" ||
                             job.status === "queued") && (
                             <div className="mt-2 flex items-center gap-2">
-                              <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+                              <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-700">
                                 <div
                                   className="h-full rounded-full bg-blue-600 transition-all"
                                   style={{ width: `${job.progress}%` }}
                                 />
                               </div>
-                              <span className="text-[11px] tabular-nums text-slate-500">
+                              <span className="text-[11px] tabular-nums text-neutral-500">
                                 {job.progress}%
                               </span>
                             </div>
                           )}
-                        {job.message && <small>{job.message}</small>}
+                        {job.message && <small className="mt-1 block text-xs text-neutral-500 dark:text-neutral-400">{job.message}</small>}
                         {job.log?.length > 0 && (
-                          <pre className="mt-2 max-h-24 overflow-auto whitespace-pre-wrap break-words text-[11px] leading-4">
+                          <pre className="mt-2 max-h-24 overflow-auto whitespace-pre-wrap break-words text-[11px] leading-4 text-neutral-600 dark:text-neutral-300">
                             {job.log.slice(-6).join("\n")}
                           </pre>
                         )}
@@ -372,7 +420,7 @@ export default function Topbar({
           )}
         </div>
         <button
-          className="icon-button !rounded-full"
+            className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 dark:text-neutral-400 dark:hover:bg-dark-hover dark:hover:text-neutral-100"
           aria-label="Toggle theme"
           onClick={onThemeToggle}
         >
@@ -381,7 +429,7 @@ export default function Topbar({
         <div className="relative" ref={languageRef}>
           <button
             type="button"
-            className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-full px-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+            className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-full px-2.5 text-xs font-semibold text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-dark-hover"
             aria-label="Choose language"
             aria-expanded={languageOpen}
             onClick={() => {
@@ -393,13 +441,13 @@ export default function Topbar({
             <img src={selectedLanguage.flag} alt="" className="h-4 w-6 rounded-sm object-cover" />
           </button>
           {languageOpen && (
-            <div className="absolute right-0 top-11 z-50 w-48 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
-              <p className="px-3 py-2 text-xs font-semibold text-slate-500 dark:text-slate-400">Language</p>
+            <div className="absolute right-0 top-11 z-50 w-48 overflow-hidden rounded-xl border border-neutral-200 bg-white p-1 shadow-lg dark:border-dark-border dark:bg-dark">
+              <p className="px-3 py-2 text-xs font-semibold text-neutral-500 dark:text-neutral-400">Language</p>
               {languages.map((item) => (
                 <button
                   type="button"
                   key={item.id}
-                  className={`flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm ${language === item.id ? "bg-slate-100 font-semibold text-slate-900 dark:bg-slate-800 dark:text-slate-100" : "text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"}`}
+                  className={`flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm ${language === item.id ? "bg-neutral-100 font-semibold text-neutral-900 dark:bg-dark-hover dark:text-neutral-100" : "text-neutral-700 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-dark-hover"}`}
                   onClick={() => changeLanguage(item.id)}
                 >
                   <img src={item.flag} alt="" className="h-4 w-6 rounded-sm object-cover" />
@@ -412,7 +460,7 @@ export default function Topbar({
         </div>
         <div className="relative" ref={accountRef}>
           <button
-            className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800"
+            className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-neutral-100 dark:hover:bg-dark-hover"
             onClick={() => {
               setAccountOpen((value) => !value);
               setJobsOpen(false);
@@ -420,28 +468,29 @@ export default function Topbar({
             aria-expanded={accountOpen}
           >
             <span className="hidden text-right sm:block">
-              <strong className="block text-sm font-semibold text-slate-800 dark:text-slate-200">
+              <strong className="block text-sm font-semibold text-neutral-800 dark:text-neutral-200">
                 {username}
               </strong>
-              <span className="block text-[11px] text-slate-500">
+              <span className="block text-[11px] text-neutral-500">
                 Administrator
               </span>
             </span>
-            <span className="grid h-8 w-8 place-items-center rounded-full bg-blue-600 text-sm font-semibold text-white">
+            <span className="grid h-8 w-8 place-items-center rounded-full bg-neutral-700 text-sm font-semibold text-white dark:bg-neutral-600">
               {initial}
             </span>
-            <span className="hidden text-slate-400 sm:block">⌄</span>
+            <span className="hidden text-neutral-400 sm:block">⌄</span>
           </button>
           {accountOpen && (
-            <div className="absolute right-0 top-12 z-50 w-64 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900">
-              <div className="border-b border-slate-200 px-4 py-4 dark:border-slate-800">
-                <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+            <div className="absolute right-0 top-12 z-50 w-64 overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-lg dark:border-dark-border dark:bg-dark">
+              <div className="px-4 py-4">
+                <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
                   {username}
                 </p>
-                <p className="mt-1 text-xs text-slate-500">
+                <p className="mt-1 text-xs text-neutral-500">
                   Administrator account
                 </p>
               </div>
+              <hr className="border-0 border-t border-neutral-300 dark:border-neutral-700" />
               <div className="p-2">
                 <a
                   href="/account"
@@ -450,7 +499,7 @@ export default function Topbar({
                     onNavigate("/account");
                     setAccountOpen(false);
                   }}
-                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-neutral-700 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-dark-hover"
                   title="Account settings"
                 >
                   <UserRound size={16} />
@@ -463,7 +512,7 @@ export default function Topbar({
                     onNavigate("/settings");
                     setAccountOpen(false);
                   }}
-                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-neutral-700 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-dark-hover"
                   title="Panel settings"
                 >
                   <Settings2 size={16} />
@@ -476,7 +525,7 @@ export default function Topbar({
                     onNavigate("/logs");
                     setAccountOpen(false);
                   }}
-                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-neutral-700 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-dark-hover"
                   title="View activity logs"
                 >
                   <ExternalLink size={16} />
@@ -484,13 +533,14 @@ export default function Topbar({
                 </a>
                 <button
                   onClick={() => setAccountOpen(false)}
-                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-neutral-700 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-dark-hover"
                 >
                   <HelpCircle size={16} />
                   Help and documentation
                 </button>
               </div>
-              <div className="border-t border-slate-200 p-2 dark:border-slate-800">
+              <hr className="border-0 border-t border-neutral-300 dark:border-neutral-700" />
+              <div className="p-2">
                 <button
                   onClick={onLogout}
                   className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
@@ -505,30 +555,30 @@ export default function Topbar({
       </div>
       {selectedJob && (
         <div
-          className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-slate-950/60 p-4 sm:p-8"
+          className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8"
           role="presentation"
         >
           <section
-            className="w-full max-w-4xl overflow-hidden rounded-xl bg-white shadow-2xl dark:bg-slate-900"
+            className="w-full max-w-4xl overflow-hidden rounded-xl bg-white shadow-2xl dark:bg-dark"
             role="dialog"
             aria-modal="true"
             aria-labelledby="job-log-title"
           >
-            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+            <div className="flex items-start justify-between gap-4 border-b border-neutral-200 px-5 py-4 dark:border-neutral-800">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <Terminal size={17} className="text-blue-600 dark:text-blue-400" />
-                  <h2 id="job-log-title" className="truncate text-base font-semibold text-slate-900 dark:text-slate-100">
+                  <h2 id="job-log-title" className="truncate text-base font-semibold text-neutral-900 dark:text-neutral-100">
                     {selectedJob.type}
                   </h2>
                 </div>
-                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
                   {selectedJob.status} · started {formatPanelDate(selectedJob.created_at)}
                 </p>
               </div>
               <button
                 type="button"
-                className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-dark-hover dark:hover:text-neutral-200"
                 aria-label="Close job log"
                 onClick={() => setSelectedJobId(null)}
               >
@@ -538,31 +588,31 @@ export default function Topbar({
             <div className="space-y-4 p-5">
               {selectedJob.progress != null && (
                 <div className="flex items-center gap-3">
-                  <div className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+                  <div className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-700">
                     <div
                       className="h-full rounded-full bg-blue-600 transition-all"
                       style={{ width: `${selectedJob.progress}%` }}
                     />
                   </div>
-                  <span className="text-xs tabular-nums text-slate-500 dark:text-slate-400">
+                  <span className="text-xs tabular-nums text-neutral-500 dark:text-neutral-400">
                     {selectedJob.progress}%
                   </span>
                 </div>
               )}
               {selectedJob.message && (
-                <p className="text-sm text-slate-600 dark:text-slate-300">
+                <p className="text-sm text-neutral-600 dark:text-neutral-300">
                   {selectedJob.message}
                 </p>
               )}
-              <div className="overflow-hidden rounded-lg bg-slate-950 shadow-inner">
-                <div className="flex items-center justify-between gap-3 border-b border-slate-800 px-4 py-2 text-xs text-slate-500">
+              <div className="overflow-hidden rounded-lg bg-neutral-950 shadow-inner">
+                <div className="flex items-center justify-between gap-3 border-b border-neutral-800 px-4 py-2 text-xs text-neutral-500">
                   <div className="flex items-center gap-2">
                     <span className="h-2 w-2 rounded-full bg-emerald-500" />
                     Job output
                   </div>
                   <button
                     type="button"
-                    className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-800 hover:text-slate-100"
+                    className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
                     aria-label="Copy job output"
                     title="Copy job output"
                     onClick={() => copyJobOutput(selectedJob)}
@@ -578,7 +628,7 @@ export default function Topbar({
                       output.scrollHeight - output.scrollTop - output.clientHeight;
                     jobOutputFollowRef.current = distanceFromBottom <= 24;
                   }}
-                  className="max-h-[60vh] min-h-56 overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-xs leading-5 text-slate-300"
+                  className="max-h-[60vh] min-h-56 overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-xs leading-5 text-neutral-300"
                 >
                   {selectedJob.log?.length
                     ? selectedJob.log.join("\n")

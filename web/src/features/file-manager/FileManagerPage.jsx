@@ -3,6 +3,7 @@ import {
   Archive,
   ArchiveRestore,
   ArrowUp,
+  ArrowUpToLine,
   ChevronDown,
   ChevronRight,
   Copy,
@@ -69,6 +70,11 @@ function fileIcon(name) {
   return FileText;
 }
 
+function fileExtension(name = "") {
+  const dot = name.lastIndexOf(".");
+  return dot > 0 && dot < name.length - 1 ? name.slice(dot + 1).toUpperCase() : "—";
+}
+
 function TreeNode({ node, style }) {
   const folder = node.data.kind === "folder";
   const depth = Number(node.level || 0);
@@ -79,19 +85,23 @@ function TreeNode({ node, style }) {
     : fileIcon(node.data.name);
   return (
     <div
-      className={`group flex min-h-10 w-full cursor-pointer items-center rounded-md pr-2 text-sm transition-colors ${node.isSelected ? "bg-blue-500/15 text-blue-600 dark:bg-white/10 dark:text-blue-300" : "text-slate-600 dark:text-slate-300"}`}
+      className={`group flex min-h-10 w-full cursor-pointer items-center rounded-md pr-2 text-sm transition-colors ${node.isSelected ? "text-blue-600 dark:text-blue-300" : "text-neutral-600 dark:text-neutral-300"}`}
       style={style}
       onClick={() => {
         node.select();
       }}
+      onDoubleClick={(event) => {
+        event.stopPropagation();
+        if (folder && !node.isOpen) node.open();
+      }}
     >
       <div className="flex min-w-0 flex-1 items-center gap-1.5" style={{ paddingLeft: `${depth * 16 + 8}px` }}>
         {Array.from({ length: depth }).map((_, index) => (
-          <span key={index} className="-ml-2 h-10 w-px shrink-0 bg-slate-200 dark:bg-slate-700" aria-hidden="true" />
+          <span key={index} className="-ml-2 h-10 w-px shrink-0 bg-neutral-200 dark:bg-neutral-700" aria-hidden="true" />
         ))}
         <button
           type="button"
-          className="grid h-6 w-5 shrink-0 cursor-pointer place-items-center rounded text-slate-400 dark:text-slate-500"
+          className="grid h-6 w-5 shrink-0 cursor-pointer place-items-center rounded text-neutral-400 dark:text-neutral-500"
           aria-label={folder ? `${node.isOpen ? "Collapse" : "Expand"} ${node.data.name}` : undefined}
           tabIndex={folder ? 0 : -1}
           onClick={(event) => {
@@ -101,14 +111,14 @@ function TreeNode({ node, style }) {
         >
           {folder ? (node.isOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />) : null}
         </button>
-        <Icon size={16} className={folder ? "text-blue-500 dark:text-blue-300" : "text-slate-400 dark:text-slate-500"} />
+        <Icon size={16} className={folder ? (node.isSelected ? "text-blue-600 dark:text-blue-300" : "text-blue-500 dark:text-blue-300") : "text-neutral-400 dark:text-neutral-500"} />
         <span className="min-w-0 truncate font-medium">{node.data.name}</span>
       </div>
       <button
         type="button"
         title={`More actions for ${node.data.name}`}
         aria-label={`More actions for ${node.data.name}`}
-        className="ml-2 inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-slate-400 opacity-0 transition-opacity hover:bg-slate-200 hover:text-slate-700 group-hover:opacity-100 dark:hover:bg-white/10 dark:hover:text-slate-200"
+        className="ml-2 inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-neutral-400 opacity-0 transition-opacity hover:bg-neutral-200 hover:text-neutral-700 group-hover:opacity-100 dark:hover:bg-white/10 dark:hover:text-neutral-200"
         onClick={(event) => {
           event.stopPropagation();
           node.select();
@@ -445,9 +455,23 @@ export function FileManagerWorkspace({ embedded = false, initialPath = "", conta
     );
     await refresh();
   }
-  async function editFile(entry = selected) {
-    if (!entry || entry.kind !== "file" || !isEditableFile(entry.name)) {
-      notify("This file type cannot be opened in the editor.", "warning");
+  async function editFile(entry = selected, confirmedTextMode = false) {
+    if (!entry || entry.kind !== "file") {
+      notify("Select a file to open in the editor.", "warning");
+      return;
+    }
+    if (!isEditableFile(entry.name) && !confirmedTextMode) {
+      setDialog({
+        kind: "confirm",
+        title: "Open as text?",
+        message: `${entry.name} is not recognized as a text file. Opening it in the text editor may display unreadable content or damage binary data. Do you want to continue?`,
+        submitLabel: "Open as text",
+        tone: "danger",
+        onSubmit: () => {
+          setDialog(null);
+          editFile(entry, true);
+        },
+      });
       return;
     }
     const response = await apiRequest(
@@ -598,44 +622,48 @@ export function FileManagerWorkspace({ embedded = false, initialPath = "", conta
   const treeInitialOpenState = tree && tree.path !== "/" ? { [tree.path]: true } : {};
   return (
     <div
-      className={`file-manager-page ${embedded ? "file-manager-embedded" : "space-y-7"}`}
+      className={embedded ? "space-y-4" : "space-y-2"}
       onClick={() => {
         setContextMenu(null);
         setUploadMenuOpen(false);
       }}
     >
-      {!embedded && <div className="file-manager-heading">
+      {!embedded && <div className="flex flex-col items-start justify-between gap-4 md:items-stretch">
         <div>
-          <p className="text-sm text-cyan-300">Storage</p>
+          <p className="text-sm text-neutral-500 dark:text-neutral-400">Storage</p>
           <h2 className="mt-1 text-3xl font-semibold tracking-tight">
             File Manager
           </h2>
-          <p className="mt-2 text-slate-400">
+          <p className="mt-2 text-neutral-400">
             Browse the server filesystem. Website files default to the shared
             web root.
           </p>
-          <form className="file-path-form" onSubmit={openPath}>
-            <input
-              value={pathInput}
-              onChange={(event) => setPathInput(event.target.value)}
-              aria-label="Filesystem path"
-            />
-            <button className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700">
-              Go
-            </button>
-          </form>
-          <small className="file-root-path">Filesystem root: {rootPath}</small>
         </div>
-        <div className="file-manager-actions">
+        <div className="flex w-full flex-wrap items-center gap-2">
+          <div className="mr-auto flex max-w-[min(42rem,55vw)] min-w-0 items-center gap-2 overflow-auto whitespace-nowrap text-xs text-neutral-500 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:text-neutral-400">
+            <button type="button" className="inline-flex shrink-0 cursor-pointer items-center gap-1 hover:text-neutral-900 hover:underline dark:hover:text-neutral-100" onClick={() => loadEntries("/")}>
+              <Folder size={14} />
+              Filesystem
+            </button>
+            {breadcrumbs.map((part, index) => {
+              const path = `/${breadcrumbs.slice(0, index + 1).join("/")}`;
+              return (
+                <React.Fragment key={`top-${path}`}>
+                  <span>/</span>
+                  <button type="button" className="shrink-0 cursor-pointer hover:text-neutral-900 hover:underline dark:hover:text-neutral-100" onClick={() => loadEntries(path)}>{part}</button>
+                </React.Fragment>
+              );
+            })}
+          </div>
           <button
-            className="inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-md border border-slate-300 px-2 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+            className="inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-md border border-neutral-300 px-2 py-1.5 text-xs font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
             onClick={createFile}
           >
             <FilePlus size={14} />
             New file
           </button>
           <button
-            className="inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-md border border-slate-300 px-2 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+            className="inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-md border border-neutral-300 px-2 py-1.5 text-xs font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
             onClick={createFolder}
           >
             <FolderPlus size={14} />
@@ -654,10 +682,10 @@ export function FileManagerWorkspace({ embedded = false, initialPath = "", conta
               Upload
             </button>
             {uploadMenuOpen && (
-              <div className="absolute right-0 top-full z-20 mt-2 w-44 rounded-md border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+              <div className="absolute right-0 top-full z-20 mt-2 w-44 rounded-md border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
                 <button
                   type="button"
-                  className="flex w-full cursor-pointer items-center gap-2 rounded px-2.5 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+                  className="flex w-full cursor-pointer items-center gap-2 rounded px-2.5 py-2 text-left text-xs font-semibold text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
                   onClick={() => {
                     setUploadMenuOpen(false);
                     uploadInput.current?.click();
@@ -668,7 +696,7 @@ export function FileManagerWorkspace({ embedded = false, initialPath = "", conta
                 </button>
                 <button
                   type="button"
-                  className="flex w-full cursor-pointer items-center gap-2 rounded px-2.5 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+                  className="flex w-full cursor-pointer items-center gap-2 rounded px-2.5 py-2 text-left text-xs font-semibold text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
                   onClick={() => {
                     setUploadMenuOpen(false);
                     folderInput.current?.click();
@@ -698,19 +726,19 @@ export function FileManagerWorkspace({ embedded = false, initialPath = "", conta
           />
         </div>
       </div>}
-      <section className="file-manager-shell">
+      <section className="relative grid h-[38rem] min-h-0 select-none grid-cols-[18rem_minmax(0,1fr)] overflow-hidden rounded-lg border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
         {uploadProgress !== null && (
-          <div className="upload-progress-line">
-            <span style={{ width: `${uploadProgress}%` }} />
+          <div className="absolute inset-x-0 top-0 z-10 h-1 bg-neutral-200 dark:bg-neutral-800">
+            <span className="block h-full bg-blue-600 transition-[width]" style={{ width: `${uploadProgress}%` }} />
           </div>
         )}
-        <aside className="file-tree-pane">
-          <div className="file-pane-title">
-            <strong>Filesystem</strong>
+        <aside className="min-w-0 border-r border-neutral-200 dark:border-neutral-800">
+          <div className="flex items-center justify-between gap-3 border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
+            <strong className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">Filesystem</strong>
             <div className="flex items-center gap-1">
               <button
                 type="button"
-                className="icon-button"
+                className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
                 disabled={treeRootPath === "/"}
                 onClick={() => {
                   const parent = treeRootPath.split("/").slice(0, -1).join("/") || "/";
@@ -725,7 +753,7 @@ export function FileManagerWorkspace({ embedded = false, initialPath = "", conta
               </button>
               <button
                 type="button"
-                className="icon-button"
+                className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
                 onClick={() => loadTreeRoot(treeRootPath)}
                 title="Refresh folders"
                 aria-label="Refresh folders"
@@ -734,7 +762,7 @@ export function FileManagerWorkspace({ embedded = false, initialPath = "", conta
               </button>
             </div>
           </div>
-          <div className="file-tree">
+          <div className="h-[35rem] overflow-auto p-2">
             <Tree
               key={treeRootPath}
               data={treeData}
@@ -751,47 +779,44 @@ export function FileManagerWorkspace({ embedded = false, initialPath = "", conta
             </Tree>
           </div>
         </aside>
-        <main className="file-list-pane">
-          <div className="file-list-toolbar">
-            <div className="file-breadcrumbs">
-              <button onClick={() => loadEntries("/")}>
-                <Folder size={14} />
-                root
-              </button>
-              {breadcrumbs.map((part, index) => {
-                const path = `/${breadcrumbs.slice(0, index + 1).join("/")}`;
-                return (
-                  <React.Fragment key={path}>
-                    <span>/</span>
-                    <button onClick={() => loadEntries(path)}>{part}</button>
-                  </React.Fragment>
-                );
-              })}
-            </div>
-            <div className="file-selection-actions">
+        <main className="flex min-h-0 min-w-0 flex-col">
+          <div className="flex shrink-0 items-center justify-between gap-4 border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
+            {embedded ? (
+              <div className="flex min-w-0 items-center gap-2 overflow-auto whitespace-nowrap text-xs text-neutral-500 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:text-neutral-400">
+                <button type="button" className="inline-flex shrink-0 cursor-pointer items-center gap-1 hover:text-neutral-900 hover:underline dark:hover:text-neutral-100" onClick={() => loadEntries("/")}>
+                  <Folder size={14} />
+                  Filesystem
+                </button>
+                {breadcrumbs.map((part, index) => {
+                  const path = `/${breadcrumbs.slice(0, index + 1).join("/")}`;
+                  return <React.Fragment key={path}><span>/</span><button type="button" className="shrink-0 cursor-pointer hover:text-neutral-900 hover:underline dark:hover:text-neutral-100" onClick={() => loadEntries(path)}>{part}</button></React.Fragment>;
+                })}
+              </div>
+            ) : <span />}
+            <div className="flex shrink-0 items-center gap-1">
               <button
-                className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 file-up-button"
+                className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
                 disabled={currentPath === "/"}
                 onClick={() => loadEntries(parentPath)}
                 title="Up one folder"
+                aria-label="Up one folder"
               >
-                <ArrowUp size={15} />
-                Up
+                <ArrowUpToLine size={16} />
               </button>
               <button
-                className="icon-button"
-                disabled={!selected || !isEditableFile(selected.name)}
+                className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+                disabled={!selected || selected.kind !== "file"}
                 onClick={() => editFile()}
                 title={
-                  selected && !isEditableFile(selected.name)
-                    ? "This file type cannot be edited"
+                  selected && selected.kind === "file" && !isEditableFile(selected.name)
+                    ? "Open this file as text"
                     : "Edit"
                 }
               >
                 <Edit3 size={15} />
               </button>
               <button
-                className="icon-button"
+                className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
                 disabled={!selected}
                 onClick={renameItem}
                 title="Rename"
@@ -799,7 +824,7 @@ export function FileManagerWorkspace({ embedded = false, initialPath = "", conta
                 <Pencil size={15} />
               </button>
               <button
-                className="icon-button"
+                className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
                 disabled={!selectedPaths.length}
                 onClick={deleteItems}
                 title="Delete"
@@ -807,12 +832,12 @@ export function FileManagerWorkspace({ embedded = false, initialPath = "", conta
                 <Trash2 size={15} />
               </button>
               {downloadUrl && (
-                <a className="icon-button" href={downloadUrl} title="Download">
+                <a className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100" href={downloadUrl} title="Download">
                   <Download size={15} />
                 </a>
               )}
               <button
-                className="icon-button"
+                className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
                 disabled={!selectedPaths.length}
                 onClick={makeArchive}
                 title="Create ZIP"
@@ -820,7 +845,7 @@ export function FileManagerWorkspace({ embedded = false, initialPath = "", conta
                 <Archive size={15} />
               </button>
               <button
-                className="icon-button"
+                className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
                 disabled={
                   !selected || !selected.name.toLowerCase().endsWith(".zip")
                 }
@@ -830,7 +855,7 @@ export function FileManagerWorkspace({ embedded = false, initialPath = "", conta
                 <ArchiveRestore size={15} />
               </button>
               <button
-                className="icon-button"
+                className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
                 disabled={!clipboard.length}
                 onClick={pasteItems}
                 title="Paste"
@@ -838,7 +863,7 @@ export function FileManagerWorkspace({ embedded = false, initialPath = "", conta
                 <Copy size={15} />
               </button>
               <button
-                className="icon-button"
+                className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
                 onClick={() => loadEntries(currentPath)}
                 title="Refresh files"
               >
@@ -846,22 +871,30 @@ export function FileManagerWorkspace({ embedded = false, initialPath = "", conta
               </button>
             </div>
           </div>
-          <div className="file-list-header">
-            <span />
+          <div className="grid shrink-0 grid-cols-[1.5rem_minmax(12rem,1.6fr)_5rem_7rem_6rem_6rem_12rem_1.5rem] items-center gap-2 px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
+            <span className="flex items-center">
+              <input
+                type="checkbox"
+                aria-label="Select all files and folders"
+                checked={entries.length > 0 && entries.every((entry) => selectedPaths.includes(entry.path))}
+                onChange={(event) => setSelectedPaths(event.target.checked ? entries.map((entry) => entry.path) : [])}
+                className="h-4 w-4 cursor-pointer rounded border-neutral-300 text-blue-600 accent-blue-600 dark:border-neutral-600 dark:bg-neutral-800"
+              />
+            </span>
             <span>Name</span>
-            <span>Type</span>
+            <span>Ext</span>
             <span>Owner</span>
             <span>Size</span>
-            <span>Permissions</span>
+            <span>Mode</span>
             <span>Modified</span>
             <span />
           </div>
-          <div className="file-entries">
+          <div className="min-h-0 flex-1 overflow-auto">
             {entries.length ? (
               entries.map((entry) => (
                 <div
                   key={entry.path}
-                  className={`file-entry ${selectedPaths.includes(entry.path) ? "file-entry-selected" : ""}`}
+                  className={`grid select-none grid-cols-[1.5rem_minmax(12rem,1.6fr)_5rem_7rem_6rem_6rem_12rem_1.5rem] items-center gap-2 border-t border-neutral-100 px-4 py-3 text-left text-xs text-neutral-600 hover:bg-neutral-50 dark:border-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-800/60 ${selectedPaths.includes(entry.path) ? "bg-neutral-100 dark:bg-neutral-800" : ""}`}
                   onClick={() =>
                     toggleSelected(
                       entry.path,
@@ -871,9 +904,7 @@ export function FileManagerWorkspace({ embedded = false, initialPath = "", conta
                   onDoubleClick={() =>
                     entry.kind === "folder"
                       ? loadEntries(entry.path)
-                      : isEditableFile(entry.name)
-                        ? editFile(entry)
-                        : notify("This file type cannot be opened in the editor.", "warning")
+                      : editFile(entry)
                   }
                   onContextMenu={(event) => {
                     event.preventDefault();
@@ -883,7 +914,7 @@ export function FileManagerWorkspace({ embedded = false, initialPath = "", conta
                   }}
                 >
                   <input
-                    className="h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 dark:border-slate-600 dark:bg-slate-800 dark:focus:ring-offset-slate-900"
+                    className="h-4 w-4 shrink-0 rounded border-neutral-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 dark:border-neutral-600 dark:bg-neutral-800 dark:focus:ring-offset-neutral-900"
                     type="checkbox"
                     checked={selectedPaths.includes(entry.path)}
                     onChange={(event) =>
@@ -891,20 +922,20 @@ export function FileManagerWorkspace({ embedded = false, initialPath = "", conta
                     }
                     onClick={(event) => event.stopPropagation()}
                   />
-                  <span className="file-entry-name">
+                  <span className="flex min-w-0 items-center gap-2 text-neutral-700 dark:text-neutral-200">
                     {entry.kind === "folder" ? (
-                      <Folder size={17} />
+                      <Folder size={17} className="text-blue-500 dark:text-blue-300" />
                     ) : (
-                      <File size={17} />
+                      <File size={17} className="text-neutral-400 dark:text-neutral-500" />
                     )}
-                    <strong>{entry.name}</strong>
+                    <strong className="truncate font-semibold">{entry.name}</strong>
                   </span>
-                  <span>{entry.kind}</span>
+                  <span>{entry.kind === "folder" ? "—" : fileExtension(entry.name)}</span>
                   <span>{entry.owner}</span>
                   <span>
                     {entry.kind === "folder" ? "—" : formatBytes(entry.size)}
                   </span>
-                  <code className="file-permissions">{entry.permissions}</code>
+                  <code className="text-[11px] text-neutral-500 dark:text-neutral-400">{entry.permissions}</code>
                   <span>
                     {new Date(entry.modified_at * 1000).toLocaleString()}
                   </span>
@@ -912,51 +943,56 @@ export function FileManagerWorkspace({ embedded = false, initialPath = "", conta
                 </div>
               ))
             ) : (
-              <div className="file-empty">This folder is empty.</div>
+              <div className="grid place-items-center px-4 py-16 text-sm text-neutral-500 dark:text-neutral-400">This folder is empty.</div>
             )}
           </div>
           {contextMenu && (
             <div
-              className="file-context-menu"
+              className="fixed z-50 w-52 overflow-hidden rounded-lg border border-neutral-200 bg-white p-1.5 shadow-2xl dark:border-neutral-700 dark:bg-neutral-900"
               style={{ left: contextMenu.x, top: contextMenu.y }}
               onClick={(event) => event.stopPropagation()}
+              onContextMenu={(event) => event.preventDefault()}
             >
+              <div className="border-b border-neutral-200 px-2.5 pb-2 pt-1 dark:border-neutral-800">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-400 dark:text-neutral-500">Selected item</p>
+                <p className="mt-0.5 truncate text-xs font-semibold text-neutral-800 dark:text-neutral-200" title={selected?.name}>{selected?.name || "Multiple items"}</p>
+              </div>
               {selectedPaths.length > 0 && (
-                <button onClick={copyItems}>
+                <button type="button" className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800" onClick={() => { setContextMenu(null); copyItems(); }}>
                   <Copy size={14} />
                   Copy
                 </button>
               )}
-              {selected?.kind === "file" && isEditableFile(selected.name) && (
-                <button onClick={() => editFile()}>
+              {selected?.kind === "file" && (
+                <button type="button" className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800" onClick={() => { setContextMenu(null); editFile(); }}>
                   <Edit3 size={14} />
                   Edit
                 </button>
               )}
               {selected && (
                 <>
-                  <button onClick={renameItem}>
+                  <button type="button" className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800" onClick={() => { setContextMenu(null); renameItem(); }}>
                     <Pencil size={14} />
                     Rename
                   </button>
-                  <button onClick={changePermissions}>
+                  <button type="button" className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800" onClick={() => { setContextMenu(null); changePermissions(); }}>
                     <LockKeyhole size={14} />
                     Permissions
                   </button>
-                  <button onClick={deleteItems}>
+                  <button type="button" className="mt-1 flex w-full cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/30" onClick={() => { setContextMenu(null); deleteItems(); }}>
                     <Trash2 size={14} />
                     Delete
                   </button>
                 </>
               )}
               {selectedPaths.length > 0 && (
-                <button onClick={makeArchive}>
+                <button type="button" className="mt-1 flex w-full cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800" onClick={() => { setContextMenu(null); makeArchive(); }}>
                   <Archive size={14} />
                   Create ZIP
                 </button>
               )}
               {selected?.kind === "file" && selected.name.toLowerCase().endsWith(".zip") && (
-                <button onClick={extractArchive}>
+                <button type="button" className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800" onClick={() => { setContextMenu(null); extractArchive(); }}>
                   <ArchiveRestore size={14} />
                   Extract ZIP
                 </button>
@@ -967,24 +1003,24 @@ export function FileManagerWorkspace({ embedded = false, initialPath = "", conta
       </section>
       {editor && (
         <div
-          className="modal-backdrop"
+          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8"
           onMouseDown={(event) =>
             event.target === event.currentTarget && requestCloseEditor()
           }
         >
           <section
-            className={`modal-card file-editor-modal ${editorExpanded ? "file-editor-modal-expanded" : ""}`}
+            className={`w-full overflow-hidden rounded-xl border border-neutral-200 bg-white p-5 shadow-2xl dark:border-neutral-800 dark:bg-neutral-900 ${editorExpanded ? "max-w-none" : "max-w-5xl"}`}
           >
-            <div className="modal-header">
+            <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="eyebrow">FILE EDITOR</p>
-                <h2>{editor.name}</h2>
-                <code>{editor.path}</code>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500">FILE EDITOR</p>
+                <h2 className="mt-1 text-lg font-semibold text-neutral-900 dark:text-neutral-100">{editor.name}</h2>
+                <code className="mt-1 block break-all text-xs text-neutral-500 dark:text-neutral-400">{editor.path}</code>
               </div>
               <div className="flex items-center gap-1">
                 <button
                   type="button"
-                  className="icon-button"
+                  className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
                   title={editorExpanded ? "Exit full view" : "Full view"}
                   aria-label={editorExpanded ? "Exit full view" : "Full view"}
                   onClick={() => setEditorExpanded((expanded) => !expanded)}
@@ -993,7 +1029,7 @@ export function FileManagerWorkspace({ embedded = false, initialPath = "", conta
                 </button>
                 <button
                   type="button"
-                  className="icon-button"
+                  className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
                   title="Close editor"
                   onClick={requestCloseEditor}
                 >
@@ -1009,15 +1045,15 @@ export function FileManagerWorkspace({ embedded = false, initialPath = "", conta
                 setEditor((current) => ({ ...current, content: value }))
               }
             />
-            <div className="config-actions">
+            <div className="mt-4 flex justify-end gap-2">
               <button
-                className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
                 onClick={requestCloseEditor}
               >
                 Cancel
               </button>
               <button
-                className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
                 onClick={restoreFile}
               >
                 Restore backup

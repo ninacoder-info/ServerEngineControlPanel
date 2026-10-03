@@ -33,6 +33,7 @@ import MongoDbConfigModal from "./MongoDbConfigModal";
 import StalwartConfigModal from "./StalwartConfigModal";
 import WpCliConfigModal from "./WpCliConfigModal";
 import LinuxAuditConfigModal from "./LinuxAuditConfigModal";
+import useServiceSocketStatus from "../../hooks/useServiceSocketStatus";
 import ClamAvConfigModal from "./ClamAvConfigModal";
 import SaveButton from "../../components/SaveButton";
 import Toast from "../../components/Toast";
@@ -49,10 +50,10 @@ const tabs = [
   ["logs", "Error log", RefreshCw],
 ];
 const inputClass =
-  "mt-1.5 w-full rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm dark:border-slate-700";
+  "mt-1.5 w-full rounded-md border border-neutral-300 bg-transparent px-3 py-2 text-sm dark:border-neutral-700";
 function Field({ label, children }) {
   return (
-    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+    <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
       {label}
       {children}
     </label>
@@ -101,10 +102,10 @@ function MySQLGeneral({ service, configText, busy, message, onSave }) {
   return (
     <div className="space-y-5">
       <div>
-        <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+        <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
           MySQL server configuration
         </h3>
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
           Manage the database service. The editable my.cnf file has its own tab.
         </p>
       </div>
@@ -136,7 +137,7 @@ function MySQLGeneral({ service, configText, busy, message, onSave }) {
         </Field>
         <Field label="SQL mode">
           <select
-            className={`${inputClass} bg-white dark:bg-slate-900`}
+            className={`${inputClass} bg-white dark:bg-neutral-900`}
             value={values.sqlMode}
             onChange={(event) => set("sqlMode", event.target.value)}
           >
@@ -153,7 +154,7 @@ function MySQLGeneral({ service, configText, busy, message, onSave }) {
         </Field>
         <Field label="Slow query log">
           <select
-            className={`${inputClass} bg-white dark:bg-slate-900`}
+            className={`${inputClass} bg-white dark:bg-neutral-900`}
             value={values.slowQueryLog}
             onChange={(event) => set("slowQueryLog", event.target.value)}
           >
@@ -163,12 +164,12 @@ function MySQLGeneral({ service, configText, busy, message, onSave }) {
         </Field>
       </div>
       {message && (
-        <p className="text-sm text-slate-600 dark:text-slate-300">{message}</p>
+        <p className="text-sm text-neutral-600 dark:text-neutral-300">{message}</p>
       )}
       <div className="flex justify-end gap-3">
         <button
           type="button"
-          className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+          className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
           disabled={busy}
           onClick={reset}
         >
@@ -191,24 +192,24 @@ function MySQLFile({ config, text, setText, message, busy, save, restore }) {
   return (
     <div className="space-y-5">
       <div>
-        <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+        <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
           my.cnf
         </h3>
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
           The active MySQL configuration file.
         </p>
-        <code className="mt-2 block text-xs text-slate-500 dark:text-slate-400">
+        <code className="mt-2 block text-xs text-neutral-500 dark:text-neutral-400">
           {config?.config_path ||
             "/opt/server-engine/services/mysql/conf/my.cnf"}
         </code>
       </div>
       <ConfigEditor path="my.cnf" value={text} onChange={setText} />
       {message && (
-        <p className="text-sm text-slate-600 dark:text-slate-300">{message}</p>
+        <p className="text-sm text-neutral-600 dark:text-neutral-300">{message}</p>
       )}
       <div className="flex justify-end gap-3">
         <button
-          className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+          className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
           disabled={busy}
           onClick={restore}
         >
@@ -230,21 +231,21 @@ function PHPConfig({ config, text, setText, message, busy, save, restore }) {
   return (
     <div className="space-y-5">
       <div>
-        <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+        <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
           PHP configuration
         </h3>
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
           Manage the PHP runtime settings used by websites and command-line
           tools.
         </p>
       </div>
       <ConfigEditor path="php.ini" value={text} onChange={setText} />
       {message && (
-        <p className="text-sm text-slate-600 dark:text-slate-300">{message}</p>
+        <p className="text-sm text-neutral-600 dark:text-neutral-300">{message}</p>
       )}
       <div className="flex justify-end gap-3">
         <button
-          className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+          className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
           disabled={busy}
           onClick={restore}
         >
@@ -276,14 +277,14 @@ function NginxOverview({ config, text }) {
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+        <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
           Nginx web server configuration
         </h3>
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
           Configure request handling, connection capacity, uploads, compression,
           and web-server security.
         </p>
-        <code className="mt-2 block text-xs text-slate-500 dark:text-slate-400">
+        <code className="mt-2 block text-xs text-neutral-500 dark:text-neutral-400">
           {config?.config_path ||
             "/opt/server-engine/services/nginx/conf/nginx.conf"}
         </code>
@@ -308,16 +309,16 @@ function NginxOverview({ config, text }) {
         ].map(([Icon, label, value, description]) => (
           <div
             key={label}
-            className="rounded-md border border-slate-200 p-4 dark:border-slate-700"
+            className="rounded-md border border-neutral-200 p-4 dark:border-neutral-700"
           >
             <Icon size={16} className="text-blue-600 dark:text-blue-400" />
-            <p className="mt-3 text-xs font-medium text-slate-500 dark:text-slate-400">
+            <p className="mt-3 text-xs font-medium text-neutral-500 dark:text-neutral-400">
               {label}
             </p>
-            <p className="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100">
+            <p className="mt-1 text-lg font-semibold text-neutral-900 dark:text-neutral-100">
               {value}
             </p>
-            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
               {description}
             </p>
           </div>
@@ -326,31 +327,31 @@ function NginxOverview({ config, text }) {
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div>
-          <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+          <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
             Keepalive timeout
           </p>
-          <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">
+          <p className="mt-1 font-semibold text-neutral-900 dark:text-neutral-100">
             {keepalive}s
           </p>
         </div>
         <div>
-          <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+          <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
             Maximum upload
           </p>
-          <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">
+          <p className="mt-1 font-semibold text-neutral-900 dark:text-neutral-100">
             {uploadLimit}
           </p>
         </div>
         <div>
-          <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+          <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
             Virtual hosts
           </p>
-          <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">
+          <p className="mt-1 font-semibold text-neutral-900 dark:text-neutral-100">
             conf/sites/*.conf
           </p>
         </div>
         <div>
-          <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+          <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
             Validation
           </p>
           <p className="mt-1 font-semibold text-emerald-600 dark:text-emerald-400">
@@ -366,26 +367,26 @@ function NginxFile({ config, text, setText, message, busy, save, restore }) {
   return (
     <div className="space-y-5">
       <div>
-        <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+        <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
           nginx.conf
         </h3>
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
           Edit the main Nginx configuration. Virtual-host files remain under the
           sites directory and are loaded by this file.
         </p>
-        <code className="mt-2 block text-xs text-slate-500 dark:text-slate-400">
+        <code className="mt-2 block text-xs text-neutral-500 dark:text-neutral-400">
           {config?.config_path ||
             "/opt/server-engine/services/nginx/conf/nginx.conf"}
         </code>
       </div>
       <ConfigEditor path="nginx.conf" value={text} onChange={setText} />
       {message && (
-        <p className="text-sm text-slate-600 dark:text-slate-300">{message}</p>
+        <p className="text-sm text-neutral-600 dark:text-neutral-300">{message}</p>
       )}
       <div className="flex justify-end gap-3">
         <button
           type="button"
-          className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+          className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
           disabled={busy}
           onClick={restore}
         >
@@ -439,20 +440,20 @@ function NginxPerformance() {
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+        <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
           Nginx performance
         </h3>
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
           Tune connection capacity, proxy behavior, static-file delivery,
           compression, and TLS for live websites.
         </p>
       </div>
       <section className="space-y-4">
         <div>
-          <h4 className="font-semibold text-slate-900 dark:text-slate-100">
+          <h4 className="font-semibold text-neutral-900 dark:text-neutral-100">
             Server profile
           </h4>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+          <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
             Use a starting point, then adjust each limit for this server.
           </p>
         </div>
@@ -466,7 +467,7 @@ function NginxPerformance() {
               key={value}
               type="button"
               onClick={() => applyProfile(value)}
-              className={`rounded-md border px-3 py-2 text-sm font-medium ${profile === value ? "border-blue-600 bg-blue-600 text-white" : "border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"}`}
+              className={`rounded-md border px-3 py-2 text-sm font-medium ${profile === value ? "border-blue-600 bg-blue-600 text-white" : "border-neutral-300 text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"}`}
             >
               {label}
             </button>
@@ -476,7 +477,7 @@ function NginxPerformance() {
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Field label="Worker processes">
           <select
-            className={`${inputClass} bg-white dark:bg-slate-900`}
+            className={`${inputClass} bg-white dark:bg-neutral-900`}
             value={workers}
             onChange={(event) => setWorkers(event.target.value)}
           >
@@ -544,7 +545,7 @@ function NginxPerformance() {
         />
       </section>
       {message && (
-        <p className="text-sm text-slate-600 dark:text-slate-300">{message}</p>
+        <p className="text-sm text-neutral-600 dark:text-neutral-300">{message}</p>
       )}
       <div className="flex justify-end">
         <button
@@ -565,12 +566,12 @@ function NginxPerformance() {
 
 function ToggleRow({ label, description, checked, onChange }) {
   return (
-    <label className="flex items-start justify-between gap-5 border-b border-slate-200 py-4 last:border-b-0 dark:border-slate-800">
+    <label className="flex items-start justify-between gap-5 border-b border-neutral-200 py-4 last:border-b-0 dark:border-neutral-800">
       <span>
-        <span className="block text-sm font-semibold text-slate-900 dark:text-slate-100">
+        <span className="block text-sm font-semibold text-neutral-900 dark:text-neutral-100">
           {label}
         </span>
-        <span className="mt-1 block text-sm text-slate-500 dark:text-slate-400">
+        <span className="mt-1 block text-sm text-neutral-500 dark:text-neutral-400">
           {description}
         </span>
       </span>
@@ -578,7 +579,7 @@ function ToggleRow({ label, description, checked, onChange }) {
         type="checkbox"
         checked={checked}
         onChange={(event) => onChange(event.target.checked)}
-        className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-800"
+        className="mt-1 h-4 w-4 shrink-0 rounded border-neutral-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500 dark:border-neutral-600 dark:bg-neutral-800"
       />
     </label>
   );
@@ -621,52 +622,52 @@ function MySQLPerformance() {
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+        <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
           Production performance
         </h3>
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
           Tune this MySQL instance for live websites. These controls apply to
           this service and should be validated against real traffic before
           applying.
         </p>
       </div>
       <div className="grid gap-4 sm:grid-cols-3">
-        <div className="rounded-md border border-slate-200 p-4 dark:border-slate-700">
-          <p className="text-xs font-medium text-slate-500">Memory strategy</p>
-          <p className="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100">
+        <div className="rounded-md border border-neutral-200 p-4 dark:border-neutral-700">
+          <p className="text-xs font-medium text-neutral-500">Memory strategy</p>
+          <p className="mt-1 text-lg font-semibold text-neutral-900 dark:text-neutral-100">
             {bufferPool}% buffer pool
           </p>
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs text-neutral-500">
             Keeps hot table and index pages in memory.
           </p>
         </div>
-        <div className="rounded-md border border-slate-200 p-4 dark:border-slate-700">
-          <p className="text-xs font-medium text-slate-500">
+        <div className="rounded-md border border-neutral-200 p-4 dark:border-neutral-700">
+          <p className="text-xs font-medium text-neutral-500">
             Connection ceiling
           </p>
-          <p className="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100">
+          <p className="mt-1 text-lg font-semibold text-neutral-900 dark:text-neutral-100">
             {connections} clients
           </p>
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs text-neutral-500">
             Protects RAM from connection spikes.
           </p>
         </div>
-        <div className="rounded-md border border-slate-200 p-4 dark:border-slate-700">
-          <p className="text-xs font-medium text-slate-500">Query visibility</p>
-          <p className="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100">
+        <div className="rounded-md border border-neutral-200 p-4 dark:border-neutral-700">
+          <p className="text-xs font-medium text-neutral-500">Query visibility</p>
+          <p className="mt-1 text-lg font-semibold text-neutral-900 dark:text-neutral-100">
             {slowQueries ? `${slowTime}s slow log` : "Disabled"}
           </p>
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs text-neutral-500">
             Finds slow production queries for review.
           </p>
         </div>
       </div>
       <section className="space-y-4">
         <div>
-          <h4 className="font-semibold text-slate-900 dark:text-slate-100">
+          <h4 className="font-semibold text-neutral-900 dark:text-neutral-100">
             Server profile
           </h4>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+          <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
             Start with a profile, then adjust individual limits for this host.
           </p>
         </div>
@@ -679,7 +680,7 @@ function MySQLPerformance() {
             <button
               key={value}
               type="button"
-              className={`rounded-md border px-3 py-2 text-sm font-medium ${profile === value ? "border-blue-600 bg-blue-600 text-white" : "border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"}`}
+              className={`rounded-md border px-3 py-2 text-sm font-medium ${profile === value ? "border-blue-600 bg-blue-600 text-white" : "border-neutral-300 text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"}`}
               onClick={() => applyProfile(value)}
             >
               {label}
@@ -697,7 +698,7 @@ function MySQLPerformance() {
             value={bufferPool}
             onChange={(event) => setBufferPool(event.target.value)}
           />
-          <span className="mt-1 block text-xs font-normal text-slate-500">
+          <span className="mt-1 block text-xs font-normal text-neutral-500">
             MySQL commonly benefits from keeping most working data and indexes
             in the buffer pool, while leaving headroom for the OS and
             connections.
@@ -712,7 +713,7 @@ function MySQLPerformance() {
             value={connections}
             onChange={(event) => setConnections(event.target.value)}
           />
-          <span className="mt-1 block text-xs font-normal text-slate-500">
+          <span className="mt-1 block text-xs font-normal text-neutral-500">
             Each connection can consume additional per-session memory.
           </span>
         </Field>
@@ -724,7 +725,7 @@ function MySQLPerformance() {
             value={tableCache}
             onChange={(event) => setTableCache(event.target.value)}
           />
-          <span className="mt-1 block text-xs font-normal text-slate-500">
+          <span className="mt-1 block text-xs font-normal text-neutral-500">
             Increase when the server repeatedly opens tables under a broad
             workload.
           </span>
@@ -738,7 +739,7 @@ function MySQLPerformance() {
             value={tempTable}
             onChange={(event) => setTempTable(event.target.value)}
           />
-          <span className="mt-1 block text-xs font-normal text-slate-500">
+          <span className="mt-1 block text-xs font-normal text-neutral-500">
             Keep this bounded because it can multiply across active sessions.
           </span>
         </Field>
@@ -751,24 +752,24 @@ function MySQLPerformance() {
             value={ioCapacity}
             onChange={(event) => setIoCapacity(event.target.value)}
           />
-          <span className="mt-1 block text-xs font-normal text-slate-500">
+          <span className="mt-1 block text-xs font-normal text-neutral-500">
             Match this to available disk I/O; higher is not always faster.
           </span>
         </Field>
       </section>
       <section className="space-y-4">
         <div>
-          <h4 className="font-semibold text-slate-900 dark:text-slate-100">
+          <h4 className="font-semibold text-neutral-900 dark:text-neutral-100">
             Slow query monitoring
           </h4>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+          <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
             Use this to find production queries that need indexes or query
             changes.
           </p>
         </div>
-        <label className="flex items-center gap-3 text-sm text-slate-700 dark:text-slate-300">
+        <label className="flex items-center gap-3 text-sm text-neutral-700 dark:text-neutral-300">
           <input
-            className="h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 dark:border-slate-600 dark:bg-slate-800 dark:focus:ring-offset-slate-900"
+            className="h-4 w-4 shrink-0 rounded border-neutral-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 dark:border-neutral-600 dark:bg-neutral-800 dark:focus:ring-offset-neutral-900"
             type="checkbox"
             checked={slowQueries}
             onChange={(event) => setSlowQueries(event.target.checked)}
@@ -788,8 +789,8 @@ function MySQLPerformance() {
           </Field>
         )}
       </section>
-      <div className="flex items-start gap-3 border-t border-slate-200 pt-4 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
-        <span className="font-medium text-slate-700 dark:text-slate-300">
+      <div className="flex items-start gap-3 border-t border-neutral-200 pt-4 text-sm text-neutral-500 dark:border-neutral-700 dark:text-neutral-400">
+        <span className="font-medium text-neutral-700 dark:text-neutral-300">
           Apply behavior
         </span>
         <span>
@@ -799,7 +800,7 @@ function MySQLPerformance() {
         </span>
       </div>
       {message && (
-        <p className="text-sm text-slate-600 dark:text-slate-300">{message}</p>
+        <p className="text-sm text-neutral-600 dark:text-neutral-300">{message}</p>
       )}
       <div className="flex justify-end">
         <button
@@ -868,10 +869,10 @@ function PHPPerformance({ version }) {
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+        <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
           PHP-FPM performance · PHP {version}
         </h3>
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
           Tune worker capacity, request safety, OPcache, uploads, and
           slow-request diagnostics for this PHP runtime.
         </p>
@@ -889,15 +890,15 @@ function PHPPerformance({ version }) {
         ].map(([label, value, description]) => (
           <div
             key={label}
-            className="rounded-md border border-slate-200 p-4 dark:border-slate-700"
+            className="rounded-md border border-neutral-200 p-4 dark:border-neutral-700"
           >
-            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+            <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
               {label}
             </p>
-            <p className="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100">
+            <p className="mt-1 text-lg font-semibold text-neutral-900 dark:text-neutral-100">
               {value}
             </p>
-            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
               {description}
             </p>
           </div>
@@ -905,10 +906,10 @@ function PHPPerformance({ version }) {
       </div>
       <section className="space-y-4">
         <div>
-          <h4 className="font-semibold text-slate-900 dark:text-slate-100">
+          <h4 className="font-semibold text-neutral-900 dark:text-neutral-100">
             FPM process pool
           </h4>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+          <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
             Choose a starting profile, then control how PHP workers are created
             and recycled.
           </p>
@@ -923,7 +924,7 @@ function PHPPerformance({ version }) {
               key={value}
               type="button"
               onClick={() => applyProfile(value)}
-              className={`rounded-md border px-3 py-2 text-sm font-medium ${profile === value ? "border-blue-600 bg-blue-600 text-white" : "border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"}`}
+              className={`rounded-md border px-3 py-2 text-sm font-medium ${profile === value ? "border-blue-600 bg-blue-600 text-white" : "border-neutral-300 text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"}`}
             >
               {label}
             </button>
@@ -932,7 +933,7 @@ function PHPPerformance({ version }) {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="Process manager">
             <select
-              className={`${inputClass} bg-white dark:bg-slate-900`}
+              className={`${inputClass} bg-white dark:bg-neutral-900`}
               value={pm}
               onChange={(event) => setPm(event.target.value)}
             >
@@ -990,10 +991,10 @@ function PHPPerformance({ version }) {
       </section>
       <section className="space-y-4">
         <div>
-          <h4 className="font-semibold text-slate-900 dark:text-slate-100">
+          <h4 className="font-semibold text-neutral-900 dark:text-neutral-100">
             Request limits
           </h4>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+          <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
             Protect the server from runaway scripts while supporting normal CMS
             and framework deployments.
           </p>
@@ -1035,10 +1036,10 @@ function PHPPerformance({ version }) {
       </section>
       <section className="space-y-1">
         <div className="mb-3">
-          <h4 className="font-semibold text-slate-900 dark:text-slate-100">
+          <h4 className="font-semibold text-neutral-900 dark:text-neutral-100">
             OPcache and diagnostics
           </h4>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+          <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
             Keep framework code cached in production while allowing safe
             development refreshes.
           </p>
@@ -1097,7 +1098,7 @@ function PHPPerformance({ version }) {
         )}
       </section>
       {message && (
-        <p className="text-sm text-slate-600 dark:text-slate-300">{message}</p>
+        <p className="text-sm text-neutral-600 dark:text-neutral-300">{message}</p>
       )}
       <div className="flex justify-end">
         <button
@@ -1246,11 +1247,11 @@ export default function ServiceManagerModal({
   const [pendingExtensions, setPendingExtensions] = React.useState(() => new Set());
   const [message, setMessage] = React.useState("");
   const [busy, setBusy] = React.useState(false);
-  const [action, setAction] = React.useState("");
   const [phpTerminalEnabled, setPhpTerminalEnabled] = React.useState(false);
   const [phpTerminalPath, setPhpTerminalPath] = React.useState("");
   const [terminalToast, setTerminalToast] = React.useState(null);
   const [startupEnabled, setStartupEnabled] = React.useState(false);
+  const { status: liveStatus, action, setAction } = useServiceSocketStatus(service.id, installed?.status);
   React.useEffect(() => {
     setAvailableVersions(service.versions);
   }, [service.id, service.versions]);
@@ -1547,33 +1548,9 @@ export default function ServiceManagerModal({
       setAction("");
       return;
     }
-    let finalJob;
-    for (let i = 0; i < 30; i += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 700));
-      const jobs = await apiRequest("/api/v1/jobs").then((x) =>
-        x.ok ? x.json() : [],
-      );
-      finalJob = jobs.find((job) => job.id === body.job_id);
-      if (
-        finalJob &&
-        ["succeeded", "failed", "cancelled"].includes(finalJob.status)
-      )
-        break;
-    }
     setMessage("");
-    setAction("");
-    const refreshed = await apiRequest("/api/v1/services/installed");
-    if (refreshed.ok) {
-      const detected = await refreshed.json();
-      setInstalledItems(
-        detected.filter(
-          (item) =>
-            item.id === service.id || item.id.startsWith(`${service.id}@`),
-        ),
-      );
-    }
   }
-  const running = installed?.status === "running";
+  const running = liveStatus === "running";
   const primary = running ? "stop" : "start";
   const actionLabel = action
     ? `${action === "stop" ? "Stopping" : action === "start" ? "Starting" : action === "restart" ? "Restarting" : action}…`
@@ -1590,16 +1567,16 @@ export default function ServiceManagerModal({
   });
   return (
     <div
-      className="modal-backdrop"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8"
       onMouseDown={(event) => event.target === event.currentTarget && onClose()}
     >
-      <section className="max-h-[calc(100vh-2rem)] w-full max-w-3xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl dark:bg-slate-900">
+      <section className="max-h-[calc(100vh-2rem)] w-full max-w-3xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl dark:bg-neutral-900">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
+            <h2 className="text-xl font-semibold text-neutral-900 dark:text-neutral-100">
               {serviceLabel}
             </h2>
-            <p className="mt-1 flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+            <p className="mt-1 flex items-center gap-2 text-sm text-neutral-500 dark:text-neutral-400">
               <span
                 className={`h-2 w-2 rounded-full ${running ? "bg-emerald-500" : "bg-amber-500"}`}
               />
@@ -1610,19 +1587,19 @@ export default function ServiceManagerModal({
           <button
             type="button"
             aria-label="Close service configuration"
-            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
             onClick={onClose}
           >
             <X size={18} />
           </button>
         </div>
-        <div className="mt-6 flex gap-5 overflow-x-auto border-b border-slate-200 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:border-slate-800">
+        <div className="mt-6 flex gap-5 overflow-x-auto border-b border-neutral-200 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:border-neutral-800">
           {visibleTabs.map(([id, label, Icon]) => (
             <button
               type="button"
               key={id}
               onClick={() => setTab(id)}
-              className={`inline-flex items-center gap-1.5 whitespace-nowrap border-b-2 px-1 pb-3 text-sm font-medium ${tab === id ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"}`}
+              className={`inline-flex items-center gap-1.5 whitespace-nowrap border-b-2 px-1 pb-3 text-sm font-medium ${tab === id ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200"}`}
             >
               <Icon size={15} />
               {isNginx && id === "configuration"
@@ -1634,7 +1611,7 @@ export default function ServiceManagerModal({
           ))}
         </div>
         {tab === "configuration" && (
-          <div className="manager-pane">
+          <div className="space-y-5 pt-5">
             {isMysql ? (
               <MySQLGeneral
                 service={service}
@@ -1659,7 +1636,7 @@ export default function ServiceManagerModal({
           </div>
         )}
         {tab === "mysql-file" && isMysql && (
-          <div className="manager-pane">
+          <div className="space-y-5 pt-5">
             <MySQLFile
               config={config}
               text={text}
@@ -1672,7 +1649,7 @@ export default function ServiceManagerModal({
           </div>
         )}
         {tab === "nginx-file" && isNginx && (
-          <div className="manager-pane">
+          <div className="space-y-5 pt-5">
             <NginxFile
               config={config}
               text={text}
@@ -1685,23 +1662,23 @@ export default function ServiceManagerModal({
           </div>
         )}
         {tab === "extensions" && isPhp && (
-          <div className="manager-pane space-y-1">
+          <div className="space-y-1 pt-5">
             {!extensions.length && (
-              <p className="py-6 text-sm text-slate-500 dark:text-slate-400">
+              <p className="py-6 text-sm text-neutral-500 dark:text-neutral-400">
                 No extension information is available for PHP {version} yet.
                 Reload the modal after the runtime finishes installing.
               </p>
             )}
             {extensions.map((extension) => (
               <div
-                className="flex items-center justify-between gap-4 border-b border-slate-200 py-2.5 last:border-b-0 dark:border-slate-700"
+                className="flex items-center justify-between gap-4 border-b border-neutral-200 py-2.5 last:border-b-0 dark:border-neutral-700"
                 key={extension.id}
               >
                 <div>
-                  <strong className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                  <strong className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
                     {extension.name}
                   </strong>
-                  <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                  <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
                     {extension.description}
                   </p>
                 </div>
@@ -1726,16 +1703,16 @@ export default function ServiceManagerModal({
           </div>
         )}
         {tab === "terminal" && isPhp && (
-          <div className="manager-pane space-y-5">
+          <div className="space-y-5 pt-5">
             <div>
-              <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+              <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
                 PHP {version} in Terminal
               </h3>
-              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
                 Enable this version to use the managed PHP runtime by typing <code>php</code> in new local terminal sessions. The server’s existing PHP command is not changed.
               </p>
             </div>
-            <label className="flex cursor-pointer items-start gap-3 border-y border-slate-200 py-4 dark:border-slate-800">
+            <label className="flex cursor-pointer items-start gap-3 border-y border-neutral-200 py-4 dark:border-neutral-800">
               <input
                 type="checkbox"
                 checked={phpTerminalEnabled}
@@ -1743,17 +1720,17 @@ export default function ServiceManagerModal({
                 className="mt-0.5 h-4 w-4 cursor-pointer accent-blue-600"
               />
               <span>
-                <span className="block text-sm font-medium text-slate-900 dark:text-slate-100">
+                <span className="block text-sm font-medium text-neutral-900 dark:text-neutral-100">
                   Make PHP {version} available as php
                 </span>
-                <span className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">
+                <span className="mt-1 block text-xs leading-5 text-neutral-500 dark:text-neutral-400">
                   PHP CLI tools from this isolated version will be placed first in PATH. Reconnect the terminal after saving.
                 </span>
               </span>
             </label>
-            <div className="space-y-2 text-sm text-slate-600 dark:text-slate-300">
+            <div className="space-y-2 text-sm text-neutral-600 dark:text-neutral-300">
               <p>Mapped command</p>
-              <code className="block break-all text-xs text-slate-500 dark:text-slate-400">
+              <code className="block break-all text-xs text-neutral-500 dark:text-neutral-400">
                 php → {phpTerminalPath || "Loading…"}
               </code>
             </div>
@@ -1765,9 +1742,9 @@ export default function ServiceManagerModal({
           </div>
         )}
         {tab === "versions" && (
-          <form className="manager-pane space-y-4" onSubmit={switchVersion}>
+          <form className="space-y-4 pt-5" onSubmit={switchVersion}>
             <div className="flex items-center justify-between gap-3">
-              <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+              <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
                 {service.name} version
               </label>
               {isMysql && (
@@ -1782,9 +1759,9 @@ export default function ServiceManagerModal({
                 </button>
               )}
             </div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+            <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
               <select
-                className={`${inputClass} bg-white dark:bg-slate-900`}
+                className={`${inputClass} bg-white dark:bg-neutral-900`}
                 value={version}
                 onChange={(event) => setVersion(event.target.value)}
               >
@@ -1795,9 +1772,9 @@ export default function ServiceManagerModal({
                 ))}
               </select>
             </label>
-            <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+            <label className="flex items-center gap-2 text-sm text-neutral-700 dark:text-neutral-300">
               <input
-                className="h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 dark:border-slate-600 dark:bg-slate-800 dark:focus:ring-offset-slate-900"
+                className="h-4 w-4 shrink-0 rounded border-neutral-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 dark:border-neutral-600 dark:bg-neutral-800 dark:focus:ring-offset-neutral-900"
                 type="checkbox"
                 checked={confirmed}
                 onChange={(event) => setConfirmed(event.target.checked)}
@@ -1815,14 +1792,14 @@ export default function ServiceManagerModal({
               </button>
             </div>
             {message && (
-              <p className="text-sm text-slate-600 dark:text-slate-300">
+              <p className="text-sm text-neutral-600 dark:text-neutral-300">
                 {message}
               </p>
             )}
           </form>
         )}
         {tab === "runtime" && (
-          <div className="manager-pane">
+          <div className="space-y-5 pt-5">
             <div className="flex w-full flex-col gap-3">
               <Server size={18} />
               <div className="w-full">
@@ -1831,52 +1808,52 @@ export default function ServiceManagerModal({
                     ? `${serviceLabel} is running`
                     : `${serviceLabel} is installed but stopped`}
                 </strong>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
                   {isPhp
                     ? `Version ${version} uses its own pool and socket.`
                     : isMysql
                       ? "MySQL uses its own data directory, port, process, and error log."
                       : `${service.name} runs from the Server Engine service root.`}
                 </p>
-                <div className="mb-5 flex items-center justify-between gap-4 border-b border-slate-200 pb-4 dark:border-slate-800">
-                  <label className="flex cursor-pointer items-start gap-3 text-sm text-slate-700 dark:text-slate-300">
+                <div className="mb-5 flex items-center justify-between gap-4 border-b border-neutral-200 pb-4 dark:border-neutral-800">
+                  <label className="flex cursor-pointer items-start gap-3 text-sm text-neutral-700 dark:text-neutral-300">
                     <input
-                      className="mt-0.5 h-4 w-4 cursor-pointer rounded border-slate-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-800"
+                      className="mt-0.5 h-4 w-4 cursor-pointer rounded border-neutral-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500/20 dark:border-neutral-600 dark:bg-neutral-800"
                       type="checkbox"
                       checked={startupEnabled}
                       onChange={(event) => saveStartupPolicy(event.target.checked)}
                     />
                     <span>
-                      <span className="block font-medium text-slate-900 dark:text-slate-100">
+                      <span className="block font-medium text-neutral-900 dark:text-neutral-100">
                         Start with operating system
                       </span>
-                      <span className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">
+                      <span className="mt-1 block text-xs leading-5 text-neutral-500 dark:text-neutral-400">
                         Starts this service automatically when Server Engine starts.
                       </span>
                     </span>
                   </label>
                 </div>
-                <div className="mb-5 divide-y divide-slate-200 border-y border-slate-200 dark:divide-slate-800 dark:border-slate-800">
+                <div className="mb-5 divide-y divide-neutral-200 border-y border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
                   <div className="flex items-center justify-between gap-4 py-3">
-                    <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Service state</span>
-                    <span className={`text-sm font-semibold ${running ? "text-emerald-600 dark:text-emerald-400" : "text-slate-700 dark:text-slate-300"}`}>
+                    <span className="text-sm font-medium text-neutral-600 dark:text-neutral-400">Service state</span>
+                    <span className={`text-sm font-semibold ${running ? "text-emerald-600 dark:text-emerald-400" : "text-neutral-700 dark:text-neutral-300"}`}>
                       {running ? "Running" : "Stopped"}
                     </span>
                   </div>
                   <div className="flex items-center justify-between gap-4 py-3">
-                    <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Version</span>
-                    <span className="text-sm text-slate-700 dark:text-slate-300">{installed?.version ? `v${installed.version}` : "—"}</span>
+                    <span className="text-sm font-medium text-neutral-600 dark:text-neutral-400">Version</span>
+                    <span className="text-sm text-neutral-700 dark:text-neutral-300">{installed?.version ? `v${installed.version}` : "—"}</span>
                   </div>
                   <div className="flex items-center justify-between gap-4 py-3">
-                    <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Configuration</span>
-                    <code className="max-w-[70%] break-all text-right text-xs text-slate-500 dark:text-slate-400">{config?.config_path || "Managed service configuration"}</code>
+                    <span className="text-sm font-medium text-neutral-600 dark:text-neutral-400">Configuration</span>
+                    <code className="max-w-[70%] break-all text-right text-xs text-neutral-500 dark:text-neutral-400">{config?.config_path || "Managed service configuration"}</code>
                   </div>
                   <div className="flex items-center justify-between gap-4 py-3">
-                    <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Runtime</span>
-                    <span className="text-sm text-slate-700 dark:text-slate-300">{isPhp ? "PHP-FPM pool and socket" : isMysql ? "MySQL server process" : "Managed service process"}</span>
+                    <span className="text-sm font-medium text-neutral-600 dark:text-neutral-400">Runtime</span>
+                    <span className="text-sm text-neutral-700 dark:text-neutral-300">{isPhp ? "PHP-FPM pool and socket" : isMysql ? "MySQL server process" : "Managed service process"}</span>
                   </div>
                 </div>
-                <div className="service-control-actions">
+                <div className="flex flex-wrap items-center gap-3">
                   <button
                     className={
                       primary === "stop"
@@ -1890,7 +1867,7 @@ export default function ServiceManagerModal({
                   </button>
                   {running && (
                     <button
-                      className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                      className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
                       disabled={Boolean(action)}
                       onClick={() => serviceAction("restart")}
                     >
@@ -1901,7 +1878,7 @@ export default function ServiceManagerModal({
               </div>
             </div>
             {message && (
-              <p className="mt-4 text-sm text-slate-600 dark:text-slate-300">
+              <p className="mt-4 text-sm text-neutral-600 dark:text-neutral-300">
                 {message}
               </p>
             )}
@@ -1909,40 +1886,40 @@ export default function ServiceManagerModal({
         )}
         {tab === "tuning" &&
           (isMysql ? (
-            <div className="manager-pane">
+            <div className="space-y-5 pt-5">
               <MySQLPerformance />
             </div>
           ) : isNginx ? (
-            <div className="manager-pane">
+            <div className="space-y-5 pt-5">
               <NginxPerformance />
             </div>
           ) : isPhp ? (
-            <div className="manager-pane">
+            <div className="space-y-5 pt-5">
               <PHPPerformance version={version} />
             </div>
           ) : (
-            <div className="manager-pane">
-              <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">{`${service.name} performance`}</h3>
-              <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+            <div className="space-y-5 pt-5">
+              <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">{`${service.name} performance`}</h3>
+              <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
                 Resource and runtime settings apply to {service.name}.
               </p>
             </div>
           ))}
         {tab === "logs" && (
-          <div className="manager-pane">
+          <div className="space-y-5 pt-5">
             <div className="flex items-center justify-between gap-3">
-              <span className="text-sm text-slate-500 dark:text-slate-400">
+              <span className="text-sm text-neutral-500 dark:text-neutral-400">
                 Tail 100 lines · {logs?.path || "Loading…"}
               </span>
               <button
-                className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 inline-flex items-center justify-center gap-1.5 whitespace-nowrap"
+                className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800 inline-flex items-center justify-center gap-1.5 whitespace-nowrap"
                 onClick={loadLogs}
               >
                 <RefreshCw size={14} />
                 Reload
               </button>
             </div>
-            <pre className="service-log">
+            <pre className="max-h-96 min-h-56 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-neutral-200 bg-neutral-950 p-4 text-xs leading-5 text-neutral-200 dark:border-neutral-800">
               {logs?.available
                 ? logs.lines.join("\n") || "No error log lines recorded."
                 : "No error log exists yet."}

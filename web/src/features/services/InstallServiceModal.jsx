@@ -138,9 +138,9 @@ export default function InstallServiceModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[70] flex h-[100dvh] min-h-full w-screen items-start justify-center overflow-y-auto overscroll-contain bg-slate-950/50 p-4 sm:p-8">
+    <div className="fixed inset-0 z-[70] flex h-[100dvh] min-h-full w-screen items-start justify-center overflow-y-auto overscroll-contain bg-neutral-950/50 p-4 sm:p-8">
       <section
-        className="my-auto max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-6 shadow-xl dark:bg-slate-900 sm:max-h-[calc(100dvh-4rem)]"
+        className="my-auto max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-6 shadow-xl dark:bg-neutral-900 sm:max-h-[calc(100dvh-4rem)]"
         role="dialog"
         aria-modal="true"
         aria-labelledby="install-service-title"
@@ -149,11 +149,11 @@ export default function InstallServiceModal({
           <div>
             <h2
               id="install-service-title"
-              className="text-lg font-semibold text-slate-900 dark:text-slate-100"
+              className="text-lg font-semibold text-neutral-900 dark:text-neutral-100"
             >
               Install {service.name}
             </h2>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
               Choose the release to install on this server.
             </p>
           </div>
@@ -161,7 +161,7 @@ export default function InstallServiceModal({
             type="button"
             onClick={onClose}
             aria-label="Close installer"
-            className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+            className="rounded-md p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
           >
             <X size={18} />
           </button>
@@ -169,24 +169,24 @@ export default function InstallServiceModal({
         <form onSubmit={submit} className="mt-6 space-y-5">
           {service.install_methods?.length > 1 && (
             <fieldset className="space-y-3">
-              <legend className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+              <legend className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">
                 Installation method
               </legend>
-              <label className={`block cursor-pointer rounded-lg border p-3 ${installMethod === "prebuilt" ? "border-blue-500 bg-blue-50/60 dark:bg-blue-950/20" : "border-slate-200 dark:border-slate-800"}`}>
+              <label className={`block cursor-pointer rounded-lg border p-3 ${installMethod === "prebuilt" ? "border-blue-500 bg-blue-50/60 dark:bg-blue-950/20" : "border-neutral-200 dark:border-neutral-800"}`}>
                 <span className="flex items-start gap-3">
                   <input type="radio" name={`${service.id}-install-method`} value="prebuilt" checked={installMethod === "prebuilt"} onChange={() => changeInstallMethod("prebuilt")} className="mt-1 accent-blue-600" disabled={busy} />
-                  <span><strong className="block text-sm text-slate-900 dark:text-slate-100">Prebuilt package · Recommended</strong><span className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">Fast installation using the exact compatible {service.name} package fetched for this OS and architecture.</span></span>
+                  <span><strong className="block text-sm text-neutral-900 dark:text-neutral-100">Prebuilt package · Recommended</strong><span className="mt-1 block text-xs leading-5 text-neutral-500 dark:text-neutral-400">Fast installation using the exact compatible {service.name} package fetched for this OS and architecture.</span></span>
                 </span>
               </label>
-              <label className={`block cursor-pointer rounded-lg border p-3 ${installMethod === "source" ? "border-blue-500 bg-blue-50/60 dark:bg-blue-950/20" : "border-slate-200 dark:border-slate-800"}`}>
+              <label className={`block cursor-pointer rounded-lg border p-3 ${installMethod === "source" ? "border-blue-500 bg-blue-50/60 dark:bg-blue-950/20" : "border-neutral-200 dark:border-neutral-800"}`}>
                 <span className="flex items-start gap-3">
                   <input type="radio" name={`${service.id}-install-method`} value="source" checked={installMethod === "source"} onChange={() => changeInstallMethod("source")} className="mt-1 accent-blue-600" disabled={busy} />
-                  <span><strong className="block text-sm text-slate-900 dark:text-slate-100">{service.id === "wp-cli" ? "Official release" : "Build from source · Advanced"}</strong><span className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">{service.id === "wp-cli" ? "Downloads the official WP-CLI release and installs it with the latest available PHP runtime." : `Fetches the official ${service.name} source release and builds it inside Server Engine.`}</span></span>
+                  <span><strong className="block text-sm text-neutral-900 dark:text-neutral-100">{service.id === "wp-cli" ? "Official release" : "Build from source · Advanced"}</strong><span className="mt-1 block text-xs leading-5 text-neutral-500 dark:text-neutral-400">{service.id === "wp-cli" ? "Downloads the official WP-CLI release and installs it with the latest available PHP runtime." : `Fetches the official ${service.name} source release and builds it inside Server Engine.`}</span></span>
                 </span>
               </label>
             </fieldset>
           )}
-          <label className="block text-sm font-medium text-slate-800 dark:text-slate-200">
+          <label className="block text-sm font-medium text-neutral-800 dark:text-neutral-200">
             <span className="flex items-center justify-between gap-3">
               <span>Version</span>
               <button
@@ -203,7 +203,7 @@ export default function InstallServiceModal({
               value={version}
               onChange={(event) => setVersion(event.target.value)}
               disabled={refreshing || busy || !versions.length}
-              className="mt-2 block min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:cursor-wait disabled:opacity-70 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+              className="mt-2 block min-h-11 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2.5 text-sm text-neutral-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:cursor-wait disabled:opacity-70 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100"
             >
               {versions.map((item) => (
                 <option key={item.version} value={item.version}>
@@ -220,18 +220,18 @@ export default function InstallServiceModal({
             </select>
           </label>
           {["composer", "wp-cli"].includes(service.id) && (
-            <label className="block text-sm font-medium text-slate-800 dark:text-slate-200">
+            <label className="block text-sm font-medium text-neutral-800 dark:text-neutral-200">
               <span>PHP CLI runtime</span>
               <select
                 value={phpVersion}
                 onChange={(event) => setPhpVersion(event.target.value)}
                 disabled={busy || !phpRuntimes.length}
-                className="mt-2 block min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:opacity-70 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                className="mt-2 block min-h-11 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2.5 text-sm text-neutral-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:opacity-70 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100"
               >
                 {phpRuntimes.map((runtime) => <option key={runtime.version} value={runtime.version}>PHP {runtime.version}</option>)}
                 {!phpRuntimes.length && <option value="">Install PHP first</option>}
               </select>
-              <span className="mt-1 block text-xs font-normal text-slate-500 dark:text-slate-400">
+              <span className="mt-1 block text-xs font-normal text-neutral-500 dark:text-neutral-400">
                 {service.id === "wp-cli" ? "WP-CLI will use this PHP runtime. If it is removed, the latest installed PHP is selected automatically." : "Composer will use this PHP CLI runtime. If it is removed, the latest installed PHP is selected automatically."}
               </span>
             </label>
@@ -245,7 +245,7 @@ export default function InstallServiceModal({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg px-4 py-2 text-sm text-slate-600 dark:text-slate-300"
+              className="rounded-lg px-4 py-2 text-sm text-neutral-600 dark:text-neutral-300"
             >
               Cancel
             </button>

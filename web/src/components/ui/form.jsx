@@ -4,7 +4,7 @@ import { Controller, FormProvider, useFormContext, useFormState } from "react-ho
 export const Form = FormProvider;
 
 export function formControlClass(className = "", invalid = false) {
-  return `${className} ${invalid ? "!border-rose-500 focus:!border-rose-500 focus:!ring-rose-500 dark:!border-rose-500" : "border-slate-300 focus:border-blue-500 dark:border-slate-700"}`;
+  return `${className} ${invalid ? "!border-rose-500 focus:!border-rose-500 focus:!ring-rose-500 dark:!border-rose-500" : "border-neutral-300 focus:border-blue-500 dark:border-neutral-700"}`;
 }
 
 const FieldContext = React.createContext(null);
@@ -31,7 +31,7 @@ export function FormItem({ className = "", children, ...props }) {
 
 export function FormLabel({ className = "", children, ...props }) {
   const { error, formItemId } = useFormField();
-  return <label htmlFor={formItemId} className={`${error ? "text-rose-600 dark:text-rose-400" : "text-slate-700 dark:text-slate-300"} text-sm font-medium ${className}`} {...props}>{children}</label>;
+  return <label htmlFor={formItemId} className={`${error ? "text-rose-600 dark:text-rose-400" : "text-neutral-700 dark:text-neutral-300"} text-sm font-medium ${className}`} {...props}>{children}</label>;
 }
 
 export function FormControl({ children }) {
@@ -41,7 +41,7 @@ export function FormControl({ children }) {
 
 export function FormDescription({ className = "", children, ...props }) {
   const { formDescriptionId } = useFormField();
-  return <p id={formDescriptionId} className={`text-xs leading-5 text-slate-500 dark:text-slate-400 ${className}`} {...props}>{children}</p>;
+  return <p id={formDescriptionId} className={`text-xs leading-5 text-neutral-500 dark:text-neutral-400 ${className}`} {...props}>{children}</p>;
 }
 
 export function FormMessage({ className = "", children, ...props }) {

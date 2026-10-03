@@ -1,10 +1,14 @@
 import os
+import json
 import time
 from datetime import datetime, timezone
+from pathlib import Path
+from threading import Event, Lock, Thread
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.dependencies import require_user
+from app.services.job_service import job_store
 from app.version import APP_VERSION
 
 router = APIRouter(prefix="/api/v1", tags=["system"])
@@ -12,6 +16,70 @@ router = APIRouter(prefix="/api/v1", tags=["system"])
 _previous_cpu = None
 _previous_network = None
 _previous_metrics_at = None
+_history_lock = Lock()
+_collector_stop = Event()
+_collector_thread = None
+_HISTORY_LIMIT = 10080  # one sample per minute for seven days
+HEALTH_THRESHOLD_DEFAULTS = {
+    "cpu_warning": 70,
+    "memory_warning": 80,
+    "disk_critical": 90,
+    "load_warning": 1.0,
+}
+
+
+def _history_path() -> Path:
+    return Path(os.getenv("SE_LOG_ROOT", "/server-engine/logs")) / "metrics-history.json"
+
+
+def _read_history() -> list[dict]:
+    try:
+        value = json.loads(_history_path().read_text())
+        return value if isinstance(value, list) else []
+    except (OSError, json.JSONDecodeError):
+        return []
+
+
+def _record_history(sample: dict) -> None:
+    item = {"timestamp": sample["timestamp"].isoformat(), **{key: sample[key] for key in ("cpu", "memory", "disk", "network")}}
+    with _history_lock:
+        path = _history_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        history = _read_history()
+        if history and history[-1].get("timestamp") == item["timestamp"]:
+            history[-1] = item
+        else:
+            history.append(item)
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(history[-_HISTORY_LIMIT:], separators=(",", ":")) + "\n")
+        temporary.replace(path)
+
+
+def _collect_and_publish() -> None:
+    try:
+        sample = _collect_metrics()
+        _record_history(sample)
+        job_store.publish({"type": "metrics", "metrics": {**sample, "timestamp": sample["timestamp"].isoformat()}})
+    except (OSError, ValueError, ZeroDivisionError):
+        return
+
+
+def _collector() -> None:
+    while not _collector_stop.wait(60):
+        _collect_and_publish()
+
+
+def start_metrics_collector() -> None:
+    global _collector_thread
+    if _collector_thread and _collector_thread.is_alive():
+        return
+    _collector_stop.clear()
+    _collector_thread = Thread(target=_collector, name="server-engine-metrics", daemon=True)
+    _collector_thread.start()
+
+
+def stop_metrics_collector() -> None:
+    _collector_stop.set()
 
 
 def _cpu_times():
@@ -35,8 +103,7 @@ def _network_bytes():
     return received, sent
 
 
-@router.get("/metrics")
-def metrics(user=Depends(require_user)):
+def _collect_metrics():
     global _previous_cpu, _previous_network, _previous_metrics_at
 
     cpu_start = _cpu_times()
@@ -81,6 +148,53 @@ def metrics(user=Depends(require_user)):
         "disk": {"used": used_disk, "total": total_disk, "percent": round(used_disk / total_disk * 100, 1) if total_disk else 0},
         "network": {"download": round(download_rate), "upload": round(upload_rate)},
     }
+
+
+@router.get("/metrics")
+def metrics(user=Depends(require_user)):
+    sample = _collect_metrics()
+    _record_history(sample)
+    return sample
+
+
+@router.get("/metrics/history")
+def metrics_history(window: str = "5m", user=Depends(require_user)):
+    windows = {"5m": 5, "1h": 60, "6h": 360, "24h": 1440}
+    minutes = windows.get(window, 5)
+    with _history_lock:
+        history = _read_history()
+    return {"window": window, "interval": "60s", "samples": history[-minutes:]}
+
+
+def _threshold_path() -> Path:
+    return Path(os.getenv("SE_STATE_DIR", "/var/lib/server-engine")) / "health-thresholds.json"
+
+
+@router.get("/health/thresholds")
+def health_thresholds(user=Depends(require_user)):
+    try:
+        stored = json.loads(_threshold_path().read_text())
+    except (OSError, json.JSONDecodeError):
+        stored = {}
+    return {**HEALTH_THRESHOLD_DEFAULTS, **{key: stored[key] for key in HEALTH_THRESHOLD_DEFAULTS if key in stored}}
+
+
+@router.put("/health/thresholds")
+def update_health_thresholds(payload: dict, user=Depends(require_user)):
+    values = {}
+    for key, default in HEALTH_THRESHOLD_DEFAULTS.items():
+        value = payload.get(key, default)
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            raise HTTPException(status_code=422, detail=f"{key} must be numeric")
+        maximum = 100 if key != "load_warning" else 1000
+        if value <= 0 or value > maximum:
+            raise HTTPException(status_code=422, detail=f"{key} is outside the supported range")
+        values[key] = round(float(value), 2)
+    path = _threshold_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(values, indent=2) + "\n")
+    job_store.publish({"type": "health-thresholds", "thresholds": values})
+    return values
 
 
 @router.get("/health")

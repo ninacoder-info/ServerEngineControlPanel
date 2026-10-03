@@ -52,6 +52,8 @@ def validate_schedule(values: dict) -> None:
 def schedule_text(job: dict) -> str:
     if job["minute"] == "*" and job["hour"] == "*":
         return "Every minute"
+    if job["minute"].isdigit() and job["hour"] == "*" and job["day"] == "*" and job["month"] == "*" and job["weekday"] == "*":
+        return f"Every hour at :{int(job['minute']):02d}"
     if job["minute"].isdigit() and job["hour"].isdigit() and job["day"] == "*" and job["month"] == "*" and job["weekday"] == "*":
         return f"Every day at {int(job['hour']):02d}:{int(job['minute']):02d}"
     if job["weekday"].isdigit() and job["minute"].isdigit() and job["hour"].isdigit():
@@ -209,7 +211,18 @@ class CronService:
                         "target_type": "database",
                         "target_id": database_name,
                     }
-                if backup_config is not None:
+                malware_target = None
+                if job["command"].startswith("server-engine-malware-scan --target="):
+                    malware_target = job["command"].split("=", 1)[1].strip()
+                if malware_target in {"websites", "backups", "mail"}:
+                    from app.services.job_service import job_store
+
+                    malware_job = job_store.enqueue_malware_scan(f"malware-scheduled-{job_id}-{uuid.uuid4().hex[:8]}", malware_target)
+                    output = f"Queued ClamAV scan job {malware_job.id} for {malware_target}."
+                    process = None
+                    exit_code = 0
+                    result = "success"
+                elif backup_config is not None:
                     backup = backup_service.run_scheduled(backup_config)
                     output = "\n".join(backup.get("logs", []))[-12000:]
                     if backup.get("error"):
@@ -232,6 +245,11 @@ class CronService:
             with self.connection() as db:
                 db.execute("UPDATE cron_jobs SET last_run_at=?, result=?, last_output=? WHERE id=?", (started, result, output, job_id))
                 db.execute("INSERT INTO cron_job_logs(job_id, started_at, finished_at, status, exit_code, output) VALUES (?, ?, ?, ?, ?, ?)", (job_id, started, _now().isoformat(timespec="seconds"), result, exit_code, output))
+            try:
+                from app.services.job_service import job_store
+                job_store.publish({"type": "malware-schedule", "schedule_id": job_id})
+            except Exception:
+                pass
 
     def start(self):
         if self._thread and self._thread.is_alive():

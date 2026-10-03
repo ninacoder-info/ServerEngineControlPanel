@@ -276,20 +276,19 @@ class FileManagerService:
 
     def read_file(self, relative: str) -> str:
         target = self.safe_path(relative)
-        if not target.is_file() or not is_editable_file(target.name):
-            raise HTTPException(status_code=400, detail="This file type cannot be opened in the editor")
-        if not target.is_file() or target.stat().st_size > 2_000_000:
-            raise HTTPException(status_code=400, detail="Only text files up to 2 MB can be edited")
-        try: return target.read_text()
-        except UnicodeDecodeError as error: raise HTTPException(status_code=400, detail="Binary files cannot be edited") from error
+        if not target.is_file():
+            raise HTTPException(status_code=404, detail="File not found")
+        if target.stat().st_size > 2_000_000:
+            raise HTTPException(status_code=400, detail="Files up to 2 MB can be edited")
+        return target.read_bytes().decode("utf-8", errors="replace")
 
     def write_file(self, relative: str, content: str) -> FileEntry:
         self._managed_account()
         target = self.safe_path(relative)
-        if not target.is_file() or not is_editable_file(target.name):
-            raise HTTPException(status_code=400, detail="This file type cannot be edited")
-        if not target.is_file() or len(content.encode()) > 2_000_000:
-            raise HTTPException(status_code=400, detail="Only existing text files up to 2 MB can be edited")
+        if not target.is_file():
+            raise HTTPException(status_code=404, detail="File not found")
+        if len(content.encode()) > 2_000_000:
+            raise HTTPException(status_code=400, detail="Files up to 2 MB can be edited")
         backup = target.with_name(f".{target.name}.serverengine.bak")
         shutil.copy2(target, backup)
         target.write_text(content)

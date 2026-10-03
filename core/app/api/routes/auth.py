@@ -4,28 +4,39 @@ from app.api.dependencies import require_user
 from app.auth import SESSION_COOKIE, set_session
 from app.models.auth import LoginRequest
 from app.services.passkey_service import authentication_options, registration_options, verify_authentication, verify_registration
+from app.services.job_service import job_store
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 
+def _audit(request, action, actor, target, detail, status, user_id=None):
+    event = request.app.state.auth_service.store.record_activity("security", action, actor, target, detail, status, actor_user_id=user_id, source_ip=request.client.host if request.client else None)
+    job_store.publish({"type": "activity", "event": event})
+
+
 @router.post("/login")
 def login(payload: LoginRequest, request: Request, response: Response):
-    token = request.app.state.auth_service.login(payload.username, payload.password)
+    token = request.app.state.auth_service.login(payload.username, payload.password, request.client.host if request.client else None)
     if token is None:
+        _audit(request, "login.failed", payload.username, payload.username, "Panel login failed.", "error")
         raise HTTPException(status_code=401, detail="Invalid username or password")
+    user = request.app.state.auth_service.store.user_for_session(token)
+    _audit(request, "login", user["username"] if user else payload.username, payload.username, "Panel login succeeded.", "success", user["id"] if user else None)
     set_session(response, token)
     return {"username": payload.username}
 
 
 @router.post("/mobile-login")
 def mobile_login(payload: LoginRequest, request: Request):
-    session_token = request.app.state.auth_service.login(payload.username, payload.password)
+    session_token = request.app.state.auth_service.login(payload.username, payload.password, request.client.host if request.client else None)
     if session_token is None:
+        _audit(request, "mobile-login.failed", payload.username, payload.username, "Mobile login failed.", "error")
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
     user = request.app.state.auth_service.store.user_for_session(session_token)
     if user is None:
         raise HTTPException(status_code=401, detail="Authentication required")
+    _audit(request, "mobile-login", user["username"], user["username"], "Mobile login succeeded.", "success", user["id"])
 
     platform = request.headers.get("x-server-engine-platform", "ios")
     if platform not in {"ios", "android", "web"}:
@@ -54,6 +65,7 @@ def me(user=Depends(require_user)):
 def logout(request: Request, response: Response, user=Depends(require_user)):
     request.app.state.auth_service.logout(request.cookies.get(SESSION_COOKIE))
     response.delete_cookie(SESSION_COOKIE, path="/")
+    _audit(request, "logout", user["username"], user["username"], "Panel session ended.", "success", user["id"])
     return {"ok": True}
 
 
@@ -69,7 +81,9 @@ def passkey_register_options(request: Request, user=Depends(require_user)):
 
 @router.post("/passkey/register/verify")
 def passkey_register_verify(payload: dict, request: Request, user=Depends(require_user)):
-    return verify_registration(request, request.app.state.auth_service.store, user, payload.get("credential", payload))
+    result = verify_registration(request, request.app.state.auth_service.store, user, payload.get("credential", payload))
+    _audit(request, "passkey.registered", user["username"], user["username"], "A new passkey was registered for the panel account.", "success", user["id"])
+    return result
 
 
 @router.post("/passkey/login/options")
@@ -84,4 +98,5 @@ def passkey_login_verify(payload: dict, request: Request, response: Response):
     token = store.create_session_for_user(user_id)
     set_session(response, token)
     user = store.user_by_id(user_id)
+    _audit(request, "passkey.login", user["username"], user["username"], "Panel login succeeded with a passkey.", "success", user["id"])
     return user

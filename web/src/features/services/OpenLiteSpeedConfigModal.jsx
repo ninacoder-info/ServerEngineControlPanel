@@ -13,6 +13,7 @@ import {
 import { apiRequest, readApiError } from "../../lib/api";
 import ConfigEditor from "./ConfigEditor";
 import StartupPolicyToggle from "./StartupPolicyToggle";
+import useServiceSocketStatus from "../../hooks/useServiceSocketStatus";
 
 const tabs = [
   ["settings", "General", Globe2],
@@ -26,7 +27,7 @@ const tabs = [
 ];
 
 const inputClass =
-  "mt-1.5 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100";
+  "mt-1.5 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100";
 const buttonClass =
   "inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60";
 
@@ -44,11 +45,11 @@ const defaults = {
 
 function Field({ label, children, hint }) {
   return (
-    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+    <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
       {label}
       {children}
       {hint && (
-        <span className="mt-1 block text-xs font-normal leading-5 text-slate-500 dark:text-slate-400">
+        <span className="mt-1 block text-xs font-normal leading-5 text-neutral-500 dark:text-neutral-400">
           {hint}
         </span>
       )}
@@ -66,10 +67,10 @@ function Toggle({ label, description, checked, onChange }) {
         className="mt-1 h-4 w-4 cursor-pointer accent-blue-600"
       />
       <span>
-        <span className="block text-sm font-medium text-slate-900 dark:text-slate-100">
+        <span className="block text-sm font-medium text-neutral-900 dark:text-neutral-100">
           {label}
         </span>
-        <span className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">
+        <span className="mt-1 block text-xs leading-5 text-neutral-500 dark:text-neutral-400">
           {description}
         </span>
       </span>
@@ -79,11 +80,11 @@ function Toggle({ label, description, checked, onChange }) {
 
 function Row({ label, value }) {
   return (
-    <div className="flex flex-col gap-1 border-b border-slate-200 py-3 last:border-b-0 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-      <span className="text-sm text-slate-500 dark:text-slate-400">
+    <div className="flex flex-col gap-1 border-b border-neutral-200 py-3 last:border-b-0 dark:border-neutral-800 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+      <span className="text-sm text-neutral-500 dark:text-neutral-400">
         {label}
       </span>
-      <code className="break-all text-xs text-slate-700 dark:text-slate-300 sm:text-right">
+      <code className="break-all text-xs text-neutral-700 dark:text-neutral-300 sm:text-right">
         {value}
       </code>
     </div>
@@ -178,14 +179,9 @@ export default function OpenLiteSpeedConfigModal({ installed, onClose }) {
   const [vhostText, setVhostText] = React.useState("");
   const [values, setValues] = React.useState(defaults);
   const [busy, setBusy] = React.useState(false);
-  const [action, setAction] = React.useState("");
   const [message, setMessage] = React.useState("");
   const [logs, setLogs] = React.useState(null);
-  const [runtimeStatus, setRuntimeStatus] = React.useState(current?.status || "stopped");
-
-  React.useEffect(() => {
-    setRuntimeStatus(current?.status || "stopped");
-  }, [current?.status, current?.version]);
+  const { status: runtimeStatus, action, setAction } = useServiceSocketStatus("openlitespeed", current?.status);
 
   const loadConfig = React.useCallback(
     () =>
@@ -280,33 +276,13 @@ export default function OpenLiteSpeedConfigModal({ installed, onClose }) {
       setAction("");
       return;
     }
-    let finalJob;
-    for (let attempt = 0; attempt < 30; attempt += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 500));
-      const jobs = await apiRequest("/api/v1/jobs").then((result) =>
-        result.ok ? result.json() : [],
-      );
-      finalJob = jobs.find((job) => job.id === body.job_id);
-      if (
-        finalJob &&
-        ["succeeded", "failed", "cancelled"].includes(finalJob.status)
-      )
-        break;
-    }
-    setMessage(
-      finalJob?.message || `OpenLiteSpeed ${actionName} request finished.`,
-    );
-    if (finalJob?.status === "succeeded") {
-      setRuntimeStatus(actionName === "stop" ? "stopped" : "running");
-    }
-    setAction("");
   };
   const running = runtimeStatus === "running";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/60 p-4 sm:p-8">
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8">
       <section
-        className="w-full max-w-3xl rounded-xl bg-white p-6 shadow-xl dark:bg-slate-900"
+        className="w-full max-w-3xl rounded-xl bg-white p-6 shadow-xl dark:bg-neutral-900"
         role="dialog"
         aria-modal="true"
         aria-labelledby="openlitespeed-title"
@@ -315,11 +291,11 @@ export default function OpenLiteSpeedConfigModal({ installed, onClose }) {
           <div>
             <h2
               id="openlitespeed-title"
-              className="text-xl font-semibold text-slate-900 dark:text-slate-100"
+              className="text-xl font-semibold text-neutral-900 dark:text-neutral-100"
             >
               OpenLiteSpeed
             </h2>
-            <p className="mt-1 flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+            <p className="mt-1 flex items-center gap-2 text-sm text-neutral-500 dark:text-neutral-400">
               <span
                 className={`h-2 w-2 rounded-full ${running ? "bg-emerald-500" : "bg-amber-500"}`}
               />
@@ -330,19 +306,19 @@ export default function OpenLiteSpeedConfigModal({ installed, onClose }) {
           <button
             type="button"
             aria-label="Close OpenLiteSpeed configuration"
-            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
             onClick={onClose}
           >
             <X size={18} />
           </button>
         </div>
-        <div className="mt-6 flex gap-5 overflow-x-auto border-b border-slate-200 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:border-slate-800">
+        <div className="mt-6 flex gap-5 overflow-x-auto border-b border-neutral-200 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:border-neutral-800">
           {tabs.map(([id, label, Icon]) => (
             <button
               type="button"
               key={id}
               onClick={() => setTab(id)}
-              className={`inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap border-b-2 px-1 pb-3 text-sm font-medium ${tab === id ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"}`}
+              className={`inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap border-b-2 px-1 pb-3 text-sm font-medium ${tab === id ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200"}`}
             >
               <Icon size={15} />
               {label}
@@ -353,10 +329,10 @@ export default function OpenLiteSpeedConfigModal({ installed, onClose }) {
           {tab === "settings" && (
             <div className="space-y-5">
               <div>
-                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
                   OpenLiteSpeed server settings
                 </h3>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
                   Configure the event-driven web server, default virtual host,
                   and production-safe request behavior.
                 </p>
@@ -403,10 +379,10 @@ export default function OpenLiteSpeedConfigModal({ installed, onClose }) {
           {tab === "listeners" && (
             <div className="space-y-5">
               <div>
-                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
                   Listeners
                 </h3>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
                   HTTP and HTTPS listeners map incoming hostnames to the default
                   virtual host. Website-specific mappings are managed with the
                   website.
@@ -423,14 +399,14 @@ export default function OpenLiteSpeedConfigModal({ installed, onClose }) {
           {tab === "vhost" && (
             <div className="space-y-4">
               <div>
-                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
                   Default virtual host
                 </h3>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
                   Set the document root, index files, rewrites, and application
                   handler for the default website.
                 </p>
-                <code className="mt-2 block break-all text-xs text-slate-500 dark:text-slate-400">
+                <code className="mt-2 block break-all text-xs text-neutral-500 dark:text-neutral-400">
                   {vhostConfig?.config_path ||
                     "/opt/server-engine/services/openlitespeed/conf/vhosts/default/vhost.conf"}
                 </code>
@@ -443,7 +419,7 @@ export default function OpenLiteSpeedConfigModal({ installed, onClose }) {
               <div className="flex justify-end gap-3">
                 <button
                   type="button"
-                  className={`${buttonClass} border border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300`}
+                  className={`${buttonClass} border border-neutral-300 text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300`}
                   onClick={loadVhost}
                 >
                   Reset edits
@@ -462,10 +438,10 @@ export default function OpenLiteSpeedConfigModal({ installed, onClose }) {
           {tab === "performance" && (
             <div className="space-y-5">
               <div>
-                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
                   Performance
                 </h3>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
                   Tune concurrency, keepalive behavior, compression, and
                   built-in page caching for live websites.
                 </p>
@@ -518,10 +494,10 @@ export default function OpenLiteSpeedConfigModal({ installed, onClose }) {
           {tab === "security" && (
             <div className="space-y-5">
               <div>
-                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
                   Security
                 </h3>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
                   Keep server details private and let website SSL settings
                   manage certificates and secure listeners.
                 </p>
@@ -532,7 +508,7 @@ export default function OpenLiteSpeedConfigModal({ installed, onClose }) {
                 checked={!values.serverSignature}
                 onChange={(value) => setValue("serverSignature", !value)}
               />
-              <div className="rounded-md bg-slate-50 p-3 text-xs leading-5 text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
+              <div className="rounded-md bg-neutral-50 p-3 text-xs leading-5 text-neutral-600 dark:bg-neutral-800/60 dark:text-neutral-300">
                 TLS certificates and SNI mappings are configured per website. Do
                 not place private keys in the global server configuration.
               </div>
@@ -544,10 +520,10 @@ export default function OpenLiteSpeedConfigModal({ installed, onClose }) {
           {tab === "runtime" && (
             <div className="space-y-5">
               <div>
-                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
                   Runtime
                 </h3>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
                   Control the OpenLiteSpeed process and inspect its managed
                   paths.
                 </p>
@@ -595,7 +571,7 @@ export default function OpenLiteSpeedConfigModal({ installed, onClose }) {
                 {running && (
                   <button
                     type="button"
-                    className={`${buttonClass} border border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300`}
+                    className={`${buttonClass} border border-neutral-300 text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300`}
                     disabled={Boolean(action)}
                     onClick={() => serviceAction("stop")}
                   >
@@ -609,16 +585,16 @@ export default function OpenLiteSpeedConfigModal({ installed, onClose }) {
             <div className="space-y-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                  <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
                     OpenLiteSpeed logs
                   </h3>
-                  <p className="mt-1 break-all text-xs text-slate-500 dark:text-slate-400">
+                  <p className="mt-1 break-all text-xs text-neutral-500 dark:text-neutral-400">
                     {logs?.path || "Loading…"}
                   </p>
                 </div>
                 <button
                   type="button"
-                  className={`${buttonClass} border border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300`}
+                  className={`${buttonClass} border border-neutral-300 text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300`}
                   onClick={() =>
                     apiRequest(
                       "/api/v1/services/openlitespeed/logs?page_size=50",
@@ -633,7 +609,7 @@ export default function OpenLiteSpeedConfigModal({ installed, onClose }) {
                   Reload
                 </button>
               </div>
-              <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-md bg-slate-950 p-4 text-xs leading-5 text-slate-300">
+              <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-md bg-neutral-950 p-4 text-xs leading-5 text-neutral-300">
                 {logs?.available
                   ? logs.lines.join("\n") || "No log lines recorded."
                   : logs
@@ -645,14 +621,14 @@ export default function OpenLiteSpeedConfigModal({ installed, onClose }) {
           {tab === "configuration" && (
             <div className="space-y-4">
               <div>
-                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
                   Server configuration
                 </h3>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
                   Edit the OpenLiteSpeed configuration directly. Guided controls
                   remain available in the other tabs.
                 </p>
-                <code className="mt-2 block break-all text-xs text-slate-500 dark:text-slate-400">
+                <code className="mt-2 block break-all text-xs text-neutral-500 dark:text-neutral-400">
                   {config?.config_path ||
                     "/opt/server-engine/services/openlitespeed/conf/httpd_config.conf"}
                 </code>
@@ -665,7 +641,7 @@ export default function OpenLiteSpeedConfigModal({ installed, onClose }) {
               <div className="flex justify-end gap-3">
                 <button
                   type="button"
-                  className={`${buttonClass} border border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300`}
+                  className={`${buttonClass} border border-neutral-300 text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300`}
                   onClick={loadConfig}
                 >
                   Reset edits
@@ -683,7 +659,7 @@ export default function OpenLiteSpeedConfigModal({ installed, onClose }) {
           )}
         </div>
         {message && (
-          <p className="mt-5 text-sm text-slate-600 dark:text-slate-300">
+          <p className="mt-5 text-sm text-neutral-600 dark:text-neutral-300">
             {message}
           </p>
         )}

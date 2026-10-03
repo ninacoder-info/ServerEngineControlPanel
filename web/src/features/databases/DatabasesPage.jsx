@@ -27,6 +27,8 @@ import Toast from "../../components/Toast";
 import ServiceNotInstalledState from "../../components/ServiceNotInstalledState";
 import { useServiceInstallationState } from "../../hooks/useServiceInstallationState";
 import ServiceManagerModal from "../services/ServiceManagerModal";
+import SecurePasswordInput from "../../components/SecurePasswordInput";
+import FormField from "../../components/FormField";
 
 const engines = [
   {
@@ -67,9 +69,9 @@ const engines = [
 ];
 
 const field =
-  "mt-2 block min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100";
+  "mt-2 block min-h-11 w-full rounded-md border border-neutral-300 bg-white px-3 py-2.5 text-sm text-neutral-900 outline-none placeholder:text-neutral-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100";
 const card =
-  "rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900";
+  "rounded-xl border border-neutral-200 bg-white p-5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900";
 
 const databaseSchema = z.object({
   name: z.string().trim().min(1, "Database name is required.").max(64, "Database name is too long.").regex(/^[A-Za-z0-9_$-]+$/, "Use only letters, numbers, underscore, hyphen, or dollar sign."),
@@ -80,12 +82,10 @@ const databaseSchema = z.object({
   backup: z.enum(["daily", "weekly", "manual"]),
 });
 
-function generateDatabasePassword() {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*-_=+";
-  const values = new Uint32Array(16);
-  crypto.getRandomValues(values);
-  return Array.from(values, (value) => alphabet[value % alphabet.length]).join("");
-}
+const databaseImportSchema = z.object({
+  file: z.any().refine((value) => value instanceof File, "Choose a database export file."),
+  targetDatabase: z.string().trim().min(1, "A target database is required."),
+});
 
 function MongoWorkspace() {
   const initial = {
@@ -107,14 +107,14 @@ function MongoWorkspace() {
   const [saved, setSaved] = React.useState(false);
   const set = (key, value) => setSettings((current) => ({ ...current, [key]: value }));
   const save = () => { localStorage.setItem("serverengine:mongodb", JSON.stringify(settings)); setSaved(true); window.setTimeout(() => setSaved(false), 3000); };
-  const input = "mt-1.5 block min-h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100";
+  const input = "mt-1.5 block min-h-10 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100";
   return (
     <section className={`${card} order-1 space-y-5`}>
-      <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start"><div><div className="flex items-center gap-2"><Database size={19} className="text-emerald-500" /><h3 className="text-xl font-semibold text-slate-900 dark:text-slate-100">MongoDB configuration</h3><span className="text-xs font-semibold text-slate-500">v8.2</span></div><p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500 dark:text-slate-400">Configure the document database runtime, storage, security, backups, and application connection defaults.</p></div><span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500"><span className="h-2 w-2 rounded-full bg-slate-400" />Stopped</span></div>
-      <div className="grid gap-3 sm:grid-cols-3"><div className="rounded-md border border-slate-200 p-4 dark:border-slate-800"><span className="text-xs text-slate-500">Databases</span><strong className="mt-1 block text-2xl text-slate-900 dark:text-slate-100">—</strong><span className="text-xs text-slate-500">Connect the runtime to inspect</span></div><div className="rounded-md border border-slate-200 p-4 dark:border-slate-800"><span className="text-xs text-slate-500">Storage engine</span><strong className="mt-1 block text-lg text-slate-900 dark:text-slate-100">WiredTiger</strong><span className="text-xs text-slate-500">Recommended for production</span></div><div className="rounded-md border border-slate-200 p-4 dark:border-slate-800"><span className="text-xs text-slate-500">Replica set</span><strong className="mt-1 block text-lg text-amber-600">Standalone</strong><span className="text-xs text-slate-500">Replication not configured</span></div></div>
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4"><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Bind address<input className={input} value={settings.bindAddress} onChange={(event) => set("bindAddress", event.target.value)} /></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Port<input className={input} value={settings.port} onChange={(event) => set("port", event.target.value)} /></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Storage engine<select className={input} value={settings.storageEngine} onChange={(event) => set("storageEngine", event.target.value)}><option>WiredTiger</option><option>In-memory</option></select></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Cache allocation<select className={input} value={settings.cacheSize} onChange={(event) => set("cacheSize", event.target.value)}><option>25% of RAM</option><option>50% of RAM</option><option>60% of RAM</option></select></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Data directory<input className={`${input} font-mono text-xs`} value={settings.dbPath} onChange={(event) => set("dbPath", event.target.value)} /></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Log file<input className={`${input} font-mono text-xs`} value={settings.logPath} onChange={(event) => set("logPath", event.target.value)} /></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Oplog size<select className={input} value={settings.oplogSize} onChange={(event) => set("oplogSize", event.target.value)}><option>1 GB</option><option>5 GB</option><option>10 GB</option><option>20 GB</option></select></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Backup schedule<select className={input} value={settings.backups} onChange={(event) => set("backups", event.target.value)}><option>Manual</option><option>Daily</option><option>Weekly</option></select></label></div>
-      <div className="grid gap-3 md:grid-cols-3"><label className="flex cursor-pointer gap-3 rounded-md border border-slate-200 p-4 text-sm dark:border-slate-800"><input type="checkbox" className="mt-0.5 h-4 w-4 accent-blue-600" checked={settings.auth} onChange={(event) => set("auth", event.target.checked)} /><span><strong className="block text-slate-800 dark:text-slate-200">Access control</strong><span className="mt-1 block text-xs text-slate-500">Require authenticated database users.</span></span></label><label className="flex cursor-pointer gap-3 rounded-md border border-slate-200 p-4 text-sm dark:border-slate-800"><input type="checkbox" className="mt-0.5 h-4 w-4 accent-blue-600" checked={settings.tls} onChange={(event) => set("tls", event.target.checked)} /><span><strong className="block text-slate-800 dark:text-slate-200">TLS connections</strong><span className="mt-1 block text-xs text-slate-500">Encrypt client and replica traffic.</span></span></label><label className="flex cursor-pointer gap-3 rounded-md border border-slate-200 p-4 text-sm dark:border-slate-800"><input type="checkbox" className="mt-0.5 h-4 w-4 accent-blue-600" checked={settings.journaling} onChange={(event) => set("journaling", event.target.checked)} /><span><strong className="block text-slate-800 dark:text-slate-200">Journaling</strong><span className="mt-1 block text-xs text-slate-500">Protect writes during an unexpected restart.</span></span></label></div>
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4 dark:border-slate-800"><p className="text-xs text-slate-500 dark:text-slate-400">MongoDB runtime actions and backup execution will connect to the host agent later.</p><button type="button" onClick={save} className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">{saved ? "Saved" : "Save MongoDB settings"}</button></div>
+      <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start"><div><div className="flex items-center gap-2"><Database size={19} className="text-emerald-500" /><h3 className="text-xl font-semibold text-neutral-900 dark:text-neutral-100">MongoDB configuration</h3><span className="text-xs font-semibold text-neutral-500">v8.2</span></div><p className="mt-1 max-w-3xl text-sm leading-6 text-neutral-500 dark:text-neutral-400">Configure the document database runtime, storage, security, backups, and application connection defaults.</p></div><span className="inline-flex items-center gap-1.5 text-xs font-semibold text-neutral-500"><span className="h-2 w-2 rounded-full bg-neutral-400" />Stopped</span></div>
+      <div className="grid gap-3 sm:grid-cols-3"><div className="rounded-md border border-neutral-200 p-4 dark:border-neutral-800"><span className="text-xs text-neutral-500">Databases</span><strong className="mt-1 block text-2xl text-neutral-900 dark:text-neutral-100">—</strong><span className="text-xs text-neutral-500">Connect the runtime to inspect</span></div><div className="rounded-md border border-neutral-200 p-4 dark:border-neutral-800"><span className="text-xs text-neutral-500">Storage engine</span><strong className="mt-1 block text-lg text-neutral-900 dark:text-neutral-100">WiredTiger</strong><span className="text-xs text-neutral-500">Recommended for production</span></div><div className="rounded-md border border-neutral-200 p-4 dark:border-neutral-800"><span className="text-xs text-neutral-500">Replica set</span><strong className="mt-1 block text-lg text-amber-600">Standalone</strong><span className="text-xs text-neutral-500">Replication not configured</span></div></div>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4"><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Bind address<input className={input} value={settings.bindAddress} onChange={(event) => set("bindAddress", event.target.value)} /></label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Port<input className={input} value={settings.port} onChange={(event) => set("port", event.target.value)} /></label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Storage engine<select className={input} value={settings.storageEngine} onChange={(event) => set("storageEngine", event.target.value)}><option>WiredTiger</option><option>In-memory</option></select></label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Cache allocation<select className={input} value={settings.cacheSize} onChange={(event) => set("cacheSize", event.target.value)}><option>25% of RAM</option><option>50% of RAM</option><option>60% of RAM</option></select></label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Data directory<input className={`${input} font-mono text-xs`} value={settings.dbPath} onChange={(event) => set("dbPath", event.target.value)} /></label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Log file<input className={`${input} font-mono text-xs`} value={settings.logPath} onChange={(event) => set("logPath", event.target.value)} /></label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Oplog size<select className={input} value={settings.oplogSize} onChange={(event) => set("oplogSize", event.target.value)}><option>1 GB</option><option>5 GB</option><option>10 GB</option><option>20 GB</option></select></label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Backup schedule<select className={input} value={settings.backups} onChange={(event) => set("backups", event.target.value)}><option>Manual</option><option>Daily</option><option>Weekly</option></select></label></div>
+      <div className="grid gap-3 md:grid-cols-3"><label className="flex cursor-pointer gap-3 rounded-md border border-neutral-200 p-4 text-sm dark:border-neutral-800"><input type="checkbox" className="mt-0.5 h-4 w-4 accent-blue-600" checked={settings.auth} onChange={(event) => set("auth", event.target.checked)} /><span><strong className="block text-neutral-800 dark:text-neutral-200">Access control</strong><span className="mt-1 block text-xs text-neutral-500">Require authenticated database users.</span></span></label><label className="flex cursor-pointer gap-3 rounded-md border border-neutral-200 p-4 text-sm dark:border-neutral-800"><input type="checkbox" className="mt-0.5 h-4 w-4 accent-blue-600" checked={settings.tls} onChange={(event) => set("tls", event.target.checked)} /><span><strong className="block text-neutral-800 dark:text-neutral-200">TLS connections</strong><span className="mt-1 block text-xs text-neutral-500">Encrypt client and replica traffic.</span></span></label><label className="flex cursor-pointer gap-3 rounded-md border border-neutral-200 p-4 text-sm dark:border-neutral-800"><input type="checkbox" className="mt-0.5 h-4 w-4 accent-blue-600" checked={settings.journaling} onChange={(event) => set("journaling", event.target.checked)} /><span><strong className="block text-neutral-800 dark:text-neutral-200">Journaling</strong><span className="mt-1 block text-xs text-neutral-500">Protect writes during an unexpected restart.</span></span></label></div>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-neutral-200 pt-4 dark:border-neutral-800"><p className="text-xs text-neutral-500 dark:text-neutral-400">MongoDB runtime actions and backup execution will connect to the host agent later.</p><button type="button" onClick={save} className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">{saved ? "Saved" : "Save MongoDB settings"}</button></div>
     </section>
   );
 }
@@ -139,14 +139,14 @@ function SqlServerWorkspace() {
   const [saved, setSaved] = React.useState(false);
   const set = (key, value) => setSettings((current) => ({ ...current, [key]: value }));
   const save = () => { localStorage.setItem("serverengine:sqlserver", JSON.stringify(settings)); setSaved(true); window.setTimeout(() => setSaved(false), 3000); };
-  const input = "mt-1.5 block min-h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100";
+  const input = "mt-1.5 block min-h-10 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100";
   return (
     <section className={`${card} order-1 space-y-5`}>
-      <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start"><div><div className="flex items-center gap-2"><Database size={19} className="text-violet-500" /><h3 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Microsoft SQL Server</h3><span className="text-xs font-semibold text-slate-500">2022</span></div><p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500 dark:text-slate-400">Manage the SQL Server runtime, connection policy, resource limits, encryption, and scheduled backups.</p></div><span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500"><span className="h-2 w-2 rounded-full bg-slate-400" />Stopped</span></div>
-      <div className="grid gap-3 sm:grid-cols-3"><div className="rounded-md border border-slate-200 p-4 dark:border-slate-800"><span className="text-xs text-slate-500">Databases</span><strong className="mt-1 block text-2xl text-slate-900 dark:text-slate-100">—</strong><span className="text-xs text-slate-500">Connect the runtime to inspect</span></div><div className="rounded-md border border-slate-200 p-4 dark:border-slate-800"><span className="text-xs text-slate-500">Edition</span><strong className="mt-1 block text-lg text-slate-900 dark:text-slate-100">{settings.edition}</strong><span className="text-xs text-slate-500">License selection</span></div><div className="rounded-md border border-slate-200 p-4 dark:border-slate-800"><span className="text-xs text-slate-500">Backups</span><strong className="mt-1 block text-lg text-emerald-600">{settings.backups}</strong><span className="text-xs text-slate-500">Configured schedule</span></div></div>
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4"><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Edition<select className={input} value={settings.edition} onChange={(event) => set("edition", event.target.value)}><option>Developer</option><option>Express</option><option>Web</option><option>Standard</option></select></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Bind address<input className={input} value={settings.bindAddress} onChange={(event) => set("bindAddress", event.target.value)} /></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">TCP port<input className={input} value={settings.port} onChange={(event) => set("port", event.target.value)} /></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Authentication<select className={input} value={settings.authMode} onChange={(event) => set("authMode", event.target.value)}><option>Windows authentication</option><option>Mixed authentication</option></select></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Memory limit<select className={input} value={settings.memoryLimit} onChange={(event) => set("memoryLimit", event.target.value)}><option>1 GB</option><option>2 GB</option><option>4 GB</option><option>8 GB</option><option>Use available memory</option></select></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">MAXDOP<select className={input} value={settings.maxDop} onChange={(event) => set("maxDop", event.target.value)}><option>Auto</option><option>1</option><option>2</option><option>4</option><option>8</option></select></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Data directory<input className={`${input} font-mono text-xs`} value={settings.dataPath} onChange={(event) => set("dataPath", event.target.value)} /></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Backup directory<input className={`${input} font-mono text-xs`} value={settings.backupPath} onChange={(event) => set("backupPath", event.target.value)} /></label></div>
-      <div className="grid gap-3 md:grid-cols-3"><label className="flex cursor-pointer gap-3 rounded-md border border-slate-200 p-4 text-sm dark:border-slate-800"><input type="checkbox" className="mt-0.5 h-4 w-4 accent-blue-600" checked={settings.tls} onChange={(event) => set("tls", event.target.checked)} /><span><strong className="block text-slate-800 dark:text-slate-200">Encrypt connections</strong><span className="mt-1 block text-xs text-slate-500">Require TLS for client traffic.</span></span></label><label className="flex cursor-pointer gap-3 rounded-md border border-slate-200 p-4 text-sm dark:border-slate-800"><input type="checkbox" className="mt-0.5 h-4 w-4 accent-blue-600" checked={settings.agent} onChange={(event) => set("agent", event.target.checked)} /><span><strong className="block text-slate-800 dark:text-slate-200">SQL Server Agent</strong><span className="mt-1 block text-xs text-slate-500">Enable scheduled jobs and maintenance tasks.</span></span></label><label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Backup schedule<select className={input} value={settings.backups} onChange={(event) => set("backups", event.target.value)}><option>Manual</option><option>Daily</option><option>Weekly</option></select></label></div>
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4 dark:border-slate-800"><p className="text-xs text-slate-500 dark:text-slate-400">SQL Server runs in a supported isolated deployment. Runtime and backup actions will connect to the host agent later.</p><button type="button" onClick={save} className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">{saved ? "Saved" : "Save SQL Server settings"}</button></div>
+      <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start"><div><div className="flex items-center gap-2"><Database size={19} className="text-violet-500" /><h3 className="text-xl font-semibold text-neutral-900 dark:text-neutral-100">Microsoft SQL Server</h3><span className="text-xs font-semibold text-neutral-500">2022</span></div><p className="mt-1 max-w-3xl text-sm leading-6 text-neutral-500 dark:text-neutral-400">Manage the SQL Server runtime, connection policy, resource limits, encryption, and scheduled backups.</p></div><span className="inline-flex items-center gap-1.5 text-xs font-semibold text-neutral-500"><span className="h-2 w-2 rounded-full bg-neutral-400" />Stopped</span></div>
+      <div className="grid gap-3 sm:grid-cols-3"><div className="rounded-md border border-neutral-200 p-4 dark:border-neutral-800"><span className="text-xs text-neutral-500">Databases</span><strong className="mt-1 block text-2xl text-neutral-900 dark:text-neutral-100">—</strong><span className="text-xs text-neutral-500">Connect the runtime to inspect</span></div><div className="rounded-md border border-neutral-200 p-4 dark:border-neutral-800"><span className="text-xs text-neutral-500">Edition</span><strong className="mt-1 block text-lg text-neutral-900 dark:text-neutral-100">{settings.edition}</strong><span className="text-xs text-neutral-500">License selection</span></div><div className="rounded-md border border-neutral-200 p-4 dark:border-neutral-800"><span className="text-xs text-neutral-500">Backups</span><strong className="mt-1 block text-lg text-emerald-600">{settings.backups}</strong><span className="text-xs text-neutral-500">Configured schedule</span></div></div>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4"><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Edition<select className={input} value={settings.edition} onChange={(event) => set("edition", event.target.value)}><option>Developer</option><option>Express</option><option>Web</option><option>Standard</option></select></label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Bind address<input className={input} value={settings.bindAddress} onChange={(event) => set("bindAddress", event.target.value)} /></label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">TCP port<input className={input} value={settings.port} onChange={(event) => set("port", event.target.value)} /></label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Authentication<select className={input} value={settings.authMode} onChange={(event) => set("authMode", event.target.value)}><option>Windows authentication</option><option>Mixed authentication</option></select></label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Memory limit<select className={input} value={settings.memoryLimit} onChange={(event) => set("memoryLimit", event.target.value)}><option>1 GB</option><option>2 GB</option><option>4 GB</option><option>8 GB</option><option>Use available memory</option></select></label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">MAXDOP<select className={input} value={settings.maxDop} onChange={(event) => set("maxDop", event.target.value)}><option>Auto</option><option>1</option><option>2</option><option>4</option><option>8</option></select></label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Data directory<input className={`${input} font-mono text-xs`} value={settings.dataPath} onChange={(event) => set("dataPath", event.target.value)} /></label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Backup directory<input className={`${input} font-mono text-xs`} value={settings.backupPath} onChange={(event) => set("backupPath", event.target.value)} /></label></div>
+      <div className="grid gap-3 md:grid-cols-3"><label className="flex cursor-pointer gap-3 rounded-md border border-neutral-200 p-4 text-sm dark:border-neutral-800"><input type="checkbox" className="mt-0.5 h-4 w-4 accent-blue-600" checked={settings.tls} onChange={(event) => set("tls", event.target.checked)} /><span><strong className="block text-neutral-800 dark:text-neutral-200">Encrypt connections</strong><span className="mt-1 block text-xs text-neutral-500">Require TLS for client traffic.</span></span></label><label className="flex cursor-pointer gap-3 rounded-md border border-neutral-200 p-4 text-sm dark:border-neutral-800"><input type="checkbox" className="mt-0.5 h-4 w-4 accent-blue-600" checked={settings.agent} onChange={(event) => set("agent", event.target.checked)} /><span><strong className="block text-neutral-800 dark:text-neutral-200">SQL Server Agent</strong><span className="mt-1 block text-xs text-neutral-500">Enable scheduled jobs and maintenance tasks.</span></span></label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Backup schedule<select className={input} value={settings.backups} onChange={(event) => set("backups", event.target.value)}><option>Manual</option><option>Daily</option><option>Weekly</option></select></label></div>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-neutral-200 pt-4 dark:border-neutral-800"><p className="text-xs text-neutral-500 dark:text-neutral-400">SQL Server runs in a supported isolated deployment. Runtime and backup actions will connect to the host agent later.</p><button type="button" onClick={save} className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">{saved ? "Saved" : "Save SQL Server settings"}</button></div>
     </section>
   );
 }
@@ -155,7 +155,7 @@ function EngineCard({ engine, selected, onSelect }) {
   return (
     <button
       onClick={() => onSelect(engine.id)}
-      className={`flex min-w-56 flex-1 items-start gap-3 rounded-lg border p-4 text-left transition ${selected ? "border-blue-500 ring-2 ring-blue-500/15" : "border-slate-200 hover:border-slate-300 dark:border-slate-800 dark:hover:border-slate-700"} bg-white dark:bg-slate-900`}
+      className={`flex min-w-56 flex-1 items-start gap-3 rounded-lg border p-4 text-left transition ${selected ? "border-blue-500 ring-2 ring-blue-500/15" : "border-neutral-200 hover:border-neutral-300 dark:border-neutral-800 dark:hover:border-neutral-700"} bg-white dark:bg-neutral-900`}
     >
       <span
         className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${engine.background} ${engine.color}`}
@@ -163,11 +163,11 @@ function EngineCard({ engine, selected, onSelect }) {
         <Database size={18} />
       </span>
       <span className="min-w-0">
-        <strong className="block text-sm font-semibold text-slate-900 dark:text-slate-100">
+        <strong className="block text-sm font-semibold text-neutral-900 dark:text-neutral-100">
           {engine.name}
         </strong>
         <small
-          className={`mt-2 block text-xs font-semibold ${engine.installed ? "text-emerald-600 dark:text-emerald-400" : "text-slate-400 dark:text-slate-500"}`}
+          className={`mt-2 block text-xs font-semibold ${engine.installed ? "text-emerald-600 dark:text-emerald-400" : "text-neutral-400 dark:text-neutral-500"}`}
         >
           {engine.installed
             ? engine.running
@@ -211,11 +211,11 @@ function CreateDatabase({ engine = "mysql", onClose, onCreate }) {
   };
   return (
     <div
-      className="fixed inset-0 z-50 grid place-items-center bg-slate-950/60 p-4"
+      className="fixed inset-0 z-50 grid place-items-center bg-neutral-950/60 p-4"
       onMouseDown={(event) => event.target === event.currentTarget && onClose()}
     >
       <form
-        className="w-full max-w-2xl rounded-xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+        className="w-full max-w-2xl rounded-xl border border-neutral-200 bg-white p-6 shadow-2xl dark:border-neutral-700 dark:bg-neutral-900"
         onSubmit={(event) => {
           event.preventDefault();
           submit();
@@ -226,23 +226,23 @@ function CreateDatabase({ engine = "mysql", onClose, onCreate }) {
             <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">
               Database provisioning
             </p>
-            <h2 className="mt-1 text-2xl font-semibold text-slate-900 dark:text-slate-100">
+            <h2 className="mt-1 text-2xl font-semibold text-neutral-900 dark:text-neutral-100">
               Create {engineName} database
             </h2>
-            <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+            <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
               Define the owner credentials and backup policy for a new database.
             </p>
           </div>
           <button
             type="button"
-            className="grid h-9 w-9 place-items-center rounded-md text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+            className="grid h-9 w-9 place-items-center rounded-md text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
             onClick={onClose}
           >
             <X size={18} />
           </button>
         </div>
         <div className="mt-6 grid gap-5 md:grid-cols-2">
-          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+          <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
             Database name
             <input
               className={inputClass("name")}
@@ -258,7 +258,7 @@ function CreateDatabase({ engine = "mysql", onClose, onCreate }) {
             {errors.name && <span className="mt-1 block text-xs font-medium text-rose-600 dark:text-rose-400">{errors.name}</span>}
           </label>
           {engine !== "mongodb" && (
-            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+            <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
               Character set
               <select
                 className={inputClass("charset")}
@@ -272,7 +272,7 @@ function CreateDatabase({ engine = "mysql", onClose, onCreate }) {
               </select>
             </label>
           )}
-          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+          <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
             Owner username
             <input
               className={inputClass("username")}
@@ -285,22 +285,12 @@ function CreateDatabase({ engine = "mysql", onClose, onCreate }) {
             />
             {errors.username && <span className="mt-1 block text-xs font-medium text-rose-600 dark:text-rose-400">{errors.username}</span>}
           </label>
-          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+          <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
             Owner password
-            <div className="group relative mt-2">
-              <input
-                className={`${inputClass("password")} mt-0 pr-12`}
-                type="text"
-                value={form.password}
-                onChange={(event) => change("password", event.target.value)}
-                placeholder="Generate a secure password"
-              />
-              <button type="button" aria-label="Generate secure password" className="absolute right-1 top-1/2 inline-flex h-9 w-9 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-blue-600 dark:hover:bg-slate-800 dark:hover:text-blue-400" onClick={() => change("password", generateDatabasePassword())}><RefreshCw size={15} /></button>
-              <span className="pointer-events-none absolute right-0 top-full z-10 mt-1 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-xs text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100 dark:bg-white dark:text-slate-900">Generate secure password</span>
-            </div>
+            <SecurePasswordInput className={`${inputClass("password")} mt-0`} value={form.password} onChange={(event) => change("password", event.target.value)} placeholder="Generate a secure password" />
             {errors.password && <span className="mt-1 block text-xs font-medium text-rose-600 dark:text-rose-400">{errors.password}</span>}
           </label>
-          <div className="text-sm text-slate-700 dark:text-slate-300 md:col-span-2">
+          <div className="text-sm text-neutral-700 dark:text-neutral-300 md:col-span-2">
             <label className="flex cursor-pointer items-center gap-2 font-medium">
               <input
                 type="checkbox"
@@ -323,7 +313,7 @@ function CreateDatabase({ engine = "mysql", onClose, onCreate }) {
             {errors.backup && <span className="mt-1 block text-xs font-medium text-rose-600 dark:text-rose-400">{errors.backup}</span>}
           </div>
         </div>
-        <div className="mt-6 flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400">
+        <div className="mt-6 flex items-start gap-3 rounded-lg border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-600 dark:border-neutral-800 dark:bg-neutral-950 dark:text-neutral-400">
           <ShieldCheck size={18} className="mt-0.5 shrink-0 text-blue-500" />
           <span>
             {engineName} credentials are shown once in the UI and should be stored in your
@@ -333,7 +323,7 @@ function CreateDatabase({ engine = "mysql", onClose, onCreate }) {
         <div className="mt-6 flex justify-end gap-3">
           <button
             type="button"
-            className="rounded-md border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+            className="rounded-md border border-neutral-300 px-4 py-2.5 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
             onClick={onClose}
             disabled={submitting}
           >
@@ -373,11 +363,11 @@ function DatabaseBackupsModal({ database, archives, creating, onClose, onCreate,
 
   return (
     <div
-      className="fixed inset-0 z-[80] flex items-start justify-center overflow-y-auto bg-slate-950/60 p-4 sm:p-8"
+      className="fixed inset-0 z-[80] flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8"
       onMouseDown={(event) => event.target === event.currentTarget && !creating && onClose()}
     >
-      <section className="w-full max-w-3xl overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
-        <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+      <section className="w-full max-w-3xl overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-2xl dark:border-neutral-700 dark:bg-neutral-900">
+        <header className="flex items-start justify-between gap-4 border-b border-neutral-200 px-5 py-4 dark:border-neutral-800">
           <div className="flex min-w-0 items-start gap-3">
             <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400">
               <Archive size={18} />
@@ -386,10 +376,10 @@ function DatabaseBackupsModal({ database, archives, creating, onClose, onCreate,
               <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">
                 Database backups
               </p>
-              <h2 className="mt-1 truncate text-xl font-semibold text-slate-900 dark:text-slate-100">
+              <h2 className="mt-1 truncate text-xl font-semibold text-neutral-900 dark:text-neutral-100">
                 {database.name}
               </h2>
-              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
                 Archives created for this database.
               </p>
             </div>
@@ -399,17 +389,17 @@ function DatabaseBackupsModal({ database, archives, creating, onClose, onCreate,
             onClick={onClose}
             disabled={creating}
             aria-label="Close database backups"
-            className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+            className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
           >
             <X size={17} />
           </button>
         </header>
 
         <div className="p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/40">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-neutral-200 bg-neutral-50 px-4 py-3 dark:border-neutral-800 dark:bg-neutral-950/40">
             <div>
-              <span className="text-xs text-slate-500 dark:text-slate-400">Stored archives</span>
-              <strong className="mt-0.5 block text-lg text-slate-900 dark:text-slate-100">{archives.length}</strong>
+              <span className="text-xs text-neutral-500 dark:text-neutral-400">Stored archives</span>
+              <strong className="mt-0.5 block text-lg text-neutral-900 dark:text-neutral-100">{archives.length}</strong>
             </div>
             <button
               type="button"
@@ -424,21 +414,21 @@ function DatabaseBackupsModal({ database, archives, creating, onClose, onCreate,
 
           {archives.length === 0 ? (
             <div className="grid place-items-center py-12 text-center">
-              <Archive size={28} className="text-slate-300 dark:text-slate-600" />
-              <h3 className="mt-3 text-sm font-semibold text-slate-900 dark:text-slate-100">No backups yet</h3>
-              <p className="mt-1 max-w-sm text-sm text-slate-500 dark:text-slate-400">
+              <Archive size={28} className="text-neutral-300 dark:text-neutral-600" />
+              <h3 className="mt-3 text-sm font-semibold text-neutral-900 dark:text-neutral-100">No backups yet</h3>
+              <p className="mt-1 max-w-sm text-sm text-neutral-500 dark:text-neutral-400">
                 Create a backup to archive this database in the Server Engine backup folder.
               </p>
             </div>
           ) : (
-            <div className="mt-5 divide-y divide-slate-200 overflow-hidden rounded-lg border border-slate-200 dark:divide-slate-800 dark:border-slate-800">
+            <div className="mt-5 divide-y divide-neutral-200 overflow-hidden rounded-lg border border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
               {archives.map((archive) => (
                 <div key={archive.id} className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    <p className="truncate text-sm font-semibold text-neutral-900 dark:text-neutral-100">
                       {archive.name || archive.archive_name || `Database backup ${archive.id}`}
                     </p>
-                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
                       {formatDate(archive.completed || archive.created)} · {formatBytes(archive.size)}
                     </p>
                     {archive.error && <p className="mt-1 truncate text-xs text-rose-600 dark:text-rose-400">{archive.error}</p>}
@@ -479,49 +469,57 @@ function DatabaseBackupsModal({ database, archives, creating, onClose, onCreate,
 function DatabaseImportModal({ engine, targetDatabase: initialTargetDatabase, submitting, onClose, onSubmit }) {
   const [file, setFile] = React.useState(null);
   const [targetDatabase] = React.useState(initialTargetDatabase || "");
+  const [error, setError] = React.useState("");
   const inputRef = React.useRef(null);
   const accepted = ".sql,.gz,.zip,.tar,.tgz";
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-slate-950/60 p-4 sm:p-8">
+    <div className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8">
       <form
-        className="w-full max-w-xl rounded-xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+        className="w-full max-w-xl rounded-xl border border-neutral-200 bg-white shadow-2xl dark:border-neutral-700 dark:bg-neutral-900"
         onSubmit={(event) => {
           event.preventDefault();
-          if (file) onSubmit({ file, targetDatabase });
+          const validation = databaseImportSchema.safeParse({ file, targetDatabase });
+          if (!validation.success) {
+            setError(validation.error.issues[0]?.message || "Choose a valid database export.");
+            return;
+          }
+          setError("");
+          onSubmit(validation.data);
         }}
       >
-        <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+        <header className="flex items-start justify-between gap-4 border-b border-neutral-200 px-5 py-4 dark:border-neutral-800">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Database inventory</p>
-            <h2 className="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">Import {engine} database</h2>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Queue an import using a file compatible with the selected engine.</p>
+            <h2 className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">Import {engine} database</h2>
+            <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">Queue an import using a file compatible with the selected engine.</p>
           </div>
-          <button type="button" onClick={onClose} disabled={submitting} aria-label="Close import dialog" className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-slate-800 dark:hover:text-slate-200">
+          <button type="button" onClick={onClose} disabled={submitting} aria-label="Close import dialog" className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-neutral-800 dark:hover:text-neutral-200">
             <X size={17} />
           </button>
         </header>
         <div className="space-y-5 p-5">
           <div>
-            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Backup file</label>
-            <div className={`mt-2 flex items-center gap-3 rounded-lg border border-dashed px-4 py-4 ${file ? "border-blue-300 bg-blue-50/50 dark:border-blue-700 dark:bg-blue-950/20" : "border-slate-300 dark:border-slate-700"}`}>
-              <Upload size={19} className="shrink-0 text-slate-400" />
+            <FormField label="Backup file" error={error}>
+            <div className={`mt-2 flex items-center gap-3 rounded-lg border border-dashed px-4 py-4 ${file ? "border-blue-300 bg-blue-50/50 dark:border-blue-700 dark:bg-blue-950/20" : "border-neutral-300 dark:border-neutral-700"}`}>
+              <Upload size={19} className="shrink-0 text-neutral-400" />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-slate-800 dark:text-slate-200">{file?.name || "Choose a database export"}</p>
-                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">MySQL accepts SQL, gzip, ZIP, TAR, TAR.GZ, and TGZ files.</p>
+                <p className="truncate text-sm font-medium text-neutral-800 dark:text-neutral-200">{file?.name || "Choose a database export"}</p>
+                <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">MySQL accepts SQL, gzip, ZIP, TAR, TAR.GZ, and TGZ files.</p>
               </div>
-              <button type="button" onClick={() => inputRef.current?.click()} className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">Browse</button>
-              <input ref={inputRef} type="file" accept={accepted} className="hidden" onChange={(event) => setFile(event.target.files?.[0] || null)} />
+              <button type="button" onClick={() => inputRef.current?.click()} className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-neutral-300 px-3 py-2 text-xs font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800">Browse</button>
+              <input ref={inputRef} type="file" accept={accepted} className="hidden" onChange={(event) => { setFile(event.target.files?.[0] || null); setError(""); }} />
             </div>
+            </FormField>
           </div>
-          <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/40">
-            <span className="block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Import into database</span>
-            <code className="mt-1.5 block text-sm font-semibold text-slate-900 dark:text-slate-100">{targetDatabase}</code>
-            <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">This target was selected from the database row.</span>
+          <div className="rounded-lg border border-neutral-200 bg-neutral-50 px-4 py-3 dark:border-neutral-800 dark:bg-neutral-950/40">
+            <span className="block text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">Import into database</span>
+            <code className="mt-1.5 block text-sm font-semibold text-neutral-900 dark:text-neutral-100">{targetDatabase}</code>
+            <span className="mt-1 block text-xs text-neutral-500 dark:text-neutral-400">This target was selected from the database row.</span>
           </div>
         </div>
-        <footer className="flex justify-end gap-3 border-t border-slate-200 px-5 py-4 dark:border-slate-800">
-          <button type="button" onClick={onClose} disabled={submitting} className="cursor-pointer rounded-md px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed dark:text-slate-300 dark:hover:bg-slate-800">Cancel</button>
+        <footer className="flex justify-end gap-3 border-t border-neutral-200 px-5 py-4 dark:border-neutral-800">
+          <button type="button" onClick={onClose} disabled={submitting} className="cursor-pointer rounded-md px-3 py-2 text-sm font-semibold text-neutral-600 hover:bg-neutral-100 disabled:cursor-not-allowed dark:text-neutral-300 dark:hover:bg-neutral-800">Cancel</button>
           <button type="submit" disabled={!file || submitting} className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
             {submitting ? <RefreshCw size={15} className="animate-spin" /> : <Upload size={15} />}
             {submitting ? "Uploading…" : "Import database"}
@@ -611,7 +609,7 @@ export default function DatabasesPage() {
     load();
     const updateServiceStatus = (event) => {
       const detail = event.detail || {};
-      if (!detail.serviceId || !ENGINE_SERVICES.some((item) => item.id === detail.serviceId)) return;
+      if (!detail.serviceId || !engines.some((item) => item.id === detail.serviceId)) return;
       if (detail.status !== "succeeded") return;
       setEngineCatalog((current) => current.map((item) => {
         if (item.id !== detail.serviceId) return item;
@@ -802,10 +800,10 @@ export default function DatabasesPage() {
           <p className="text-sm font-medium text-blue-600 dark:text-blue-400">
             Data services
           </p>
-          <h2 className="mt-1 text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
+          <h2 className="mt-1 text-3xl font-bold tracking-tight text-neutral-900 dark:text-neutral-100">
             Databases
           </h2>
-          <p className="mt-2 max-w-3xl text-base leading-7 text-slate-500 dark:text-slate-400">
+          <p className="mt-2 max-w-3xl text-base leading-7 text-neutral-500 dark:text-neutral-400">
             Manage database engines, credentials, backups, and application data
             connections from one workspace.
           </p>
@@ -818,8 +816,8 @@ export default function DatabasesPage() {
               <div className="flex items-center gap-3">
                 <Database className="text-red-500" size={20} />
                 <span>
-                  <small className="block text-xs text-slate-500 dark:text-slate-400">Logical databases</small>
-                  <strong className="mt-1 block text-xl text-slate-900 dark:text-slate-100">—</strong>
+                  <small className="block text-xs text-neutral-500 dark:text-neutral-400">Logical databases</small>
+                  <strong className="mt-1 block text-xl text-neutral-900 dark:text-neutral-100">—</strong>
                 </span>
               </div>
             </div>
@@ -827,8 +825,8 @@ export default function DatabasesPage() {
               <div className="flex items-center gap-3">
                 <Database className="text-violet-500" size={20} />
                 <span>
-                  <small className="block text-xs text-slate-500 dark:text-slate-400">Keys</small>
-                  <strong className="mt-1 block text-xl text-slate-900 dark:text-slate-100">—</strong>
+                  <small className="block text-xs text-neutral-500 dark:text-neutral-400">Keys</small>
+                  <strong className="mt-1 block text-xl text-neutral-900 dark:text-neutral-100">—</strong>
                 </span>
               </div>
             </div>
@@ -836,8 +834,8 @@ export default function DatabasesPage() {
               <div className="flex items-center gap-3">
                 <HardDrive className="text-amber-500" size={20} />
                 <span>
-                  <small className="block text-xs text-slate-500 dark:text-slate-400">Memory used</small>
-                  <strong className="mt-1 block text-xl text-slate-900 dark:text-slate-100">—</strong>
+                  <small className="block text-xs text-neutral-500 dark:text-neutral-400">Memory used</small>
+                  <strong className="mt-1 block text-xl text-neutral-900 dark:text-neutral-100">—</strong>
                 </span>
               </div>
             </div>
@@ -845,8 +843,8 @@ export default function DatabasesPage() {
               <div className="flex items-center gap-3">
                 <Archive className="text-emerald-500" size={20} />
                 <span>
-                  <small className="block text-xs text-slate-500 dark:text-slate-400">Managed snapshots</small>
-                  <strong className="mt-1 block text-xl text-slate-900 dark:text-slate-100">0</strong>
+                  <small className="block text-xs text-neutral-500 dark:text-neutral-400">Managed snapshots</small>
+                  <strong className="mt-1 block text-xl text-neutral-900 dark:text-neutral-100">0</strong>
                 </span>
               </div>
             </div>
@@ -860,17 +858,17 @@ export default function DatabasesPage() {
             aria-label={`Create ${selectedEngine?.name || "database"}`}
             onClick={() => setModal(true)}
             disabled={!canCreateDatabase}
-            className={`absolute right-4 top-4 inline-flex h-8 w-8 items-center justify-center rounded-full ${canCreateDatabase ? "cursor-pointer text-blue-600 hover:bg-blue-50 hover:text-blue-700 dark:text-blue-400 dark:hover:bg-blue-950/40 dark:hover:text-blue-300" : "cursor-not-allowed text-slate-300 dark:text-slate-600"}`}
+            className={`absolute right-4 top-4 inline-flex h-8 w-8 items-center justify-center rounded-full ${canCreateDatabase ? "cursor-pointer text-blue-600 hover:bg-blue-50 hover:text-blue-700 dark:text-blue-400 dark:hover:bg-blue-950/40 dark:hover:text-blue-300" : "cursor-not-allowed text-neutral-300 dark:text-neutral-600"}`}
           >
             <CirclePlus size={18} />
           </button>
           <div className="flex items-center gap-3 pr-8">
             <Database className="text-blue-500" size={20} />
             <span>
-              <small className="block text-xs text-slate-500 dark:text-slate-400">
+              <small className="block text-xs text-neutral-500 dark:text-neutral-400">
                 Total databases
               </small>
-              <strong className="mt-1 block text-xl text-slate-900 dark:text-slate-100">
+              <strong className="mt-1 block text-xl text-neutral-900 dark:text-neutral-100">
                 {databases.length}
               </strong>
             </span>
@@ -880,10 +878,10 @@ export default function DatabasesPage() {
           <div className="flex items-center gap-3">
             <Users className="text-violet-500" size={20} />
             <span>
-              <small className="block text-xs text-slate-500 dark:text-slate-400">
+              <small className="block text-xs text-neutral-500 dark:text-neutral-400">
                 Database users
               </small>
-              <strong className="mt-1 block text-xl text-slate-900 dark:text-slate-100">
+              <strong className="mt-1 block text-xl text-neutral-900 dark:text-neutral-100">
                 {new Set(databases.map((item) => item.username)).size}
               </strong>
             </span>
@@ -893,10 +891,10 @@ export default function DatabasesPage() {
           <div className="flex items-center gap-3">
             <Archive className="text-emerald-500" size={20} />
             <span>
-              <small className="block text-xs text-slate-500 dark:text-slate-400">
+              <small className="block text-xs text-neutral-500 dark:text-neutral-400">
                 Scheduled backups
               </small>
-              <strong className="mt-1 block text-xl text-slate-900 dark:text-slate-100">
+              <strong className="mt-1 block text-xl text-neutral-900 dark:text-neutral-100">
                 {databases.filter((item) => item.backup !== "manual").length}
               </strong>
             </span>
@@ -906,10 +904,10 @@ export default function DatabasesPage() {
           <div className="flex items-center gap-3">
             <HardDrive className="text-amber-500" size={20} />
             <span>
-              <small className="block text-xs text-slate-500 dark:text-slate-400">
+              <small className="block text-xs text-neutral-500 dark:text-neutral-400">
                 Storage used
               </small>
-              <strong className="mt-1 block text-xl text-slate-900 dark:text-slate-100">
+              <strong className="mt-1 block text-xl text-neutral-900 dark:text-neutral-100">
                 {formatBytes(storage)}
               </strong>
             </span>
@@ -918,23 +916,8 @@ export default function DatabasesPage() {
           </>
         )}
       </section>
-      <section className={`${card} order-1`}>
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
-              Database engines
-            </h3>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-              Choose an engine to narrow the inventory or start a matching
-              database.
-            </p>
-          </div>
-          <button className="hidden items-center gap-2 text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 sm:inline-flex">
-            <RefreshCw size={15} />
-            Refresh catalog
-          </button>
-        </div>
-        <div className="mt-5 flex gap-3 overflow-x-auto pb-1">
+      <section className="order-1">
+        <div className="flex gap-3 overflow-x-auto pb-1">
           {engineCatalog.map((item) => (
             <EngineCard
               key={item.id}
@@ -948,10 +931,10 @@ export default function DatabasesPage() {
       <section className={`${card} order-3`}>
         <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
           <div>
-            <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+            <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">
               {isRedis ? "Redis runtime" : "Database inventory"}
             </h3>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
               {isRedis && !engineStopped
                 ? "Redis uses logical databases and keys rather than SQL databases and users."
                 : engineStopped
@@ -962,10 +945,10 @@ export default function DatabasesPage() {
             </p>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row">
-            <label className="flex min-w-64 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2.5 text-slate-400 dark:border-slate-700 dark:bg-slate-950">
+            <label className="flex min-w-64 items-center gap-2 rounded-md border border-neutral-300 bg-white px-3 py-2.5 text-neutral-400 dark:border-neutral-700 dark:bg-neutral-950">
               <Search size={16} />
               <input
-                className="w-full bg-transparent text-sm text-slate-900 outline-none dark:text-slate-100"
+                className="w-full bg-transparent text-sm text-neutral-900 outline-none dark:text-neutral-100"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder={isRedis ? "Search Redis keys (when metrics are connected)" : "Search databases or users"}
@@ -985,7 +968,7 @@ export default function DatabasesPage() {
               compact
             />
           ) : engineStopped ? (
-            <div className="flex min-h-64 items-center justify-center border-t border-slate-200 px-5 py-12 dark:border-slate-800">
+            <div className="flex min-h-64 items-center justify-center border-t border-neutral-200 px-5 py-12 dark:border-neutral-800">
               <div className="max-w-lg text-center">
                 <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-amber-50 text-amber-600 dark:bg-amber-950/30 dark:text-amber-400">
                   <Database size={23} />
@@ -993,10 +976,10 @@ export default function DatabasesPage() {
                 <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400">
                   Database service stopped
                 </p>
-                <h4 className="mt-2 text-lg font-semibold text-slate-900 dark:text-slate-100">
+                <h4 className="mt-2 text-lg font-semibold text-neutral-900 dark:text-neutral-100">
                   {selectedEngine.name} is not running
                 </h4>
-                <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                <p className="mt-2 text-sm leading-6 text-neutral-500 dark:text-neutral-400">
                   Start {selectedEngine.name} before opening its database inventory. No database records are shown while the service is offline.
                 </p>
                 <div className="mt-5 flex flex-wrap justify-center gap-3">
@@ -1004,7 +987,7 @@ export default function DatabasesPage() {
                     {serviceConfigLoading && <RefreshCw size={15} className="animate-spin" />}
                     {serviceConfigLoading ? "Loading configuration…" : "Open service configuration"}
                   </button>
-                  <button type="button" onClick={load} className="inline-flex cursor-pointer items-center gap-2 rounded-md px-3.5 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800">
+                  <button type="button" onClick={load} className="inline-flex cursor-pointer items-center gap-2 rounded-md px-3.5 py-2 text-sm font-semibold text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800">
                     <RefreshCw size={15} />
                     Check again
                   </button>
@@ -1012,17 +995,17 @@ export default function DatabasesPage() {
               </div>
             </div>
           ) : loading ? (
-            <div className="border-t border-slate-200 py-16 text-center text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400">
+            <div className="border-t border-neutral-200 py-16 text-center text-sm text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
               Loading database inventory…
             </div>
           ) : isRedis ? (
-            <div className="flex min-h-64 items-center justify-center border-t border-slate-200 px-5 py-12 dark:border-slate-800">
+            <div className="flex min-h-64 items-center justify-center border-t border-neutral-200 px-5 py-12 dark:border-neutral-800">
               <div className="max-w-lg text-center">
                 <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400">
                   <Database size={23} />
                 </div>
-                <h4 className="mt-4 text-lg font-semibold text-slate-900 dark:text-slate-100">Redis logical databases</h4>
-                <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                <h4 className="mt-4 text-lg font-semibold text-neutral-900 dark:text-neutral-100">Redis logical databases</h4>
+                <p className="mt-2 text-sm leading-6 text-neutral-500 dark:text-neutral-400">
                   Redis does not create SQL database records or database users. Use the Redis configuration and runtime views to manage logical databases, keys, memory, and persistence.
                 </p>
               </div>
@@ -1030,7 +1013,7 @@ export default function DatabasesPage() {
           ) : (
             <table className="w-full min-w-[760px] border-collapse text-left">
               <thead>
-                <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:text-slate-400">
+                <tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
                   <th className="px-3 py-3 font-semibold">Database</th>
                   <th className="px-3 py-3 font-semibold">Engine</th>
                   <th className="px-3 py-3 font-semibold">Credentials</th>
@@ -1045,31 +1028,31 @@ export default function DatabasesPage() {
                 {pageRows.map((item) => (
                   <tr
                     key={item.id}
-                    className="border-b border-slate-100 text-sm dark:border-slate-800"
+                    className="border-b border-neutral-100 text-sm dark:border-neutral-800"
                   >
-                    <td className="px-3 py-4 font-semibold text-slate-900 dark:text-slate-100">
+                    <td className="px-3 py-4 font-semibold text-neutral-900 dark:text-neutral-100">
                       {item.name}
                     </td>
-                    <td className="px-3 py-4 capitalize text-slate-600 dark:text-slate-400">
+                    <td className="px-3 py-4 capitalize text-neutral-600 dark:text-neutral-400">
                       {item.engine}
                     </td>
-                    <td className="px-3 py-4 text-slate-600 dark:text-slate-400">
+                    <td className="px-3 py-4 text-neutral-600 dark:text-neutral-400">
                       {item.credentials_saved ? (
                         <div className="min-w-56 space-y-1">
                           <div className="flex items-center gap-1.5 truncate text-xs">
-                            <span className="font-medium text-slate-500 dark:text-slate-400">User:</span>
+                            <span className="font-medium text-neutral-500 dark:text-neutral-400">User:</span>
                             <span className="truncate">{item.username}</span>
-                            <button type="button" title="Copy username" aria-label={`Copy username for ${item.name}`} onClick={() => copyDatabaseCredential(item, "username")} className="inline-flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200">
+                            <button type="button" title="Copy username" aria-label={`Copy username for ${item.name}`} onClick={() => copyDatabaseCredential(item, "username")} className="inline-flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200">
                               <Copy size={14} />
                             </button>
                           </div>
                           <div className="flex items-center gap-1.5 text-xs">
-                            <span className="font-medium text-slate-500 dark:text-slate-400">Pass:</span>
+                            <span className="font-medium text-neutral-500 dark:text-neutral-400">Pass:</span>
                             <code className="max-w-36 truncate">{revealedCredentials[item.id] ? credentialCache.current[item.id]?.password : "••••••••••••"}</code>
-                            <button type="button" title={revealedCredentials[item.id] ? "Hide password" : "Show password"} aria-label={revealedCredentials[item.id] ? `Hide password for ${item.name}` : `Show password for ${item.name}`} onClick={() => toggleDatabasePassword(item)} className="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200">
+                            <button type="button" title={revealedCredentials[item.id] ? "Hide password" : "Show password"} aria-label={revealedCredentials[item.id] ? `Hide password for ${item.name}` : `Show password for ${item.name}`} onClick={() => toggleDatabasePassword(item)} className="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200">
                               {revealedCredentials[item.id] ? <EyeOff size={14} /> : <Eye size={14} />}
                             </button>
-                            <button type="button" title="Copy password" aria-label={`Copy password for ${item.name}`} onClick={() => copyDatabaseCredential(item, "password")} className="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200">
+                            <button type="button" title="Copy password" aria-label={`Copy password for ${item.name}`} onClick={() => copyDatabaseCredential(item, "password")} className="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200">
                               <Copy size={14} />
                             </button>
                           </div>
@@ -1100,24 +1083,24 @@ export default function DatabasesPage() {
                           aria-label={`More actions for ${item.name}`}
                           aria-expanded={actionMenu === item.id}
                           onClick={() => setActionMenu(actionMenu === item.id ? null : item.id)}
-                          className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                          className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
                         >
                           <MoreHorizontal size={17} />
                         </button>
                         {actionMenu === item.id && (
-                        <div className="absolute bottom-11 right-0 z-50 w-56 rounded-lg border border-slate-200 bg-white p-1 text-left shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                        <div className="absolute bottom-11 right-0 z-50 w-56 rounded-lg border border-neutral-200 bg-white p-1 text-left shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
                           {item.credentials_saved && (
-                            <button type="button" onClick={() => copyDatabaseCredential(item, "password")} className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800">
+                            <button type="button" onClick={() => copyDatabaseCredential(item, "password")} className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800">
                               <Copy size={15} /> Copy password
                             </button>
                           )}
-                          <button type="button" onClick={() => createBackupJob(item)} className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800">
+                          <button type="button" onClick={() => createBackupJob(item)} className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800">
                             <Archive size={15} /> Create daily backup job
                           </button>
-                          <button type="button" onClick={() => { setActionMenu(null); setImportModal({ engine: item.engine, targetDatabase: item.name }); }} className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800">
+                          <button type="button" onClick={() => { setActionMenu(null); setImportModal({ engine: item.engine, targetDatabase: item.name }); }} className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800">
                             <Upload size={15} /> Import backup file
                           </button>
-                          <button type="button" onClick={() => { setActionMenu(null); setBackupModal(item); }} className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800">
+                          <button type="button" onClick={() => { setActionMenu(null); setBackupModal(item); }} className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800">
                             <HardDrive size={15} /> View backup archives
                           </button>
                         </div>
@@ -1133,12 +1116,12 @@ export default function DatabasesPage() {
             ? null
             : !loading &&
               visible.length === 0 && (
-                <div className="grid place-items-center border-t border-slate-200 py-16 text-center dark:border-slate-800">
-                  <Database size={30} className="text-slate-400" />
-                  <h4 className="mt-4 text-base font-semibold text-slate-900 dark:text-slate-100">
+                <div className="grid place-items-center border-t border-neutral-200 py-16 text-center dark:border-neutral-800">
+                  <Database size={30} className="text-neutral-400" />
+                  <h4 className="mt-4 text-base font-semibold text-neutral-900 dark:text-neutral-100">
                     {query ? "No matching databases" : "No databases yet"}
                   </h4>
-                  <p className="mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">
+                  <p className="mt-2 max-w-md text-sm leading-6 text-neutral-500 dark:text-neutral-400">
                     Create a database to start managing credentials, backups,
                     and application connections.
                   </p>
@@ -1152,7 +1135,7 @@ export default function DatabasesPage() {
                 </div>
               )}
           {!loading && visible.length > 0 && (
-            <div className="flex flex-col gap-3 border-t border-slate-200 px-3 py-4 text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-3 border-t border-neutral-200 px-3 py-4 text-sm text-neutral-500 dark:border-neutral-800 dark:text-neutral-400 sm:flex-row sm:items-center sm:justify-between">
               <span>
                 Page {page} of {pageCount}
               </span>
@@ -1161,7 +1144,7 @@ export default function DatabasesPage() {
                   type="button"
                   disabled={page === 1}
                   onClick={() => setPage((value) => Math.max(1, value - 1))}
-                  className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-slate-300 px-3 py-2 font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                  className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-neutral-300 px-3 py-2 font-medium text-neutral-700 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
                 >
                   <ChevronLeft size={15} />
                   Previous
@@ -1172,7 +1155,7 @@ export default function DatabasesPage() {
                   onClick={() =>
                     setPage((value) => Math.min(pageCount, value + 1))
                   }
-                  className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-slate-300 px-3 py-2 font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                  className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-neutral-300 px-3 py-2 font-medium text-neutral-700 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
                 >
                   Next
                   <ChevronRight size={15} />
@@ -1183,7 +1166,7 @@ export default function DatabasesPage() {
         </div>
       </section>
       {notice && (
-        <p className="order-4 text-sm text-slate-600 dark:text-slate-300">
+        <p className="order-4 text-sm text-neutral-600 dark:text-neutral-300">
           {notice}
         </p>
       )}

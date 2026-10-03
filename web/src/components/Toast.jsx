@@ -14,7 +14,7 @@ function ToastCard({ id, message, type }) {
 
   return (
     <div
-      className="flex w-[min(24rem,calc(100vw-2rem))] items-start gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-lg dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+      className="flex w-[min(24rem,calc(100vw-2rem))] items-start gap-3 rounded-lg border border-neutral-200 bg-white px-4 py-3 text-sm text-neutral-700 shadow-lg dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
       role="status"
       aria-live="polite"
     >
@@ -23,7 +23,7 @@ function ToastCard({ id, message, type }) {
       <button
         type="button"
         aria-label="Dismiss notification"
-        className="-mr-1 -mt-1 inline-flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+        className="-mr-1 -mt-1 inline-flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-full text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
         onClick={() => sonnerToast.dismiss(id)}
       >
         <X size={14} />

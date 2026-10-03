@@ -1,5 +1,5 @@
 import React from "react";
-import { ExternalLink, Server, X } from "lucide-react";
+import { Download, ExternalLink, Server, X } from "lucide-react";
 import { apiRequest } from "../../lib/api";
 import ServiceNotInstalledState from "../../components/ServiceNotInstalledState";
 import { useServiceInstallationState } from "../../hooks/useServiceInstallationState";
@@ -67,24 +67,24 @@ export default function PhpRuntimesPage({ modal = false, onClose }) {
     <div
       className={
         modal
-          ? "fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/50 p-4 sm:p-8"
+          ? "fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-neutral-950/50 p-4 sm:p-8"
           : ""
       }
     >
       <section
         className={
           modal
-            ? "relative max-h-[calc(100vh-2rem)] w-full max-w-4xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl dark:bg-slate-900"
+            ? "relative max-h-[calc(100vh-2rem)] w-full max-w-4xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl dark:bg-neutral-900"
             : ""
         }
       >
         {modal && (
           <div className="mb-5 flex items-start justify-between gap-4">
             <div>
-              <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+              <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">
                 PHP runtimes ({installedRuntimes.length})
               </h2>
-              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
                 Manage installed PHP-FPM versions.
               </p>
             </div>
@@ -105,7 +105,7 @@ export default function PhpRuntimesPage({ modal = false, onClose }) {
               <button
                 type="button"
                 aria-label="Close PHP runtimes"
-                className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
                 onClick={onClose}
               >
                 <X size={18} />
@@ -116,27 +116,36 @@ export default function PhpRuntimesPage({ modal = false, onClose }) {
       <div className={`space-y-7 ${modal ? "pr-2" : ""}`}>
       {!modal && (
         <>
-          <div className="php-page-heading">
+          <div className="flex items-start justify-between gap-4">
             <div>
               <p className="text-sm text-cyan-300">Application runtimes</p>
-              <h2 className="mt-1 text-3xl font-semibold tracking-tight">
+              <h2 className="mt-1 flex items-center gap-2 text-3xl font-semibold tracking-tight">
                 <Server size={25} />
                 PHP-FPM runtimes
               </h2>
-              <p className="mt-2 text-slate-400">
+              <p className="mt-2 text-neutral-400">
                 Each PHP version has its own process, socket, configuration,
                 logs, and extensions.
               </p>
             </div>
+            <button
+              type="button"
+              disabled={!service || loading}
+              className="inline-flex shrink-0 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60"
+              onClick={() => setSelected({ service })}
+            >
+              <Download size={14} />
+              Install
+            </button>
           </div>
         </>
       )}
       {loading || phpState.loading ? (
-        <div className="animate-pulse overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700" aria-label="Loading PHP runtimes" aria-busy="true">
-          <div className="flex gap-4 border-b border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-950">
-            {["w-32", "w-24", "w-24", "w-20"].map((width) => <div key={width} className={`h-3 ${width} rounded bg-slate-200 dark:bg-slate-800`} />)}
+        <div className="animate-pulse overflow-hidden rounded-lg border border-neutral-200 dark:border-neutral-700" aria-label="Loading PHP runtimes" aria-busy="true">
+          <div className="flex gap-4 border-b border-neutral-200 bg-neutral-50 px-4 py-3 dark:border-neutral-700 dark:bg-neutral-950">
+            {["w-32", "w-24", "w-24", "w-20"].map((width) => <div key={width} className={`h-3 ${width} rounded bg-neutral-200 dark:bg-neutral-800`} />)}
           </div>
-          {[1, 2, 3].map((item) => <div key={item} className="flex items-center gap-4 border-b border-slate-200 px-4 py-5 last:border-0 dark:border-slate-700"><div className="h-4 w-32 rounded bg-slate-200 dark:bg-slate-800" /><div className="h-4 w-24 rounded bg-slate-200 dark:bg-slate-800" /><div className="h-4 w-28 rounded bg-slate-200 dark:bg-slate-800" /><div className="ml-auto h-8 w-20 rounded bg-slate-200 dark:bg-slate-800" /></div>)}
+          {[1, 2, 3].map((item) => <div key={item} className="flex items-center gap-4 border-b border-neutral-200 px-4 py-5 last:border-0 dark:border-neutral-700"><div className="h-4 w-32 rounded bg-neutral-200 dark:bg-neutral-800" /><div className="h-4 w-24 rounded bg-neutral-200 dark:bg-neutral-800" /><div className="h-4 w-28 rounded bg-neutral-200 dark:bg-neutral-800" /><div className="ml-auto h-8 w-20 rounded bg-neutral-200 dark:bg-neutral-800" /></div>)}
         </div>
       ) : !phpState.installed ? (
         <ServiceNotInstalledState
@@ -166,7 +175,7 @@ export default function PhpRuntimesPage({ modal = false, onClose }) {
         />
       )}
       {notice && (
-        <p className="text-sm text-slate-600 dark:text-slate-300">{notice}</p>
+        <p className="text-sm text-neutral-600 dark:text-neutral-300">{notice}</p>
       )}
       {selected && (
         <InstallServiceModal

@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 WebsiteStatus = Literal["ready", "disabled", "error"]
 ServerType = Literal["nginx", "apache", "openlitespeed", "caddy"]
 FrameworkType = Literal["generic_php", "laravel", "wordpress", "symfony", "codeigniter", "custom"]
+ApplicationTemplate = Literal["wordpress", "laravel", "drupal", "symfony", "cakephp", "codeigniter4", "yii", "slim", "laminas"]
 
 
 class Website(BaseModel):
@@ -51,6 +52,19 @@ class WebsiteCreateRequest(BaseModel):
     database_user: str = Field(default="", max_length=128)
     notes: str = Field(default="", max_length=4000)
     tags: list[str] = Field(default_factory=list, max_length=30)
+
+
+class WebsiteDeployRequest(WebsiteCreateRequest):
+    """Validated input for a one-click application deployment."""
+
+    application_template: ApplicationTemplate
+    database_engine: Literal["", "mysql", "mariadb", "postgresql", "sqlite"] = ""
+    database_password: str = Field(default="", max_length=256)
+    wordpress_version: str = Field(default="latest", max_length=32)
+    wordpress_admin_user: str = Field(default="", max_length=64)
+    wordpress_admin_password: str = Field(default="", max_length=256)
+    wordpress_database_prefix: str = Field(default="wp_", max_length=32)
+    wordpress_site_title: str = Field(default="", max_length=200)
 
 
 class WebsiteUpdateRequest(BaseModel):

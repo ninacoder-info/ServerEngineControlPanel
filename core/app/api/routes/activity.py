@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 
 from app.api.dependencies import require_user
 from app.services.job_service import job_store
@@ -42,10 +42,13 @@ def _event(job):
 
 @router.get("")
 def list_activity(
+    request: Request,
     range: str = Query(default="24h", pattern="^(24h|7d|30d|all)$"),
     user=Depends(require_user),
 ):
     events = [_event(job) for job in job_store.list()]
+    events.extend(request.app.state.auth_service.store.list_activity())
+    events.sort(key=lambda event: event.get("time") or "", reverse=True)
     if range != "all":
         hours = {"24h": 24, "7d": 24 * 7, "30d": 24 * 30}[range]
         cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)

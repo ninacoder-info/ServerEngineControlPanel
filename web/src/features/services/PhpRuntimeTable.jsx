@@ -51,20 +51,19 @@ export default function PhpRuntimeTable({
   };
 
   return (
-    <section className="overflow-visible rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
+    <section className="overflow-visible rounded-lg border border-neutral-200 bg-white dark:border-neutral-700 dark:bg-neutral-900">
       <div className="overflow-visible">
         <table className="w-full min-w-[760px] border-collapse text-left text-sm">
-          <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-950 dark:text-slate-400">
+          <thead className="bg-neutral-50 text-xs uppercase tracking-wide text-neutral-500 dark:bg-neutral-950 dark:text-neutral-400">
             <tr>
-              <th className="px-4 py-3 font-semibold">Version</th>
-              <th className="px-4 py-3 font-semibold">Channel</th>
-              <th className="px-4 py-3 font-semibold">Status</th>
+              <th className="rounded-tl-lg px-4 py-3 font-semibold">Version</th>
               <th className="px-4 py-3 font-semibold">Install method</th>
+              <th className="px-4 py-3 font-semibold">Status</th>
               <th className="px-4 py-3 font-semibold">Extensions</th>
-              <th className="px-4 py-3 text-right font-semibold" />
+              <th className="rounded-tr-lg px-4 py-3 text-right font-semibold" />
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+          <tbody className="divide-y divide-neutral-200 dark:divide-neutral-700">
             {runtimes.map((runtime) => {
               const item = installed.find(
                 (entry) => entry.id === `php@${runtime.version}`,
@@ -77,18 +76,22 @@ export default function PhpRuntimeTable({
                 ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
                 : isInstalled
                   ? "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
-                  : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400";
+                  : "bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400";
 
               return (
                 <tr
                   key={runtime.version}
-                  className="hover:bg-slate-50 dark:hover:bg-slate-800/50"
+                  className="hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
                 >
-                  <td className="px-4 py-4 font-semibold text-slate-900 dark:text-slate-100">
+                  <td className="px-4 py-4 font-semibold text-neutral-900 dark:text-neutral-100">
                     PHP {runtime.version}
                   </td>
-                  <td className="px-4 py-4 capitalize text-slate-500 dark:text-slate-400">
-                    {runtime.channel}
+                  <td className="px-4 py-4 text-neutral-500 dark:text-neutral-400">
+                    {runtime.install_method === "source"
+                      ? "Build from source"
+                      : runtime.install_method === "prebuilt"
+                        ? "Prebuilt package"
+                        : "—"}
                   </td>
                   <td className="px-4 py-4">
                     <span
@@ -108,14 +111,7 @@ export default function PhpRuntimeTable({
                           : "Not installed"}
                     </span>
                   </td>
-                  <td className="px-4 py-4 text-slate-500 dark:text-slate-400">
-                    {runtime.install_method === "source"
-                      ? "Build from source"
-                      : runtime.install_method === "prebuilt"
-                        ? "Prebuilt package"
-                        : "—"}
-                  </td>
-                  <td className="px-4 py-4 text-slate-500 dark:text-slate-400">
+                  <td className="px-4 py-4 text-neutral-500 dark:text-neutral-400">
                     {isInstalled
                       ? `${runtime.extensions.filter((extension) => extension.enabled).length} enabled`
                       : "—"}
@@ -155,7 +151,7 @@ export default function PhpRuntimeTable({
                             type="button"
                             aria-label={`More actions for PHP ${runtime.version}`}
                             aria-expanded={menuVersion === runtime.version}
-                            className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                            className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
                             onClick={() =>
                               setMenuVersion(
                                 menuVersion === runtime.version
@@ -167,10 +163,10 @@ export default function PhpRuntimeTable({
                             <MoreHorizontal size={17} />
                           </button>
                           {menuVersion === runtime.version && (
-                            <div className="absolute bottom-11 right-0 z-50 w-56 rounded-lg border border-slate-200 bg-white p-1 text-left shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                            <div className="absolute bottom-11 right-0 z-50 w-56 rounded-lg border border-neutral-200 bg-white p-1 text-left shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
                               <button
                                 type="button"
-                                className="flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+                                className="flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
                                 onClick={() =>
                                   copyCliPath(runtime.version, runtime.cli_path)
                                 }
@@ -189,7 +185,7 @@ export default function PhpRuntimeTable({
                               </button>
                               <button
                                 type="button"
-                                className="flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+                                className="flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
                                 onClick={() =>
                                   copyPath(runtime.version, runtime.fpm_path)
                                 }
@@ -214,7 +210,8 @@ export default function PhpRuntimeTable({
                       </div>
                     ) : (
                       <button
-                        className={linkButton}
+                        type="button"
+                        className="inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
                         onClick={() => onInstall(service, runtime.version)}
                       >
                         <Download size={14} />
