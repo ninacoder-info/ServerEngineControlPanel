@@ -195,6 +195,16 @@ export function TerminalSession({
     });
     onControls(profile.id, {
       clear: () => terminal.clear(),
+      copy: async () => {
+        const selection = terminal.getSelection();
+        if (!selection) return;
+        try {
+          await navigator.clipboard.writeText(selection);
+        } catch {
+          // Keep browser-native xterm selection usable when clipboard
+          // permissions are unavailable in an insecure context.
+        }
+      },
       fullscreen: () => root.current?.requestFullscreen?.(),
       switchUser: () => {
         if (
@@ -239,7 +249,7 @@ export function TerminalSession({
     <div
       ref={root}
       onClick={() => term.current?.focus()}
-      className={`${visible ? "" : "hidden"} box-border min-h-0 w-full overflow-hidden rounded-lg bg-white p-3 dark:bg-neutral-900 ${className || "h-[32rem] max-h-[32rem]"}`}
+      className={`${visible ? "" : "hidden"} box-border min-h-0 w-full select-text overflow-hidden rounded-lg bg-white p-3 dark:bg-neutral-900 ${className || "h-[32rem] max-h-[32rem]"}`}
     />
   );
 }
@@ -641,7 +651,10 @@ export default function TerminalPage({ autoConnect = false }) {
               >
                 <Maximize2 size={16} />
               </Button>
-              <Button label="Copy selection">
+              <Button
+                label="Copy selection"
+                onClick={() => controls.current[activeId]?.copy()}
+              >
                 <Copy size={16} />
               </Button>
             </div>

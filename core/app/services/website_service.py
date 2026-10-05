@@ -24,7 +24,51 @@ class WebsiteService:
         self.path = Path(os.getenv("SE_WEBSITES_PATH", str(state / "websites.json")))
         self.web_root = Path(os.getenv("SE_WEB_ROOT", "/server-engine/www")).resolve()
         self.service_root = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services"))
+        self.log_root = Path(os.getenv("SE_LOG_ROOT", "/server-engine/logs")).resolve()
         self._lock = RLock()
+
+    @property
+    def nginx_port_path(self) -> Path:
+        return self.path.parent / "nginx-settings.json"
+
+    def nginx_http_port(self) -> int:
+        try:
+            value = json.loads(self.nginx_port_path.read_text()).get("http_port", 80)
+            port = int(value)
+            return port if 1 <= port <= 65535 else 80
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            return 80
+
+    def set_nginx_http_port(self, port: int) -> int:
+        if not 1 <= port <= 65535:
+            raise HTTPException(400, "Nginx HTTP port must be between 1 and 65535")
+        with self._lock:
+            self.nginx_port_path.parent.mkdir(parents=True, exist_ok=True)
+            self.nginx_port_path.write_text(json.dumps({"http_port": port}, indent=2) + "\n")
+            for site in [Website.model_validate(item) for item in self._read() if item.get("server_type") == "nginx"]:
+                generated = self.configuration(site)
+                provider_path = Path(generated["config_path"])
+                provider_path.parent.mkdir(parents=True, exist_ok=True)
+                provider_path.write_text(generated["content"])
+            # Migrate managed site files from older releases as well. This
+            # covers sites that are no longer present in the registry and
+            # prevents an orphaned `listen 80;` block from keeping port 80
+            # bound after the panel setting changes.
+            sites_dir = self.service_root / "nginx" / "conf" / "sites"
+            if sites_dir.is_dir():
+                for provider_path in sites_dir.glob("*.conf"):
+                    try:
+                        content = provider_path.read_text(errors="replace")
+                    except OSError:
+                        continue
+                    migrated = re.sub(
+                        r"(?m)^(\s*listen\s+)(\[::\]:)?\d+(\s*;.*)$",
+                        rf"\g<1>\g<2>{port}\g<3>",
+                        content,
+                    )
+                    if migrated != content:
+                        provider_path.write_text(migrated)
+        return port
 
     def list(self) -> list[Website]:
         with self._lock:
@@ -34,7 +78,9 @@ class WebsiteService:
             for site in sites:
                 generated = self.configuration(site.id)
                 provider_path = Path(generated["config_path"])
-                if not provider_path.exists():
+                existing = provider_path.read_text(errors="replace") if provider_path.exists() else ""
+                legacy_log_root = str(self.service_root / site.server_type / "logs")
+                if not provider_path.exists() or legacy_log_root in existing:
                     provider_path.parent.mkdir(parents=True, exist_ok=True)
                     provider_path.write_text(generated["content"])
             return sites
@@ -57,6 +103,8 @@ class WebsiteService:
         index = "index.php index.html index.htm default.php default.htm default.html"
         root = site.document_root
         socket = self.service_root / "php" / "versions" / site.php_version / "run" / "php-fpm.sock"
+        site_log_root = self.log_root / site.server_type / "sites"
+        site_log_root.mkdir(parents=True, exist_ok=True)
         if site.server_type == "apache":
             service_root = self.service_root / "apache"
             config_path = service_root / "conf" / "sites" / f"{config_id}.conf"
@@ -66,8 +114,8 @@ class WebsiteService:
                 *[f"    ServerAlias {alias}" for alias in site.aliases],
                 f"    DocumentRoot \"{root}\"",
                 f"    DirectoryIndex {index}",
-                f"    ErrorLog \"{service_root}/logs/sites/{config_id}.error.log\"",
-                f"    CustomLog \"{service_root}/logs/sites/{config_id}.access.log\" combined",
+                f"    ErrorLog \"{site_log_root / f'{config_id}.error.log'}\"",
+                f"    CustomLog \"{site_log_root / f'{config_id}.access.log'}\" combined",
                 f"    <Directory \"{root}\">",
                 "        AllowOverride All",
                 "        Require all granted",
@@ -86,7 +134,7 @@ class WebsiteService:
             lines = [f"{names} {{", f"    root * {root}", "    encode zstd gzip", "    file_server"]
             if site.php_version:
                 lines.append(f"    php_fastcgi unix/{socket}")
-            lines.extend(["    log {", f"        output file {service_root}/logs/sites/{config_id}.access.log", "    }", "}", ""])
+            lines.extend(["    log {", f"        output file {site_log_root / f'{config_id}.access.log'}", "    }", "}", ""])
         elif site.server_type == "openlitespeed":
             service_root = self.service_root / "openlitespeed"
             config_path = service_root / "conf" / "vhosts" / config_id / "vhost.conf"
@@ -112,12 +160,12 @@ class WebsiteService:
             config_path = service_root / "conf" / "sites" / f"{config_id}.conf"
             lines = [
                 "server {",
-                "    listen 80;",
+                f"    listen {self.nginx_http_port()};",
                 f"    server_name {names};",
                 f"    index {index};",
                 f"    root {root};",
-                f"    access_log {service_root}/logs/sites/{config_id}.access.log;",
-                f"    error_log {service_root}/logs/sites/{config_id}.error.log;",
+                f"    access_log {site_log_root / f'{config_id}.access.log'};",
+                f"    error_log {site_log_root / f'{config_id}.error.log'};",
                 "",
                 "    location / {",
                 "        try_files $uri $uri/ /index.php?$query_string;",

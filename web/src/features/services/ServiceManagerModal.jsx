@@ -35,6 +35,7 @@ import WpCliConfigModal from "./WpCliConfigModal";
 import LinuxAuditConfigModal from "./LinuxAuditConfigModal";
 import useServiceSocketStatus from "../../hooks/useServiceSocketStatus";
 import ClamAvConfigModal from "./ClamAvConfigModal";
+import SqlServerConfigModal from "./SqlServerConfigModal";
 import SaveButton from "../../components/SaveButton";
 import Toast from "../../components/Toast";
 
@@ -1206,6 +1207,9 @@ export default function ServiceManagerModal({
   }
   if (service.id === "clamav") {
     return <ClamAvConfigModal service={service} installed={installedProp} onClose={onClose} />;
+  }
+  if (service.id === "sqlserver") {
+    return <SqlServerConfigModal service={service} installed={installedProp} onClose={onClose} />;
   }
   const initialInstalledItems = Array.isArray(installedProp)
     ? installedProp

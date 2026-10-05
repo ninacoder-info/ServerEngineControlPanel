@@ -28,7 +28,6 @@ const sections = [
     "Workspace",
     [
       ["Overview", "/", LayoutDashboard],
-      ["Activity", "/activity", Activity],
     ],
   ],
   [

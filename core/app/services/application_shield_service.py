@@ -23,7 +23,7 @@ from app.models.application_shield import (
 from app.models.application_shield_rule import ApplicationShieldRule, ApplicationShieldRuleRequest
 from app.models.application_shield_ip import ApplicationShieldIpEntry, ApplicationShieldIpRequest
 from app.models.application_shield_geo import ApplicationShieldGeoEntry, ApplicationShieldGeoRequest, ApplicationShieldGeoOverview
-from app.services.service_runtime import binary_path, managed_library_environment, nginx_paths
+from app.services.service_runtime import binary_path, ensure_nginx_layout, managed_library_environment, nginx_paths
 from app.services.website_service import website_service
 from app.services.geoip_service import geoip_service
 
@@ -654,8 +654,8 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
         access_logs = []
         for site in website_service.list():
             if site.enabled and site.server_type in attached:
-                access_logs.append(self.service_root / site.server_type / "logs/sites" / f"{website_service._configuration_id(site)}.access.log")
-        access_logs.append(self.service_root / "nginx/logs/access.log") if "nginx" in attached else None
+                access_logs.append(website_service.log_root / site.server_type / "sites" / f"{website_service._configuration_id(site)}.access.log")
+        access_logs.append(nginx_paths()["access_log"]) if "nginx" in attached else None
         requests_observed = sum(self._line_count(path) for path in access_logs)
         audit_path = Path(policy.audit_log_path)
         audit_text = audit_path.read_text(errors="replace") if audit_path.exists() else ""
@@ -687,7 +687,7 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
         for site in website_service.list():
             if not site.enabled or site.server_type not in attached:
                 continue
-            log_path = self.service_root / site.server_type / "logs/sites" / f"{website_service._configuration_id(site)}.access.log"
+            log_path = website_service.log_root / site.server_type / "sites" / f"{website_service._configuration_id(site)}.access.log"
             sites.append({
                 "id": site.id,
                 "domain": site.domain,
@@ -860,6 +860,11 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
         runtime_env = managed_library_environment(root, self.service_root / "modsecurity")
         running = self._provider_running(provider, root)
         if provider == "nginx":
+            # Shield attach validates the complete Nginx tree directly. Make
+            # sure legacy included site configs are migrated before nginx -t,
+            # otherwise an old service-local log path can fail validation even
+            # when the main config already uses shared logs.
+            ensure_nginx_layout()
             paths = nginx_paths()
             command = [str(binary), "-p", str(paths["root"]), "-c", str(paths["config"]), "-t"]
             check = subprocess.run(command, capture_output=True, text=True, check=False, timeout=20, env=runtime_env)

@@ -17,6 +17,7 @@ from app.api.dependencies import require_user
 from app.models.service import ConfigurationSaveRequest, ExtensionInstallRequest, InstallServiceRequest, InstalledService, ServiceActionRequest, ServiceDefinition, StalwartStorageRequest, SwitchVersionRequest
 from app.services.service_catalog import CATALOG, PHP_EXTENSIONS, get_service, refresh_service_versions
 from app.services.job_service import job_store
+from app.services.website_service import website_service
 from app.services.service_runtime import PHP_BASELINE_MODULES, SERVICE_PACKAGES, binary_path, composer_path, composer_php_version, default_startup_enabled, enable_php_baseline_extensions, ensure_composer_launcher, ensure_nginx_layout, ensure_node_runtime, ensure_php_fpm_layout, ensure_php_runtime_launcher, ensure_php_terminal_launcher, normalize_php_runtime_layout, nginx_default_configuration, nginx_paths, php_cli_path, php_runtime_library_path, service_root, set_startup_enabled, startup_enabled, version_sort_key
 
 router = APIRouter(prefix="/api/v1/services", tags=["services"])
@@ -521,6 +522,21 @@ def set_nginx_default(payload: dict, user=Depends(require_user)):
     return {"active_version": version, "message": f"Nginx {version} is now the default runtime."}
 
 
+@router.get("/nginx/settings")
+def nginx_settings(user=Depends(require_user)):
+    return {"http_port": website_service.nginx_http_port()}
+
+
+@router.put("/nginx/settings")
+def save_nginx_settings(payload: dict, user=Depends(require_user)):
+    try:
+        port = int(payload.get("http_port", 80))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Nginx HTTP port must be a number")
+    saved = website_service.set_nginx_http_port(port)
+    return {"saved": True, "http_port": saved, "message": f"Nginx HTTP port set to {saved}."}
+
+
 @router.put("/apache/default")
 def set_apache_default(payload: dict, user=Depends(require_user)):
     version = str(payload.get("version") or "").strip()
@@ -620,6 +636,32 @@ def set_caddy_default(payload: dict, user=Depends(require_user)):
 @router.get("/installed", response_model=list[InstalledService])
 def installed(user=Depends(require_user)):
     detected = [InstalledService(id="server-engine", name="Server Engine", version="0.1.0", status="running", managed=True)]
+    sqlserver_root = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / "sqlserver"
+    sqlserver_marker = sqlserver_root / ".serverengine-version"
+    if sqlserver_marker.exists() and shutil.which("docker"):
+        sqlserver_version = sqlserver_marker.read_text(errors="replace").strip() or "unknown"
+        sqlserver_running = subprocess.run(
+            ["docker", "inspect", "--format", "{{.State.Running}}", "server-engine-sqlserver"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        definition = get_service("sqlserver")
+        detected.append(InstalledService(
+            id="sqlserver",
+            name=definition.name if definition else "Microsoft SQL Server",
+            version=sqlserver_version,
+            status="running" if sqlserver_running.returncode == 0 and sqlserver_running.stdout.strip() == "true" else "stopped",
+            port=1433,
+            managed=False,
+        ))
+    openssl_versions = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / "openssl" / "versions"
+    if openssl_versions.exists():
+        definition = get_service("openssl")
+        for version_root in sorted((item for item in openssl_versions.iterdir() if item.is_dir()), key=lambda item: version_sort_key(item.name), reverse=True):
+            marker = version_root / ".serverengine-version"
+            if marker.exists() and (version_root / "lib/libssl.a").exists():
+                detected.append(InstalledService(id=f"openssl@{version_root.name}", name=f"{definition.name if definition else 'OpenSSL'} {version_root.name}", version=marker.read_text(errors="replace").strip(), status="installed", managed=False))
     packages = SERVICE_PACKAGES
     for service_id, package in packages.items():
         if service_id == "powerdns":
@@ -1386,7 +1428,17 @@ def configuration(service_id: str, version: str | None = None, file: str = "fpm"
             "IncludeOptional conf/sites/*.conf",
             'LogFormat "%v %h %l %u %t \\\"%r\\\" %>s %b" combined\nCustomLog "logs/access.log" combined\nIncludeOptional conf/sites/*.conf',
         )
-    return {"service": service_id, "config_path": str(path), "content": content, "owner": "serverengine", "port": service.default_port, "safe_defaults": True, "notes": "Configuration is isolated inside the Server Engine service root."}
+    return {
+        "service": service_id,
+        "config_path": str(path),
+        "content": content,
+        "owner": "serverengine",
+        "port": website_service.nginx_http_port() if service_id == "nginx" else service.default_port,
+        "http_port": website_service.nginx_http_port() if service_id == "nginx" else None,
+        "web_root": os.getenv("SE_WEB_ROOT", "/server-engine/www") if service_id == "nginx" else None,
+        "safe_defaults": True,
+        "notes": "Configuration is isolated inside the Server Engine service root.",
+    }
 
 
 def _configuration_path(service_id: str, version: str | None, file: str = "fpm") -> Path:
@@ -1421,6 +1473,8 @@ def _configuration_path(service_id: str, version: str | None, file: str = "fpm")
         return service_root("redis") / "conf/redis.conf"
     if service_id == "memcached":
         return service_root("memcached") / "conf/memcached.conf"
+    if service_id == "sqlserver":
+        return service_root("sqlserver") / "conf/service.conf"
     if service_id == "certbot":
         return service_root("certbot") / "conf/cli.ini"
     return service_root(service_id) / "conf/service.conf"
@@ -1705,6 +1759,21 @@ daemonize no
 -o modern
 # Memcached is intentionally volatile; it has no persistence or replication.
 """
+    if service_id == "sqlserver":
+        root = service_root("sqlserver")
+        return f"""# Server Engine SQL Server runtime configuration
+# Environment-style values used when the managed container is recreated.
+MSSQL_PID=Developer
+MSSQL_TCP_PORT=1433
+MSSQL_MEMORY_LIMIT_MB=2048
+MSSQL_AGENT_ENABLED=false
+MSSQL_ENABLE_HADR=false
+MSSQL_COLLATION=SQL_Latin1_General_CP1_CI_AS
+SE_BIND_ADDRESS=127.0.0.1
+SE_MAXDOP=0
+SE_DATA_DIRECTORY={root / 'data'}
+SE_BACKUP_DIRECTORY={root / 'backups'}
+"""
     if service_id == "certbot":
         root = service_root("certbot")
         return f"""# Server Engine Certbot defaults
@@ -1723,6 +1792,11 @@ logs-dir = {root / "logs"}
 def save_configuration(service_id: str, payload: ConfigurationSaveRequest, version: str | None = None, file: str = "fpm", user=Depends(require_user)):
     if get_service(service_id) is None:
         raise HTTPException(status_code=404, detail="Service is not in the provider catalog")
+    if service_id == "nginx":
+        # Migrate included site blocks before validating the main file. A
+        # valid global error/access log path is not enough when an old site
+        # block still points at the former service-local log directory.
+        ensure_nginx_layout()
     path = _configuration_path(service_id, version, file)
     path.parent.mkdir(parents=True, exist_ok=True)
     backup_dir = path.parent.parent / "backups"

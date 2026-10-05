@@ -11,11 +11,13 @@ import {
   Database,
   FileCog,
   Globe2,
+  HardDrive,
   Info,
   KeyRound,
   Package,
   RefreshCw,
   Search,
+  Trash2,
   Server,
   ShieldCheck,
   TerminalSquare,
@@ -24,6 +26,8 @@ import {
 } from "lucide-react";
 import { apiRequest, readApiError } from "../../lib/api";
 import { formatPanelDate } from "../../lib/panelPreferences";
+import ActionDialog from "../../components/ActionDialog";
+import Toast from "../../components/Toast";
 
 const filters = [
   ["all", "All activity", ActivityIcon],
@@ -139,6 +143,13 @@ function Summary({ icon: Icon, label, value, detail, tone = "slate" }) {
   );
 }
 
+function formatBytes(value) {
+  if (!Number.isFinite(value) || value <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
+  return `${(value / 1024 ** index).toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+}
+
 function ActivityRow({ event, expanded, onExpand }) {
   const state = statusStyles[event.status] || statusStyles.info;
   const StateIcon = state.icon;
@@ -152,12 +163,17 @@ function ActivityRow({ event, expanded, onExpand }) {
             <strong className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{event.type}</strong>
             <span className={`inline-flex items-center gap-1 text-xs font-medium ${state.text}`}><StateIcon size={13} />{state.label}</span>
           </span>
-          <span className="mt-1 block text-sm text-neutral-600 dark:text-neutral-400">{event.detail}</span>
+          <span
+            className="mt-1 block max-w-full truncate whitespace-nowrap text-sm text-neutral-600 dark:text-neutral-400"
+            title={event.detail}
+          >
+            {event.detail}
+          </span>
           <span className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-500 dark:text-neutral-500"><span className="inline-flex items-center gap-1"><UserRound size={12} />{event.actor}</span><span>·</span><span>{event.target}</span></span>
         </span>
         <span className="flex shrink-0 items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400"><span className="hidden sm:inline">{formatTime(event.time)}</span><ChevronDown size={15} className={`transition-transform ${expanded ? "rotate-180" : ""}`} /></span>
       </button>
-      {expanded && <div className="ml-12 mb-4 grid gap-3 rounded-md bg-neutral-50 px-4 py-3 sm:grid-cols-3 dark:bg-neutral-950/60">{Object.entries(event.metadata).map(([key, value]) => <div key={key}><p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-500">{key}</p><p className="mt-1 break-words text-xs text-neutral-700 dark:text-neutral-300">{value}</p></div>)}</div>}
+      {expanded && <div className="mb-4 ml-0 grid w-full gap-3 rounded-md bg-neutral-50 px-4 py-3 sm:ml-12 sm:w-[calc(100%-3rem)] sm:grid-cols-3 dark:bg-neutral-950/60">{Object.entries(event.metadata).map(([key, value]) => <div key={key} className={key === "Details" ? "sm:col-span-3" : ""}><p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-500">{key}</p><p className="mt-1 break-words text-xs text-neutral-700 dark:text-neutral-300">{value}</p></div>)}</div>}
     </div>
   );
 }
@@ -175,7 +191,7 @@ function ActivitySkeleton() {
   );
 }
 
-export default function ActivityPage() {
+export default function ActivityPage({ variant = "activity" }) {
   const [activeFilter, setActiveFilter] = React.useState("all");
   const [range, setRange] = React.useState("24h");
   const [query, setQuery] = React.useState("");
@@ -184,6 +200,10 @@ export default function ActivityPage() {
   const [expanded, setExpanded] = React.useState(null);
   const [events, setEvents] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
+  const [logSize, setLogSize] = React.useState(null);
+  const [logSizeLoading, setLogSizeLoading] = React.useState(false);
+  const [logDialog, setLogDialog] = React.useState(null);
+  const [toast, setToast] = React.useState(null);
   const icons = { websites: Globe2, services: Package, security: ShieldCheck, access: UserRound, hosting: Globe2, system: Server };
   const loadActivity = React.useCallback(async () => {
     setLoading(true);
@@ -217,18 +237,47 @@ export default function ActivityPage() {
   React.useEffect(() => { setPage(1); setExpanded(null); }, [activeFilter, range, query, status]);
   React.useEffect(() => { if (page > pageCount) setPage(pageCount); }, [page, pageCount]);
   const attention = events.filter((event) => event.status === "warning" || event.status === "error").length;
+  const loadLogSize = React.useCallback(async () => {
+    setLogSizeLoading(true);
+    const response = await apiRequest("/api/v1/logs/summary");
+    if (response.ok) {
+      const data = await response.json();
+      setLogSize(data);
+    } else {
+      setToast({ type: "error", message: await readApiError(response, "Unable to read log size") });
+    }
+    setLogSizeLoading(false);
+  }, []);
+  React.useEffect(() => {
+    // Load after the Logs page has rendered; the size check must never delay
+    // the activity list or make the page look stuck.
+    loadLogSize();
+  }, [loadLogSize]);
+  const cleanLogs = async () => {
+    setLogDialog(null);
+    const response = await apiRequest("/api/v1/logs/clean", { method: "POST", body: JSON.stringify({ confirmed: true }) });
+    if (!response.ok) {
+      setToast({ type: "error", message: await readApiError(response, "Unable to clean logs") });
+      return;
+    }
+    const data = await response.json();
+    setLogSize((current) => ({ ...(current || {}), size: data.size, files: data.cleared }));
+    setToast({ type: "success", message: `${data.cleared} log files were cleared.` });
+  };
   if (loading && !events.length) return <ActivitySkeleton />;
   return (
     <div className="space-y-6">
       <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
-        <div><p className="text-sm font-medium text-blue-600 dark:text-blue-400">Operations center</p><h2 className="mt-1 text-3xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-100">Activity</h2><p className="mt-2 max-w-2xl text-sm text-neutral-500 dark:text-neutral-400">A clear record of changes, service operations, security events, and account activity across this server.</p></div>
+        <div><p className="text-sm font-medium text-blue-600 dark:text-blue-400">{variant === "logs" ? "System records" : "Operations center"}</p><h2 className="mt-1 text-3xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-100">{variant === "logs" ? "Logs" : "Activity"}</h2><p className="mt-2 max-w-2xl text-sm text-neutral-500 dark:text-neutral-400">{variant === "logs" ? "Review service operations, security events, account changes, and control-plane records in one place." : "A clear record of changes, service operations, security events, and account activity across this server."}</p></div>
         <div className="flex items-center gap-2"><label className="sr-only" htmlFor="activity-range">Activity range</label><select id="activity-range" value={range} onChange={(event) => setRange(event.target.value)} className="cursor-pointer rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-700 outline-none focus:border-blue-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300"><option value="24h">Last 24 hours</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="all">All activity</option></select><button type="button" className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800" onClick={loadActivity}><RefreshCw className={loading ? "animate-spin" : ""} size={15} />Refresh</button></div>
       </div>
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Summary icon={ActivityIcon} label="Events in range" value={visible.length} detail="Recorded control-plane activity" tone="blue" /><Summary icon={CheckCircle2} label="Completed" value={events.filter((event) => event.status === "success").length} detail="Successful operations and changes" tone="emerald" /><Summary icon={AlertTriangle} label="Needs attention" value={attention} detail="Warnings and failed operations" tone="amber" /><Summary icon={Clock3} label="Latest event" value="Just now" detail="Activity feed is ready for live events" /></section>
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Summary icon={ActivityIcon} label="Events in range" value={visible.length} detail="Recorded control-plane activity" tone="blue" /><Summary icon={CheckCircle2} label="Completed" value={events.filter((event) => event.status === "success").length} detail="Successful operations and changes" tone="emerald" /><Summary icon={AlertTriangle} label="Needs attention" value={attention} detail="Warnings and failed operations" tone="amber" /><div className="rounded-lg border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900"><div className="flex items-start justify-between gap-3"><span className="grid h-9 w-9 place-items-center rounded-md bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300"><HardDrive size={18} /></span><span className="flex items-start gap-2 text-right"><span><strong className="block text-2xl font-semibold text-neutral-900 dark:text-neutral-100">{logSizeLoading ? "…" : logSize ? formatBytes(logSize.size) : "—"}</strong><span className="text-xs text-neutral-500 dark:text-neutral-400">Logs size</span></span><span className="flex flex-col items-center gap-1"><button type="button" title="Reload log size" aria-label="Reload log size" className="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 disabled:cursor-wait disabled:opacity-50 dark:hover:bg-neutral-800 dark:hover:text-neutral-200" disabled={logSizeLoading} onClick={loadLogSize}><RefreshCw size={13} className={logSizeLoading ? "animate-spin" : ""} /></button><button type="button" title="Clear log files" aria-label="Clear log files" className="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-rose-500 hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-50 dark:text-rose-400 dark:hover:bg-rose-950/30" disabled={!logSize || logSizeLoading} onClick={() => setLogDialog({ kind: "confirm", title: "Clean log files?", message: "This truncates managed .log files under the Server Engine log directory. It does not delete the files or change retention settings.", submitLabel: "Clean logs", tone: "danger" })}><Trash2 size={13} /></button></span></span></div><p className="mt-3 text-xs text-neutral-500 dark:text-neutral-400">{logSize ? `${logSize.files} log files · ${logSize.path}` : logSizeLoading ? "Calculating managed log files…" : "Unable to read log size"}</p></div></section>
       <section className="rounded-lg border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
         <div className="border-b border-neutral-200 px-4 pt-4 dark:border-neutral-800"><div className="flex gap-5 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">{filters.map(([id, label, Icon]) => <button type="button" key={id} onClick={() => setActiveFilter(id)} className={`inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap border-b-2 px-1 pb-3 text-sm font-medium ${activeFilter === id ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200"}`}><Icon size={15} />{label}</button>)}</div></div>
         <div className="p-4"><div className="flex flex-col justify-between gap-3 xl:flex-row xl:items-center"><div><h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">Recent activity</h3><p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">Select an event to inspect the recorded context.</p></div><div className="flex flex-col gap-2 sm:flex-row"><label className="flex min-w-64 items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-neutral-400 dark:border-neutral-700"><Search size={15} /><input className="w-full bg-transparent text-sm text-neutral-900 outline-none dark:text-neutral-100" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search activity" /></label><select value={status} onChange={(event) => setStatus(event.target.value)} className="cursor-pointer rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-700 outline-none dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300"><option value="all">All statuses</option><option value="success">Completed</option><option value="info">Information</option><option value="warning">Needs attention</option><option value="error">Failed</option></select><button type="button" title="Export activity" aria-label="Export activity" className="inline-flex cursor-pointer items-center justify-center rounded-md border border-neutral-300 px-3 py-2 text-neutral-600 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800" onClick={() => { const rows = visible.map((event) => [event.time, event.status, event.type, event.actor, event.target, event.detail]); const csv = [["Time", "Status", "Type", "Actor", "Target", "Details"], ...rows].map((row) => row.map((value) => `"${String(value ?? "").replaceAll('"', '""')}"`).join(",")).join("\n"); const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); const link = document.createElement("a"); link.href = url; link.download = "server-engine-activity.csv"; link.click(); URL.revokeObjectURL(url); }}><ArrowDownToLine size={16} /></button></div></div><div className="mt-4">{loading ? <div className="py-14 text-center text-sm text-neutral-500 dark:text-neutral-400">Loading activity…</div> : pageEvents.length ? pageEvents.map((event) => <ActivityRow key={event.id} event={event} expanded={expanded === event.id} onExpand={() => setExpanded(expanded === event.id ? null : event.id)} />) : <div className="py-14 text-center"><ActivityIcon className="mx-auto text-neutral-300 dark:text-neutral-700" size={28} /><p className="mt-3 text-sm font-medium text-neutral-700 dark:text-neutral-300">No activity matches these filters</p><p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">Try another category, status, or search term.</p></div>}</div>{visible.length > 0 && <div className="mt-4 flex items-center justify-between border-t border-neutral-200 pt-3 dark:border-neutral-800"><span className="text-xs text-neutral-500 dark:text-neutral-400">Showing {((page - 1) * pageSize) + 1}–{Math.min(page * pageSize, visible.length)} of {visible.length}</span><div className="flex items-center gap-1"><button type="button" aria-label="Previous page" disabled={page === 1} onClick={() => setPage((value) => Math.max(1, value - 1))} className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-600 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-300 dark:hover:bg-neutral-800"><ChevronLeft size={16} /></button><span className="min-w-16 text-center text-xs font-medium text-neutral-600 dark:text-neutral-300">Page {page} of {pageCount}</span><button type="button" aria-label="Next page" disabled={page === pageCount} onClick={() => setPage((value) => Math.min(pageCount, value + 1))} className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-600 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-300 dark:hover:bg-neutral-800"><ChevronRight size={16} /></button></div></div>}</div>
       </section>
+      <ActionDialog dialog={logDialog} onClose={() => setLogDialog(null)} onSubmit={cleanLogs} />
+      <Toast message={toast?.message} type={toast?.type} onClose={() => setToast(null)} />
     </div>
   );
 }

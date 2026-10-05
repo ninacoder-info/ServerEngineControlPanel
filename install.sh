@@ -44,6 +44,7 @@ GITHUB_TOKEN_FILE=""
 ADMIN_USER=""
 ADMIN_PASSWORD=""
 NEW_ADMIN_CREDENTIALS="false"
+SERVICES_WERE_RUNNING="false"
 readonly MIN_RAM_MB="1024"
 RELEASE_ID="$(date -u +%Y%m%d%H%M%S)-$$"
 RELEASE_DIR=""
@@ -127,6 +128,10 @@ prepare_logging() {
 rollback() {
   local code=$?
   if [ "$code" -ne 0 ]; then
+    if [ "$SERVICES_WERE_RUNNING" = true ] && has systemctl; then
+      log "Update failed; attempting to restore the previously running Server Engine services"
+      systemctl start server-engine-core.service server-engine-web.service 2>/dev/null || true
+    fi
     log "Installation failed with exit code $code"
     if [ -n "$RELEASE_DIR" ] && [ -d "$RELEASE_DIR" ] && [ ! -L "$PREFIX/current" ]; then
       log "Leaving failed release for diagnosis: $RELEASE_DIR"
@@ -227,9 +232,26 @@ else:
 install_system_dependencies() {
   [ "$INSTALL_SYSTEM_DEPS" = true ] || return 0
   case "$PM" in
-    apt) run env DEBIAN_FRONTEND=noninteractive apt-get update; run env DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl tar gzip unzip git golang-go build-essential python3 python3-venv python3-pip libcap2-bin;;
+    apt) disable_unsupported_server_engine_php_source; run env DEBIAN_FRONTEND=noninteractive apt-get update; run env DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl tar gzip unzip git golang-go build-essential python3 python3-venv python3-pip libcap2-bin;;
     dnf|yum) run "$PM" install -y ca-certificates curl tar gzip unzip git golang gcc gcc-c++ make python3 python3-pip libcap;;
   esac
+}
+
+disable_unsupported_server_engine_php_source() {
+  [ -r /etc/os-release ] || return 0
+  # packages.sury.org does not publish an APT Release for Ubuntu 23.10
+  # (mantic). This file is owned by Server Engine, so disable only this
+  # stale entry and retain a backup; never modify the host's other sources.
+  # shellcheck disable=SC1091
+  . /etc/os-release
+  if [ "${ID:-}" = ubuntu ] && { [ "${VERSION_CODENAME:-}" = mantic ] || [ "${VERSION_ID:-}" = 23.10 ]; }; then
+    local source_file=/etc/apt/sources.list.d/server-engine-php.list
+    if [ -f "$source_file" ] && grep -q 'packages\.sury\.org/php' "$source_file"; then
+      cp -a "$source_file" "$source_file.backup"
+      sed -i 's/^[[:space:]]*deb[[:space:]]/# disabled by Server Engine (unsupported Ubuntu release): deb /' "$source_file"
+      log "Disabled the stale Server Engine PHP Sury source for unsupported Ubuntu 23.10 (backup: $source_file.backup)"
+    fi
+  fi
 }
 
 install_certbot_runtime() {
@@ -347,6 +369,9 @@ stop_existing_server_engine() {
     systemctl is-active --quiet server-engine-web.service 2>/dev/null && services_running="true"
   fi
   server_engine_processes_running && processes_running="true"
+  if [ "$services_running" = true ] || [ "$processes_running" = true ]; then
+    SERVICES_WERE_RUNNING="true"
+  fi
 
   if [ "$services_running" != true ] && [ "$processes_running" != true ]; then
     return 0

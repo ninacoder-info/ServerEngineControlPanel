@@ -26,7 +26,6 @@ import EmailPage from "../email/EmailPage";
 import FTPPage from "../ftp/FTPPage";
 import AccountSettingsPage from "../account/AccountSettingsPage";
 import TerminalPage from "../terminal/TerminalPage";
-import ActivityPage from "../activity/ActivityPage";
 import CronJobsPage from "../cron/CronJobsPage";
 import SupervisorWorkspace from "../services/SupervisorWorkspace";
 import WebProtectionPage from "../waf/WebProtectionPage";
@@ -197,8 +196,8 @@ export default function DashboardPage({ user, onLogout }) {
                 ? "Email"
                 : location.pathname === "/ftp"
                   ? "FTP Accounts"
-                  : location.pathname === "/activity"
-                    ? "Activity"
+                  : location.pathname === "/activity" || location.pathname === "/logs"
+                    ? "Logs"
                     : location.pathname === "/cronjobs"
                       ? "Cron jobs"
                       : location.pathname === "/supervisor"
@@ -247,8 +246,8 @@ export default function DashboardPage({ user, onLogout }) {
                                                         );
   const content = location.pathname.startsWith("/websites") ? (
     <WebsitesPage onOpenTerminal={openWebsiteTerminal} />
-  ) : location.pathname === "/activity" ? (
-    <ActivityPage />
+  ) : location.pathname === "/activity" || location.pathname === "/logs" ? (
+    <LogsPage />
   ) : location.pathname === "/cronjobs" ? (
     <CronJobsPage />
   ) : location.pathname === "/supervisor" ? (

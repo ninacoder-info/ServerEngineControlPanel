@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import { apiRequest, readApiError } from "../../lib/api";
+import Toast from "../../components/Toast";
 import ConfigEditor from "./ConfigEditor";
 import StartupPolicyToggle from "./StartupPolicyToggle";
 import InstallServiceModal from "./InstallServiceModal";
@@ -81,72 +82,28 @@ function Row({ label, value, hint }) {
   );
 }
 
-function IndexFilesField({ value, onChange }) {
-  const [draft, setDraft] = React.useState("");
-  const items = value.split(/\s+/).filter(Boolean);
-  function addItem() {
-    const next = draft.trim();
-    if (!next || items.includes(next)) return;
-    onChange([...items, next].join(" "));
-    setDraft("");
-  }
-  function removeItem(item) {
-    onChange(items.filter((current) => current !== item).join(" "));
-  }
-  return (
-    <div className="mt-1.5 rounded-md border border-neutral-300 px-2 py-2 focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500 dark:border-neutral-700">
-      <div className="flex flex-wrap items-center gap-1.5">
-        {items.map((item) => (
-          <span
-            key={item}
-            className="inline-flex items-center gap-1 rounded bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"
-          >
-            {item}
-            <button
-              type="button"
-              aria-label={`Remove ${item}`}
-              className="cursor-pointer text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-100"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => removeItem(item)}
-            >
-              ×
-            </button>
-          </span>
-        ))}
-        <input
-          className="min-w-[9rem] flex-1 border-0 bg-transparent px-1 py-1 text-sm text-neutral-900 outline-none dark:text-neutral-100"
-          value={draft}
-          placeholder="Type a file and press Enter"
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === ",") {
-              event.preventDefault();
-              addItem();
-            }
-          }}
-        />
-        <button
-          type="button"
-          className="cursor-pointer px-1 text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400"
-          onClick={addItem}
-        >
-          Add
-        </button>
-      </div>
-    </div>
-  );
+function nginxDirective(content, directive, fallback) {
+  const match = String(content || "").match(new RegExp(`^\\s*${directive}\\s+([^;#\\r\\n]+)`, "mi"));
+  return match ? match[1].trim() : fallback;
 }
 
-function Settings({ config, busy, message, onSave }) {
+function Settings({ config, busy, message, httpPort, onSave }) {
   const [values, setValues] = React.useState({
     listen: "80",
-    root: "/opt/server-engine/www",
+    root: "/server-engine/www",
     index: "index.php index.html index.htm",
     php: "Enabled",
     proxy: "Enabled",
   });
   const set = (key, value) =>
     setValues((current) => ({ ...current, [key]: value }));
+  React.useEffect(() => {
+    setValues((current) => ({
+      ...current,
+      listen: String(config?.http_port || httpPort || current.listen),
+      root: config?.web_root || current.root,
+    }));
+  }, [config?.http_port, config?.web_root, httpPort]);
   return (
     <div className="space-y-5">
       <div>
@@ -168,37 +125,16 @@ function Settings({ config, busy, message, onSave }) {
           />
         </Field>
         <Field label="Default website root">
-          <input
-            className={inputClass}
-            value={values.root}
-            onChange={(event) => set("root", event.target.value)}
-          />
+          <p className="mt-1.5 rounded-md border border-neutral-200 px-3 py-2 text-sm text-neutral-600 dark:border-neutral-800 dark:text-neutral-300">{values.root}</p>
         </Field>
         <Field label="Index files">
-          <IndexFilesField
-            value={values.index}
-            onChange={(value) => set("index", value)}
-          />
+          <p className="mt-1.5 rounded-md border border-neutral-200 px-3 py-2 text-sm text-neutral-600 dark:border-neutral-800 dark:text-neutral-300">Managed per website</p>
         </Field>
         <Field label="PHP-FPM routing">
-          <select
-            className={`${inputClass} bg-white dark:bg-neutral-900`}
-            value={values.php}
-            onChange={(event) => set("php", event.target.value)}
-          >
-            <option>Enabled</option>
-            <option>Disabled</option>
-          </select>
+          <p className="mt-1.5 rounded-md border border-neutral-200 px-3 py-2 text-sm text-neutral-600 dark:border-neutral-800 dark:text-neutral-300">Managed per website</p>
         </Field>
         <Field label="Reverse proxy support">
-          <select
-            className={`${inputClass} bg-white dark:bg-neutral-900`}
-            value={values.proxy}
-            onChange={(event) => set("proxy", event.target.value)}
-          >
-            <option>Enabled</option>
-            <option>Disabled</option>
-          </select>
+          <p className="mt-1.5 rounded-md border border-neutral-200 px-3 py-2 text-sm text-neutral-600 dark:border-neutral-800 dark:text-neutral-300">Managed per project</p>
         </Field>
       </div>
       <div className="border-t border-neutral-200 pt-2 dark:border-neutral-800">
@@ -216,9 +152,6 @@ function Settings({ config, busy, message, onSave }) {
         />
         <Row label="Validation" value="Checked before save" />
       </div>
-      {message && (
-        <p className="text-sm text-neutral-600 dark:text-neutral-300">{message}</p>
-      )}
       <div className="flex justify-end">
         <button
           type="button"
@@ -233,7 +166,7 @@ function Settings({ config, busy, message, onSave }) {
   );
 }
 
-function Performance({ busy, message, onSave }) {
+function Performance({ config, busy, message, onSave }) {
   const [values, setValues] = React.useState({
     workers: "auto",
     connections: "4096",
@@ -246,6 +179,19 @@ function Performance({ busy, message, onSave }) {
   });
   const set = (key, value) =>
     setValues((current) => ({ ...current, [key]: value }));
+  React.useEffect(() => {
+    const content = config?.content || "";
+    setValues((current) => ({
+      ...current,
+      workers: nginxDirective(content, "worker_processes", current.workers),
+      connections: nginxDirective(content, "worker_connections", current.connections),
+      keepalive: nginxDirective(content, "keepalive_timeout", current.keepalive),
+      upload: nginxDirective(content, "client_max_body_size", current.upload),
+      proxy: nginxDirective(content, "proxy_read_timeout", `${current.proxy}s`).replace(/s$/, ""),
+      gzip: nginxDirective(content, "gzip", current.gzip ? "on" : "off") === "on",
+      sendfile: nginxDirective(content, "sendfile", current.sendfile ? "on" : "off") === "on",
+    }));
+  }, [config?.content]);
   return (
     <div className="space-y-5">
       <div>
@@ -322,9 +268,6 @@ function Performance({ busy, message, onSave }) {
           onChange={(value) => set("http2", value)}
         />
       </div>
-      {message && (
-        <p className="text-sm text-neutral-600 dark:text-neutral-300">{message}</p>
-      )}
       <div className="flex justify-end">
         <button
           type="button"
@@ -339,16 +282,11 @@ function Performance({ busy, message, onSave }) {
   );
 }
 
-function Security() {
-  const [values, setValues] = React.useState({
-    tokens: true,
-    headers: true,
-    tls: true,
-    listing: false,
-    limits: true,
-  });
-  const set = (key, value) =>
-    setValues((current) => ({ ...current, [key]: value }));
+function Security({ config }) {
+  const content = config?.content || "";
+  const serverTokens = nginxDirective(content, "server_tokens", "not configured");
+  const bodyLimit = nginxDirective(content, "client_max_body_size", "not configured");
+  const sendfile = nginxDirective(content, "sendfile", "not configured");
   return (
     <div className="space-y-5">
       <div>
@@ -360,45 +298,13 @@ function Security() {
           disclosure.
         </p>
       </div>
-      <div className="border-t border-neutral-200 dark:border-neutral-800">
-        <Toggle
-          label="Hide server version"
-          description="Remove the Nginx version from response headers and error pages."
-          checked={values.tokens}
-          onChange={(value) => set("tokens", value)}
-        />
-        <Toggle
-          label="Security response headers"
-          description="Apply nosniff, frame protection, referrer policy, and permissions policy."
-          checked={values.headers}
-          onChange={(value) => set("headers", value)}
-        />
-        <Toggle
-          label="Modern TLS policy"
-          description="Allow TLS 1.2 and TLS 1.3 while disabling obsolete protocols."
-          checked={values.tls}
-          onChange={(value) => set("tls", value)}
-        />
-        <Toggle
-          label="Request limits"
-          description="Protect headers, bodies, and slow clients from exhausting workers."
-          checked={values.limits}
-          onChange={(value) => set("limits", value)}
-        />
-        <Toggle
-          label="Directory listing"
-          description="Keep directory indexes disabled unless a site explicitly enables them."
-          checked={values.listing}
-          onChange={(value) => set("listing", value)}
-        />
-      </div>
-      <div className="flex justify-end">
-        <button
-          type="button"
-          className={`${buttonClass} bg-blue-600 text-white hover:bg-blue-700`}
-        >
-          Save security profile
-        </button>
+      <div className="border-y border-neutral-200 dark:border-neutral-800">
+        <Row label="Server version header" value={serverTokens} />
+        <Row label="Maximum request body" value={bodyLimit} />
+        <Row label="Sendfile" value={sendfile} />
+        <Row label="Response security headers" value="Managed per website or Application Shield" />
+        <Row label="TLS policy" value="Managed per TLS-enabled website" />
+        <Row label="Directory listing" value="Managed per website" />
       </div>
     </div>
   );
@@ -459,9 +365,11 @@ export default function NginxConfigModal({ service, installed, onClose }) {
   const running = runtimeStatus === "running";
   const [tab, setTab] = React.useState("settings");
   const [config, setConfig] = React.useState(null);
+  const [httpPort, setHttpPort] = React.useState("80");
   const [text, setText] = React.useState("");
   const [logs, setLogs] = React.useState(null);
   const [message, setMessage] = React.useState("");
+  const [toast, setToast] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
   const [action, setAction] = React.useState("");
   const [nginxVersions, setNginxVersions] = React.useState([]);
@@ -479,7 +387,7 @@ export default function NginxConfigModal({ service, installed, onClose }) {
       if (detail.status === "succeeded") {
         setRuntimeStatus(["start", "restart"].includes(detail.action) ? "running" : "stopped");
       } else if (detail.job?.message) {
-        setMessage(detail.job.message);
+        setToast({ type: "error", message: detail.job.message });
       }
       setAction("");
     };
@@ -506,7 +414,12 @@ export default function NginxConfigModal({ service, installed, onClose }) {
     const body = response.ok
       ? await response.json()
       : { message: await readApiError(response) };
-    setMessage(body.message || "Unable to change the Nginx default version.");
+    setToast({
+      type: response.ok ? "success" : "error",
+      message: response.ok
+        ? `Nginx ${version} is now the default version.`
+        : body.message || "Unable to change the Nginx default version.",
+    });
     if (response.ok) loadNginxVersions();
   }
   React.useEffect(() => {
@@ -515,6 +428,12 @@ export default function NginxConfigModal({ service, installed, onClose }) {
       .then((value) => {
         setConfig(value);
         setText(value?.content || "");
+      })
+      .catch(() => {});
+    apiRequest("/api/v1/services/nginx/settings")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((value) => {
+        if (value?.http_port) setHttpPort(String(value.http_port));
       })
       .catch(() => {});
   }, []);
@@ -544,18 +463,38 @@ export default function NginxConfigModal({ service, installed, onClose }) {
       ? await response.json()
       : { message: await readApiError(response) };
     if (response.ok) setText(content);
-    setMessage(
-      body.saved
-        ? `Saved. Backup created at ${body.backup || "the Nginx backup directory"}.`
-        : body.message,
-    );
+    setMessage("");
+    setToast({
+      type: body.saved ? "success" : "error",
+      message: body.saved
+        ? `Nginx configuration saved. Backup created at ${body.backup || "the Nginx backup directory"}.`
+        : body.message || "Unable to save Nginx configuration.",
+    });
+    setBusy(false);
+  }
+  async function saveSettings(values) {
+    setBusy(true);
+    const response = await apiRequest("/api/v1/services/nginx/settings", {
+      method: "PUT",
+      body: JSON.stringify({ http_port: Number(values.listen) }),
+    });
+    const body = response.ok
+      ? await response.json()
+      : { message: await readApiError(response) };
+    setToast({
+      type: response.ok ? "success" : "error",
+      message: response.ok
+        ? `Nginx HTTP port set to ${body.http_port}.`
+        : body.message || "Unable to save Nginx settings.",
+    });
+    if (response.ok && body.http_port) setHttpPort(String(body.http_port));
     setBusy(false);
   }
   function replaceDirective(content, directive, value) {
     const pattern = new RegExp(`^${directive}\\s+.*$`, "mi");
     return pattern.test(content)
-      ? content.replace(pattern, `${directive} ${value}`)
-      : `${content.trimEnd()}\n${directive} ${value}\n`;
+      ? content.replace(pattern, `${directive} ${value};`)
+      : `${content.trimEnd()}\n${directive} ${value};\n`;
   }
   function savePerformance(values) {
     let next = text;
@@ -564,6 +503,7 @@ export default function NginxConfigModal({ service, installed, onClose }) {
       worker_connections: values.connections,
       keepalive_timeout: values.keepalive,
       client_max_body_size: values.upload,
+      proxy_read_timeout: `${values.proxy}s`,
       sendfile: values.sendfile ? "on" : "off",
       gzip: values.gzip ? "on" : "off",
     };
@@ -582,7 +522,7 @@ export default function NginxConfigModal({ service, installed, onClose }) {
       ? await response.json()
       : { message: await readApiError(response) };
     if (!response.ok || !body.job_id) {
-      setMessage(body.message || "Nginx action failed.");
+      setToast({ type: "error", message: body.message || "Nginx action failed." });
       setAction("");
       return;
     }
@@ -635,9 +575,8 @@ export default function NginxConfigModal({ service, installed, onClose }) {
               config={config}
               busy={busy}
               message={message}
-              onSave={(values) =>
-                save(replaceDirective(text, "listen", values.listen))
-              }
+              httpPort={httpPort}
+              onSave={saveSettings}
             />
           )}
           {tab === "versions" && (
@@ -685,12 +624,13 @@ export default function NginxConfigModal({ service, installed, onClose }) {
           )}
           {tab === "performance" && (
             <Performance
+              config={config}
               busy={busy}
               message={message}
               onSave={savePerformance}
             />
           )}
-          {tab === "security" && <Security />}
+          {tab === "security" && <Security config={config} />}
           {tab === "sites" && <Sites setMessage={setMessage} />}
           {tab === "configuration" && (
             <div className="space-y-4">
@@ -725,11 +665,6 @@ export default function NginxConfigModal({ service, installed, onClose }) {
                   {busy ? "Saving…" : "Save configuration"}
                 </button>
               </div>
-              {message && (
-                <p className="text-sm text-neutral-600 dark:text-neutral-300">
-                  {message}
-                </p>
-              )}
             </div>
           )}
           {tab === "runtime" && (
@@ -826,6 +761,7 @@ export default function NginxConfigModal({ service, installed, onClose }) {
           }}
         />
       )}
+      <Toast message={toast?.message} type={toast?.type} onClose={() => setToast(null)} />
     </div>
   );
 }

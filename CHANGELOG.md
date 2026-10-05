@@ -4,6 +4,54 @@ Release notes for the Server Engine control panel and control-plane runtime.
 
 ## Unreleased
 
+No changes yet.
+
+## v0.1.33
+
+- Fixed PHP 5.6 ICU linking when generated multiline Makefile variables
+  dropped the isolated ICU libraries from the PHP-FPM link command.
+- Appended ICU 57 libraries with explicit Make `+=` assignments for the FPM,
+  global, and intl extension link targets.
+
+## v0.1.32
+
+- Fixed PHP 5.6 source linking against the isolated ICU 57 compatibility
+  runtime.
+- Explicitly links `libicui18n`, `libicuuc`, and `libicudata` so intl IDN and
+  SpoofChecker symbols resolve during the PHP-FPM build.
+- Verifies the required isolated ICU libraries before starting the PHP build.
+
+## v0.1.31
+
+- Fixed repeated Application Shield connector preparation when a runtime
+  library symlink already exists.
+- Made shared ModSecurity runtime-library staging safely refresh existing
+  files and symlinks without failing with `File exists`.
+
+## v0.1.30
+
+- Fixed Nginx Application Shield attachment so the managed ModSecurity module
+  remains loaded while the connector is being validated.
+- Prevented Nginx normalization from removing `load_module` during an active
+  Shield attach transaction.
+- Made release-note lookup prefer the GitHub release body and avoid showing an
+  unrelated `Unreleased` changelog section when a tagged changelog is absent.
+
+## v0.1.29
+
+- Fixed Nginx settings so the saved HTTP port is read back by the panel.
+- Applied the Nginx HTTP port to generated website server blocks instead of
+  inserting an invalid `listen` directive into the global configuration.
+- Migrated legacy per-site Nginx log paths into `/server-engine/logs/nginx`.
+- Fixed Nginx configuration validation during Application Shield attachment.
+- Persisted ModSecurity connector runtime libraries, including GeoIP, so
+  prebuilt and source-built Nginx connectors can load successfully.
+- Removed placeholder Nginx modal values and displayed live configuration
+  values for performance and security settings.
+
+## v0.1.27
+
+- Fixed release-note rendering so Markdown bullets display as bullets instead of malformed numbered list items.
 - Fixed PowerDNS startup by removing unsupported SOA and incompatible DNSSEC
   algorithm directives from isolated runtime configuration.
 - Added a PowerDNS stopped-state card to Domains & DNS with direct service

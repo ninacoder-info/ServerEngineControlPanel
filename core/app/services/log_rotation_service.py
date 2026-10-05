@@ -166,7 +166,10 @@ class LogRotationService:
             if service_id == "php":
                 roots = [item / "logs" for item in (self.service_root / "php" / "versions").iterdir() if item.is_dir()] if (self.service_root / "php" / "versions").exists() else []
             if service_id == "nginx":
-                roots.append(self.service_root / "nginx" / "logs" / "sites")
+                # Nginx site logs are generated directly in the shared log
+                # tree. Rotate the canonical directory once; the service-root
+                # logs path is only a compatibility link for older configs.
+                roots = [self.log_root / "nginx"]
             for log_root in roots:
                 rotated += self._rotate_directory(log_root, policy, settings, force)
         return {"rotated": rotated}

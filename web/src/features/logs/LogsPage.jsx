@@ -6,5 +6,5 @@ import ActivityPage from "../activity/ActivityPage";
  * separate so service log viewers can grow without changing navigation.
  */
 export default function LogsPage() {
-  return <ActivityPage />;
+  return <ActivityPage variant="logs" />;
 }

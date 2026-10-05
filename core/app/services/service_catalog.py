@@ -94,6 +94,7 @@ _WPCLI_SOURCES: dict[str, str] = {}
 _POSTFIX_SOURCES: dict[str, str] = {}
 _DOVECOT_SOURCES: dict[str, str] = {}
 _RSPAMD_SOURCES: dict[str, str] = {}
+_OPENSSL_SOURCES: dict[str, str] = {}
 _BIND9_SOURCES: dict[str, str] = {}
 _UNBOUND_SOURCES: dict[str, str] = {}
 _CLAMAV_SOURCES: dict[str, str] = {}
@@ -187,6 +188,42 @@ def _refresh_python_source_versions(definition: ServiceDefinition):
 
 def python_source_for(version: str) -> str | None:
     return _PYTHON_SOURCES.get(version)
+
+
+def _refresh_openssl_source_versions(definition: ServiceDefinition):
+    """Fetch legacy OpenSSL source archives from the official archive."""
+    cached_at = _VERSION_REFRESHED_AT.get("openssl-source", 0)
+    if _OPENSSL_SOURCES and cached_at and time.monotonic() - cached_at < 300:
+        definition.versions = [v(version, "legacy") for version in sorted(_OPENSSL_SOURCES, reverse=True)]
+        return len(_OPENSSL_SOURCES)
+    found: dict[str, str] = {}
+    for branch in ("1.1.1", "1.0.2"):
+        try:
+            request = urllib.request.Request(
+                f"https://www.openssl.org/source/old/{branch}/",
+                headers={"User-Agent": "Server-Engine-Control-Panel"},
+            )
+            with urllib.request.urlopen(request, timeout=20) as response:
+                html = response.read().decode("utf-8", "replace")
+            for filename in re.findall(r'href=["\'](openssl-(1\.(?:1\.1|0\.2)[a-z]\d*)\.tar\.gz)["\']', html, re.I):
+                version = filename.removeprefix("openssl-").removesuffix(".tar.gz")
+                found[version] = f"https://www.openssl.org/source/old/{branch}/{filename}"
+        except Exception:
+            continue
+    if not found:
+        found = {
+            "1.1.1w": "https://www.openssl.org/source/old/1.1.1/openssl-1.1.1w.tar.gz",
+            "1.0.2u": "https://www.openssl.org/source/old/1.0.2/openssl-1.0.2u.tar.gz",
+        }
+    _OPENSSL_SOURCES.clear()
+    _OPENSSL_SOURCES.update(found)
+    _VERSION_REFRESHED_AT["openssl-source"] = time.monotonic()
+    definition.versions = [v(version, "legacy") for version in sorted(found, reverse=True)]
+    return len(found)
+
+
+def openssl_source_for(version: str) -> str | None:
+    return _OPENSSL_SOURCES.get(version)
 
 
 def _refresh_php_versions(definition: ServiceDefinition):
@@ -1688,6 +1725,7 @@ CATALOG = [
     ServiceDefinition(id="nodejs", name="Node.js", category="Application runtimes", description="JavaScript runtime for server-side applications and tooling. Multiple major versions can coexist for separate projects.", vendor="OpenJS Foundation", license="MIT", versions=[]),
     ServiceDefinition(id="python", name="Python", category="Application runtimes", description="Python runtime for WSGI/ASGI applications and automation.", vendor="Python Software Foundation", license="PSF-2.0", versions=[]),
     ServiceDefinition(id="ruby", name="Ruby", category="Application runtimes", description="Ruby runtime for Rails and Rack applications.", vendor="Ruby Community", license="Ruby/BSD", versions=[]),
+    ServiceDefinition(id="openssl", name="OpenSSL compatibility runtime", category="Application runtimes", description="Isolated legacy OpenSSL libraries for runtimes that cannot use the host OpenSSL 3 ABI.", requirements="OpenSSL 1.1.1 is end-of-life and should be used only for legacy runtimes.", vendor="OpenSSL Project", license="Apache-2.0", versions=[], mode="service", installable=True),
     ServiceDefinition(id="mariadb", name="MariaDB", category="Databases", description="MySQL-compatible relational database server.", vendor="MariaDB Foundation", license="GPL-2.0", default_port=3306, versions=[]),
     ServiceDefinition(id="mysql", name="MySQL", category="Databases", description="Relational database server for web applications.", vendor="Oracle", license="GPL-2.0 / Commercial", default_port=3306, versions=[]),
     ServiceDefinition(id="postgresql", name="PostgreSQL", category="Databases", description="Advanced open-source relational database server.", vendor="PostgreSQL Global Development Group", license="PostgreSQL License", default_port=5432, versions=[]),
@@ -1749,6 +1787,8 @@ for _service in CATALOG:
         _service.install_methods = ["prebuilt", "source"]
     elif _service.id in {"openlitespeed", "caddy", "stalwart"}:
         _service.install_methods = ["prebuilt", "source"]
+    elif _service.id == "openssl":
+        _service.install_methods = ["source"]
 
 
 def get_service(service_id: str) -> ServiceDefinition | None:
@@ -1772,6 +1812,9 @@ def refresh_service_versions(service_id: str, force: bool = False, install_metho
         if service_id == "python":
             _VERSION_REFRESHED_AT.pop("python-source", None)
             _PYTHON_SOURCES.clear()
+        if service_id == "openssl":
+            _VERSION_REFRESHED_AT.pop("openssl-source", None)
+            _OPENSSL_SOURCES.clear()
         packages = _PREBUILT_PACKAGE_CHOICES.get(
             service_id,
             [_PREBUILT_PACKAGES[service_id]] if service_id in _PREBUILT_PACKAGES else [],
@@ -1874,6 +1917,10 @@ def refresh_service_versions(service_id: str, force: bool = False, install_metho
         except Exception:
             pass
         return definition, "catalog", "The Python release catalog could not be reached. Refresh compatible versions and try again."
+
+    if service_id == "openssl":
+        count = _refresh_openssl_source_versions(definition)
+        return definition, "openssl.org/source", f"Fetched {count} OpenSSL source archives from the official source archive."
 
     if service_id == "nodejs":
         try:

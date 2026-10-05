@@ -53,12 +53,12 @@ function MarkdownContent({ content }) {
     }
     const bullet = line.match(/^\s*[-*+]\s+(.+)$/);
     if (bullet) {
-      blocks.push(<li key={`item-${index}`} className="ml-5 list-disc leading-5">{renderMarkdownInline(bullet[1])}</li>);
+      blocks.push(<div key={`item-${index}`} className="flex gap-2 leading-5"><span aria-hidden="true">•</span><span>{renderMarkdownInline(bullet[1])}</span></div>);
       return;
     }
     const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
     if (ordered) {
-      blocks.push(<li key={`ordered-${index}`} className="ml-5 list-decimal leading-5">{renderMarkdownInline(ordered[1])}</li>);
+      blocks.push(<div key={`ordered-${index}`} className="flex gap-2 leading-5"><span aria-hidden="true">{line.match(/^\s*(\d+)[.)]/)?.[1]}.</span><span>{renderMarkdownInline(ordered[1])}</span></div>);
       return;
     }
     blocks.push(<p key={`paragraph-${index}`}>{renderMarkdownInline(line)}</p>);

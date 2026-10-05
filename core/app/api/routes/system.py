@@ -72,7 +72,9 @@ def _release_changelog_section(markdown: str, version: str) -> str:
     heading = re.compile(rf"^##\s+\[?v?{re.escape(version)}\]?\s*$", re.IGNORECASE)
     start = next((index for index, line in enumerate(lines) if heading.match(line.strip())), None)
     if start is None:
-        return markdown.strip()
+        # Never return the complete document here: that can surface an
+        # unrelated `Unreleased` section when this version is absent.
+        return ""
     end = next((index for index in range(start + 1, len(lines)) if re.match(r"^##\s+", lines[index])), len(lines))
     return "\n".join(lines[start:end]).strip()
 
@@ -98,12 +100,17 @@ def check_for_panel_update(user=Depends(require_user)):
             detail = "The configured GitHub release is unavailable or requires a server-side token."
         return {"current_version": current, "available": False, "checked": False, "message": detail}
     latest = str(release.get("tag_name", "")).lstrip("v")
-    notes = release.get("body") or "No release notes were published for this version."
-    if latest:
+    # The release body is the authoritative content shown on the GitHub
+    # release page.  Do not replace it with CHANGELOG.md: the changelog may
+    # not have been committed to the tagged repository yet, and that would
+    # make the updater display an unrelated Unreleased section.
+    notes = str(release.get("body") or "").strip()
+    if not notes and latest:
         try:
             notes = _release_changelog_section(_github_changelog(str(release.get("tag_name", latest))), latest)
         except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, UnicodeDecodeError):
-            pass
+            notes = ""
+    notes = notes or "No release notes were published for this version."
     return {
         "current_version": current,
         "latest_version": latest,

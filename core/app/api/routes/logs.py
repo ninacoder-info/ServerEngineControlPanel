@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
 from app.api.dependencies import require_user
 
@@ -15,6 +15,45 @@ def _root() -> Path:
 def _category(path: Path, root: Path) -> str:
     value = path.relative_to(root).parts[0] if path.relative_to(root).parts else "general"
     return value.lower().replace("-", " ").title()
+
+
+def _size(root: Path) -> int:
+    total = 0
+    if not root.is_dir():
+        return 0
+    for path in root.rglob("*"):
+        try:
+            if path.is_file():
+                total += path.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
+@router.get("/summary")
+def summary(user=Depends(require_user)):
+    root = _root()
+    return {"path": str(root), "size": _size(root), "files": sum(1 for path in root.rglob("*.log") if path.is_file()) if root.is_dir() else 0}
+
+
+@router.post("/clean")
+def clean(payload: dict = Body(default={}), user=Depends(require_user)):
+    if payload.get("confirmed") is not True:
+        raise HTTPException(status_code=400, detail="Confirm log cleanup before continuing")
+    root = _root()
+    cleared = 0
+    failed = []
+    if root.is_dir():
+        for path in root.rglob("*.log"):
+            try:
+                if path.is_file():
+                    path.write_bytes(b"")
+                    cleared += 1
+            except OSError as exc:
+                failed.append(f"{path}: {exc}")
+    if failed:
+        raise HTTPException(status_code=500, detail=f"Cleared {cleared} log files, but could not clear {len(failed)} files")
+    return {"cleared": cleared, "size": _size(root)}
 
 
 @router.get("/sources")

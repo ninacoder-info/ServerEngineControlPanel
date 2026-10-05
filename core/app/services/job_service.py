@@ -12,6 +12,7 @@ import urllib.request
 import re
 import shutil
 import shlex
+import signal
 import socket
 import subprocess
 import tempfile
@@ -26,7 +27,7 @@ from app.models.job import JobSummary
 from app.models.website import Website, WebsiteUpdateRequest
 from app.models.projects import NodeProject
 from app.services.website_service import website_service
-from app.services.service_catalog import apache_source_for, bind9_source_for, certbot_source_for, caddy_source_for, clamav_source_for, dovecot_source_for, ffmpeg_source_for, git_source_for, haproxy_source_for, imagemagick_source_for, lynis_source_for, mariadb_source_for, memcached_source_for, mongodb_prebuilt_for, mongodb_source_for, mysql_release_for, nginx_source_for, opensearch_source_for, openlitespeed_prebuilt_for, openlitespeed_source_for, php_source_for, postfix_source_for, powerdns_source_for, postgresql_source_for, prebuilt_package_for, python_asset_for, python_source_for, rabbitmq_source_for, redis_source_for, refresh_service_versions, rspamd_source_for, ruby_source_for, stalwart_prebuilt_for, stalwart_source_for, supervisor_source_for, unbound_source_for, valkey_source_for, vsftpd_source_for, wpcli_source_for
+from app.services.service_catalog import apache_source_for, bind9_source_for, certbot_source_for, caddy_source_for, clamav_source_for, dovecot_source_for, ffmpeg_source_for, git_source_for, haproxy_source_for, imagemagick_source_for, lynis_source_for, mariadb_source_for, memcached_source_for, mongodb_prebuilt_for, mongodb_source_for, mysql_release_for, nginx_source_for, opensearch_source_for, openlitespeed_prebuilt_for, openlitespeed_source_for, openssl_source_for, php_source_for, postfix_source_for, powerdns_source_for, postgresql_source_for, prebuilt_package_for, python_asset_for, python_source_for, rabbitmq_source_for, redis_source_for, refresh_service_versions, rspamd_source_for, ruby_source_for, stalwart_prebuilt_for, stalwart_source_for, supervisor_source_for, unbound_source_for, valkey_source_for, vsftpd_source_for, wpcli_source_for
 from app.services.service_runtime import PHP_BASELINE_MODULES, PHP_REQUIRED_EXTENSIONS, SERVICE_PACKAGES, binary_path, composer_path, enable_php_baseline_extensions, ensure_composer_cache, ensure_nginx_layout, ensure_node_runtime, ensure_php_fpm_layout, ensure_php_runtime_configuration, ensure_php_runtime_launcher, managed_library_environment, nginx_paths, normalize_php_runtime_layout, package_for, php_cli_path, php_fpm_paths, php_runtime_library_path, prepare_mongodb_runtime, prepare_mysql_runtime, prepare_postgresql_runtime, prepare_powerdns_runtime, service_root, startup_enabled, version_sort_key
 from app.services.database_credentials import database_credentials
 
@@ -40,6 +41,42 @@ def _sanitize_apache_configuration(content: str) -> str:
     return re.sub(r"(?mi)^\s*LoadModule\s+unixd_module\s+[^\n]*(?:\n|$)", "", content)
 
 
+def _persist_shared_library_tree(source: Path, service_id: str) -> None:
+    """Keep runtime libraries required by dynamically loaded connectors."""
+    target = service_root(service_id) / ".runtime-libraries"
+    target.mkdir(parents=True, exist_ok=True)
+    for directory in (source / "lib", source / "lib64", source / "usr/lib"):
+        if directory.exists():
+            destination = target / directory.relative_to(source)
+            destination.mkdir(parents=True, exist_ok=True)
+            # `copytree(..., dirs_exist_ok=True, symlinks=True)` still raises
+            # when a repeated package extraction tries to recreate an
+            # existing library symlink. Merge entries explicitly so connector
+            # preparation is safe to repeat and can refresh an older library.
+            for entry in directory.rglob("*"):
+                relative = entry.relative_to(directory)
+                output = destination / relative
+                if entry.is_dir() and not entry.is_symlink():
+                    output.mkdir(parents=True, exist_ok=True)
+                    continue
+                output.parent.mkdir(parents=True, exist_ok=True)
+                if entry.is_symlink():
+                    link_target = os.readlink(entry)
+                    if output.is_symlink() and os.readlink(output) == link_target:
+                        continue
+                    if output.is_dir() and not output.is_symlink():
+                        shutil.rmtree(output)
+                    else:
+                        output.unlink(missing_ok=True)
+                    output.symlink_to(link_target)
+                else:
+                    if output.is_symlink():
+                        output.unlink()
+                    elif output.is_dir():
+                        shutil.rmtree(output)
+                    shutil.copy2(entry, output)
+
+
 class JobStore:
     """Background installer queue for the local privileged control-plane process."""
 
@@ -48,6 +85,7 @@ class JobStore:
         self._cancel_events: dict[str, Event] = {}
         self._subscribers: set[tuple[asyncio.AbstractEventLoop, asyncio.Queue]] = set()
         self._lock = Lock()
+        self._active_processes: dict[str, subprocess.Popen] = {}
         # Installations, builds, package extraction, and service actions are
         # deliberately serialized. Running multiple privileged jobs at once
         # can corrupt the package database or exhaust the server while source
@@ -104,6 +142,7 @@ class JobStore:
         return job
 
     def cancel(self, job_id: str) -> JobSummary | None:
+        active_process = None
         with self._lock:
             current = self._jobs.get(job_id)
             if current is None:
@@ -113,14 +152,49 @@ class JobStore:
             event = self._cancel_events.get(job_id)
             if event:
                 event.set()
+            active_process = self._active_processes.get(job_id)
             cancelled = current.model_copy(update={
                 "status": "cancelled",
                 "message": "Cancellation requested.",
                 "updated_at": datetime.now(timezone.utc),
             })
             self._jobs[job_id] = cancelled
+        if active_process is not None:
+            self._terminate_process(active_process)
         self._broadcast(cancelled)
         return cancelled
+
+    def _track_process(self, job_id: str, process: subprocess.Popen):
+        with self._lock:
+            self._active_processes[job_id] = process
+
+    def _untrack_process(self, job_id: str, process: subprocess.Popen):
+        with self._lock:
+            if self._active_processes.get(job_id) is process:
+                self._active_processes.pop(job_id, None)
+
+    @staticmethod
+    def _terminate_process(process: subprocess.Popen):
+        """Stop a cancellable job process and its child process group."""
+        if process.poll() is not None:
+            return
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError, OSError):
+            try:
+                process.terminate()
+            except (ProcessLookupError, PermissionError, OSError):
+                return
+        try:
+            process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
+                try:
+                    process.kill()
+                except (ProcessLookupError, PermissionError, OSError):
+                    pass
 
     def _is_cancelled(self, job_id: str) -> bool:
         with self._lock:
@@ -1212,10 +1286,20 @@ class JobStore:
                         diagnostics.extend(diagnostic.read_text(errors="replace").splitlines()[-80:])
                 detail = "\n".join(diagnostics) or (configured.stderr or configured.stdout).strip()
                 raise RuntimeError(detail[-4000:] or "Nginx connector configure failed.")
-            build = subprocess.run([make, "-j2", "modules"], cwd=nginx_source, capture_output=True, text=True, check=False, timeout=600)
-            self._update(job_id, progress=80, message=f"Finishing the Nginx {version} connector…", log=(build.stdout + build.stderr).splitlines()[-100:])
-            if build.returncode:
-                raise RuntimeError((build.stderr or build.stdout).strip()[-1600:] or "Nginx ModSecurity connector build failed.")
+            build_command = [make, "-j2", "modules"]
+            self._update(job_id, progress=55, message=f"Compiling the Nginx {version} connector…", log=[f"$ {' '.join(build_command)}"])
+            build_output = []
+            with subprocess.Popen(build_command, cwd=nginx_source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1) as build:
+                for line in build.stdout or []:
+                    if line.strip():
+                        build_output.append(line.rstrip())
+                        if len(build_output) > 1000:
+                            del build_output[:-1000]
+                        if len(build_output) == 1 or len(build_output) % 5 == 0:
+                            self._update(job_id, progress=80, message=f"Compiling the Nginx {version} connector…", log=[f"$ {' '.join(build_command)}", *build_output[-999:]])
+                build_code = build.wait()
+            if build_code:
+                raise RuntimeError("\n".join(build_output[-30:])[-1600:] or "Nginx ModSecurity connector build failed.")
             module = next(nginx_source.rglob("ngx_http_modsecurity_module.so"), None)
             if not module:
                 raise RuntimeError("The connector build completed without producing ngx_http_modsecurity_module.so.")
@@ -1402,6 +1486,15 @@ class JobStore:
                 unpacked = subprocess.run([dpkg_deb, "-x", str(archive), str(extracted)], capture_output=True, text=True, check=False)
                 if unpacked.returncode:
                     return False
+            if not any(extracted.rglob("libGeoIP.so.1")):
+                for geoip_package in ("libgeoip1t64", "libgeoip1"):
+                    geoip_result = subprocess.run([apt, "download", geoip_package], cwd=packages, capture_output=True, text=True, check=False, timeout=180)
+                    geoip_archive = next(iter(sorted(packages.glob(f"{geoip_package}_*.deb"))), None)
+                    if geoip_result.returncode == 0 and geoip_archive:
+                        unpacked = subprocess.run([dpkg_deb, "-x", str(geoip_archive), str(extracted)], capture_output=True, text=True, check=False)
+                        if unpacked.returncode == 0:
+                            break
+            _persist_shared_library_tree(extracted, "modsecurity")
             module = next(extracted.rglob("ngx_http_modsecurity_module.so"), None)
             if not module:
                 return False
@@ -1542,17 +1635,26 @@ class JobStore:
             if configured.returncode:
                 raise RuntimeError((configured.stderr or configured.stdout).strip()[-2200:] or "ModSecurity Apache connector configuration failed.")
             self._update(job_id, progress=52, message=f"Compiling ModSecurity {source_version} against Apache {version}…", log=["$ make -j2"])
-            built = subprocess.run(["make", "-j2"], cwd=source, env=connector_env, capture_output=True, text=True, check=False, timeout=900)
-            build_log = (built.stdout + built.stderr).splitlines()
-            self._update(job_id, progress=82, message=f"Compiling ModSecurity {source_version} against Apache {version}…", log=build_log[-160:])
-            if built.returncode:
-                raise RuntimeError((built.stderr or built.stdout).strip()[-2400:] or "ModSecurity Apache connector compilation failed.")
+            build_command = ["make", "-j2"]
+            build_log = []
+            with subprocess.Popen(build_command, cwd=source, env=connector_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1) as built:
+                for line in built.stdout or []:
+                    if line.strip():
+                        build_log.append(line.rstrip())
+                        if len(build_log) > 1000:
+                            del build_log[:-1000]
+                        if len(build_log) == 1 or len(build_log) % 5 == 0:
+                            self._update(job_id, progress=82, message=f"Compiling ModSecurity {source_version} against Apache {version}…", log=[f"$ {' '.join(build_command)}", *build_log[-999:]])
+                build_code = built.wait()
+            if build_code:
+                raise RuntimeError("\n".join(build_log[-30:])[-2400:] or "ModSecurity Apache connector compilation failed.")
             module = next(source.rglob("mod_security2.so"), None)
             if module is None:
                 raise RuntimeError("The ModSecurity Apache build completed without producing mod_security2.so.")
             target = root / "modules/mod_security2.so"
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(module, target)
+            _persist_shared_library_tree(dependency_root, "modsecurity")
             (root / ".serverengine-apache-connector-method").write_text("source\n")
             self._update(job_id, progress=94, message=f"ModSecurity connector compiled for Apache {version}; validating attachment…", log=[f"$ apxs: {apxs}", f"$ module: {target}"])
         finally:
@@ -1613,6 +1715,22 @@ class JobStore:
         command_text = "$ " + " ".join(command)
         self._update(job_id, status="succeeded", progress=100, message=f"Docker container {action} completed.", log=[command_text, output] if output else [command_text])
 
+    def _run_sqlserver_action(self, job_id: str, action: str):
+        """Control the isolated SQL Server container without touching host Docker workloads."""
+        docker = shutil.which("docker")
+        if not docker:
+            raise RuntimeError("Docker Engine is not installed or available to Server Engine.")
+        container = "server-engine-sqlserver"
+        if action not in {"start", "stop", "restart"}:
+            raise RuntimeError(f"Unsupported SQL Server action: {action}")
+        command = [docker, action, container]
+        self._update(job_id, status="running", progress=20, message=f"{action.title()}ing Microsoft SQL Server…", log=["$ " + " ".join(command)])
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        output = (result.stdout or result.stderr or "").strip()
+        if result.returncode != 0:
+            raise RuntimeError(output or f"Unable to {action} Microsoft SQL Server")
+        self._update(job_id, status="succeeded", progress=100, message=f"Microsoft SQL Server {action} completed.", log=["$ " + " ".join(command), output] if output else ["$ " + " ".join(command)])
+
     def _run_docker_compose(self, job_id: str, project_dir: Path, filename: str, content: str):
         docker = shutil.which("docker")
         if not docker:
@@ -1646,6 +1764,9 @@ class JobStore:
             return
         if service_id == "docker":
             self._run_docker_container_action(job_id, version or "", action)
+            return
+        if service_id == "sqlserver":
+            self._run_sqlserver_action(job_id, action)
             return
         if service_id in {"mysql", "mariadb"}:
             self._run_mysql_action(job_id, action, service_id)
@@ -1783,6 +1904,17 @@ class JobStore:
         while the service is already running. Check the actual managed process
         before dispatching to a controller so a second daemon is never created.
         """
+        if service_id == "sqlserver":
+            docker = shutil.which("docker")
+            if not docker:
+                return False
+            result = subprocess.run(
+                [docker, "inspect", "--format", "{{.State.Running}}", "server-engine-sqlserver"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            return result.returncode == 0 and result.stdout.strip() == "true"
         if service_id in {"docker", "nodejs", "python", "ruby", "certbot", "git", "imagemagick", "ffmpeg", "lynis"}:
             return False
         try:
@@ -2509,6 +2641,18 @@ class JobStore:
 
     def _ensure_php_package_source(self):
         os_release = Path("/etc/os-release").read_text(errors="replace") if Path("/etc/os-release").exists() else ""
+        release_info = {}
+        for line in os_release.splitlines():
+            key, separator, value = line.partition("=")
+            if separator:
+                release_info[key] = value.strip().strip('"')
+        if release_info.get("ID") == "ubuntu" and (
+            release_info.get("VERSION_CODENAME") == "mantic" or release_info.get("VERSION_ID") == "23.10"
+        ):
+            raise RuntimeError(
+                "Prebuilt PHP packages are unavailable for Ubuntu 23.10 (mantic); "
+                "use a source build or upgrade the host to a supported Ubuntu release."
+            )
         codename = next((line.split("=", 1)[1].strip().strip('"') for line in os_release.splitlines() if line.startswith("VERSION_CODENAME=")), "")
         if not codename:
             release = shutil.which("lsb_release")
@@ -2741,6 +2885,9 @@ class JobStore:
         if service_id == "php" and install_method == "source":
             self._run_php_source_binary(job_id, requested_version)
             return
+        if service_id == "openssl":
+            self._run_openssl_compatibility_runtime(job_id, requested_version)
+            return
         if service_id == "python" and install_method == "source":
             self._run_python_source_binary(job_id, requested_version)
             return
@@ -2942,7 +3089,26 @@ class JobStore:
                 message=f"Resolving {service_id} package dependencies…",
                 log=[f"$ apt-get download {' '.join(packages)}"],
             )
-            downloaded = subprocess.run([apt, "download", *packages], cwd=package_dir, capture_output=True, text=True, check=False)
+            downloaded_process = subprocess.Popen(
+                [apt, "download", *packages],
+                cwd=package_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                start_new_session=True,
+            )
+            self._track_process(job_id, downloaded_process)
+            try:
+                downloaded_output, _ = downloaded_process.communicate()
+                downloaded = subprocess.CompletedProcess(
+                    downloaded_process.args,
+                    downloaded_process.returncode,
+                    stdout=downloaded_output,
+                    stderr="",
+                )
+            finally:
+                self._untrack_process(job_id, downloaded_process)
+            self._raise_if_cancelled(job_id)
             download_log = (downloaded.stdout + downloaded.stderr).strip().splitlines()
             if download_log:
                 self._update(job_id, progress=32, message=f"Downloaded {len(download_log)} package log entries for {service_id}.", log=download_log[-80:])
@@ -3216,6 +3382,7 @@ class JobStore:
         staging = root.parent / f".php-{requested_version}-{job_id}-staging"
         build_dependencies = root.parent / f".php-{requested_version}-{job_id}-dependencies"
         archive = root.parent / f"php-{requested_version}.tar.gz"
+        preserve_build_workspace = False
         try:
             self._ensure_source_build_dependencies(job_id, "php")
             shutil.rmtree(staging, ignore_errors=True)
@@ -3238,6 +3405,17 @@ class JobStore:
             # under /usr/include/<triplet>/curl. Stage a private include
             # prefix for configure instead of modifying the host filesystem.
             php_version_tuple = tuple(int(part) for part in requested_version.split(".")[:2])
+            legacy_ssl_root = None
+            legacy_icu_root = None
+            icu_link_flags = ""
+            # PHP 7.x can use OpenSSL 1.1.1, but PHP 5.x directly accesses
+            # EVP_PKEY internals that became opaque in OpenSSL 1.1. PHP 5.x
+            # therefore requires the older 1.0.2 compatibility headers.
+            if php_version_tuple < (8, 0):
+                openssl_version = "1.0.2u" if php_version_tuple < (7, 0) else self._latest_legacy_openssl_version()
+                legacy_ssl_root = self._ensure_isolated_openssl(job_id, openssl_version)
+            if php_version_tuple < (7, 4):
+                legacy_icu_root = self._ensure_isolated_icu(job_id, "57.1")
             curl_header = next(
                 (
                     candidate
@@ -3273,29 +3451,275 @@ class JobStore:
             if php_version_tuple >= (7, 4):
                 gd_options = ["--enable-gd", "--with-jpeg", "--with-webp", "--with-freetype"]
             else:
-                gd_options = ["--with-gd", "--with-jpeg-dir=/usr", "--with-png-dir=/usr", "--with-freetype-dir=/usr"]
+                # PHP 5.x does not use pkg-config for FreeType. Its configure
+                # script searches <freetype-dir>/bin/freetype-config, so the
+                # isolated dependency prefix must be passed here instead of
+                # the host /usr prefix.
+                gd_options = ["--with-gd", "--with-jpeg-dir=/usr", "--with-png-dir=/usr"]
+                # PHP 5.x's configure script requires the removed
+                # ``freetype-config`` helper. Modern Debian/Ubuntu packages
+                # expose the same information only through pkg-config. Keep
+                # this compatibility shim inside the temporary build area;
+                # never add a host-wide command or alter the system PATH.
+                freetype_tools = build_dependencies / "bin"
+                freetype_tools.mkdir(parents=True, exist_ok=True)
+                pkg_config = shutil.which("pkg-config") or "/usr/bin/pkg-config"
+                freetype_config = freetype_tools / "freetype-config"
+                freetype_config.write_text(
+                    "#!/bin/sh\n"
+                    f'PKG_CONFIG="{pkg_config}"\n'
+                    'if [ "$1" = "--cflags" ] && [ "$2" = "--libs" ]; then\n'
+                    '  exec "$PKG_CONFIG" --cflags --libs freetype2\n'
+                    'fi\n'
+                    'case "$1" in\n'
+                    '  --cflags) exec "$PKG_CONFIG" --cflags freetype2 ;;\n'
+                    '  --libs) exec "$PKG_CONFIG" --libs freetype2 ;;\n'
+                    '  --version) exec "$PKG_CONFIG" --modversion freetype2 ;;\n'
+                    '  --prefix) exec "$PKG_CONFIG" --variable=prefix freetype2 ;;\n'
+                    '  --exec-prefix) exec "$PKG_CONFIG" --variable=exec_prefix freetype2 ;;\n'
+                    '  --includedir) exec "$PKG_CONFIG" --variable=includedir freetype2 ;;\n'
+                    '  --libdir) exec "$PKG_CONFIG" --variable=libdir freetype2 ;;\n'
+                    '  *) exec "$PKG_CONFIG" "$@" freetype2 ;;\n'
+                    'esac\n'
+                )
+                freetype_config.chmod(0o755)
+                gd_options.append(f"--with-freetype-dir={build_dependencies}")
+                icu_config = legacy_icu_root / "bin/icu-config"
+                if not icu_config.is_file():
+                    raise RuntimeError(f"The isolated ICU runtime did not provide icu-config: {icu_config}")
+                gd_options.append(f"--with-icu-dir={legacy_icu_root}")
             configure = [
                 "./configure", f"--prefix={root}", f"--with-config-file-path={root / 'conf'}",
                 f"--with-config-file-scan-dir={root / 'conf/conf.d'}", "--enable-fpm", f"--with-fpm-user={runtime_user}",
                 f"--with-fpm-group={runtime_user}", "--enable-mbstring", "--enable-bcmath", "--enable-opcache",
                 "--enable-zip", f"--with-curl={build_dependencies}", "--with-openssl", "--with-zlib",
                 "--with-mysqli=mysqlnd", "--with-pdo-mysql=mysqlnd", "--with-pdo-pgsql", "--with-sqlite3",
-                "--enable-intl", *gd_options, "--enable-fileinfo", "--enable-soap",
+                "--enable-intl",
+                *gd_options, "--enable-fileinfo", "--enable-soap",
             ]
+            if legacy_ssl_root:
+                configure.append(f"--with-openssl={legacy_ssl_root}")
             self._update(job_id, progress=25, message=f"Configuring PHP {requested_version} with FPM and web extensions…", log=[f"$ {' '.join(configure)}", f"CPPFLAGS={configure_cppflags}", f"LDFLAGS={configure_ldflags}"])
             configure_environment = {**os.environ, "CPPFLAGS": configure_cppflags}
+            if legacy_ssl_root:
+                configure_environment["CPPFLAGS"] = f"-I{legacy_ssl_root / 'include'} {configure_environment['CPPFLAGS']}"
+                configure_environment["LDFLAGS"] = f"-L{legacy_ssl_root / 'lib'}"
+                configure_environment["LIBS"] = "-ldl -lpthread"
+            if legacy_icu_root:
+                configure_environment["CPPFLAGS"] = f"-I{legacy_icu_root / 'include'} {configure_environment['CPPFLAGS']}"
+                configure_environment["LDFLAGS"] = " ".join(
+                    value for value in (configure_environment.get("LDFLAGS", ""), f"-L{legacy_icu_root / 'lib'}") if value
+                )
+            if php_version_tuple < (7, 4):
+                configure_environment["PATH"] = f"{build_dependencies / 'bin'}:{configure_environment.get('PATH', '')}"
+                # PHP 5.6's bundled configure checks both the executable name
+                # and the cached Autoconf path.  Supplying both prevents it
+                # from bypassing the private compatibility wrapper on hosts
+                # where freetype-config is no longer installed system-wide.
+                configure_environment["FREETYPE_CONFIG"] = str(freetype_config)
+                configure_environment["ac_cv_path_FREETYPE_CONFIG"] = str(freetype_config)
+                configure_environment["ICU_CONFIG"] = str(icu_config)
+                configure_environment["PATH"] = f"{legacy_icu_root / 'bin'}:{configure_environment['PATH']}"
+                configure_environment["FREETYPE_CFLAGS"] = subprocess.run(
+                    [pkg_config, "--cflags", "freetype2"], capture_output=True, text=True, check=False
+                ).stdout.strip()
+                configure_environment["FREETYPE_LIBS"] = subprocess.run(
+                    [pkg_config, "--libs", "freetype2"], capture_output=True, text=True, check=False
+                ).stdout.strip()
+                freetype_check = subprocess.run(
+                    [str(freetype_config), "--cflags", "--libs"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    env=configure_environment,
+                )
+                if freetype_check.returncode != 0:
+                    raise RuntimeError(
+                        "The isolated freetype-config wrapper could not run: "
+                        + (freetype_check.stderr or freetype_check.stdout).strip()
+                    )
+                icu_check = subprocess.run(
+                    [str(icu_config), "--cflags"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    env=configure_environment,
+                )
+                if icu_check.returncode != 0:
+                    raise RuntimeError(
+                        "The isolated icu-config wrapper could not run: "
+                        + (icu_check.stderr or icu_check.stdout).strip()
+                    )
+                icu_link_check = subprocess.run(
+                    [str(icu_config), "--ldflags"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    env=configure_environment,
+                )
+                if icu_link_check.returncode != 0 or not icu_link_check.stdout.strip():
+                    raise RuntimeError(
+                        "The isolated ICU runtime did not provide linker flags: "
+                        + (icu_link_check.stderr or icu_link_check.stdout).strip()
+                    )
+                icu_library = legacy_icu_root / "lib"
+                required_icu_libraries = [
+                    icu_library / "libicui18n.so",
+                    icu_library / "libicuuc.so",
+                    icu_library / "libicudata.so",
+                ]
+                missing_icu_libraries = [path.name for path in required_icu_libraries if not path.exists()]
+                if missing_icu_libraries:
+                    raise RuntimeError(
+                        "The isolated ICU runtime is missing link libraries: "
+                        + ", ".join(missing_icu_libraries)
+                    )
+                # PHP 5.6's configure macros can lose ICU_LIBS when they
+                # generate the final FPM link command. Keep icu-config output
+                # for compatibility, but append explicit ICU 57 libraries at
+                # the end of LIBS so uidna/uspoof symbols resolve against the
+                # isolated runtime rather than the host ICU.
+                icu_link_flags = " ".join([
+                    icu_link_check.stdout.strip(),
+                    f"-L{icu_library}",
+                    f"-Wl,-rpath,{icu_library}",
+                    "-licui18n",
+                    "-licuuc",
+                    "-licudata",
+                ])
+                configure_environment["ICU_LIBS"] = icu_link_flags
+                configure_environment["LDFLAGS"] = " ".join(
+                    value for value in (configure_environment.get("LDFLAGS", ""), icu_link_flags) if value
+                )
+                configure_environment["LIBS"] = " ".join(
+                    value for value in (configure_environment.get("LIBS", ""), icu_link_flags) if value
+                )
+                self._update(
+                    job_id,
+                    message=f"Preparing FreeType compatibility for PHP {requested_version}…",
+                    log=[
+                        f"freetype-config: {freetype_config}",
+                        f"FREETYPE_CFLAGS={configure_environment['FREETYPE_CFLAGS']}",
+                        f"FREETYPE_LIBS={configure_environment['FREETYPE_LIBS']}",
+                        f"icu-config: {icu_config}",
+                        f"ICU_CFLAGS={icu_check.stdout.strip()}",
+                        f"ICU_LIBS={icu_link_flags}",
+                        f"PHP {requested_version}: using isolated ICU compatibility runtime {legacy_icu_root}",
+                    ],
+                )
+            if php_version_tuple < (8, 0):
+                # PHP 7.4 and older use OpenSSL 1.x RSA APIs. Ubuntu 24.04
+                # exposes OpenSSL 3 headers, where those APIs are deprecated
+                # and some parameters became const-qualified. The legacy
+                # source treats these compatibility warnings as errors; keep
+                # the adjustment limited to legacy PHP builds.
+                # PHP 5.6/7.4 intentionally uses APIs that OpenSSL 1.1.1
+                # marks deprecated, and GCC 13 warns about the old PHP zval
+                # const signatures. Keep these warnings from becoming build
+                # failures and keep the compiler output readable. This is
+                # limited to legacy PHP source builds only.
+                legacy_cflags = (
+                    "-Wno-error=deprecated-declarations "
+                    "-Wno-error=discarded-qualifiers "
+                    "-Wno-deprecated-declarations "
+                    "-Wno-discarded-qualifiers"
+                )
+                configure_environment["CFLAGS"] = " ".join(
+                    value for value in (configure_environment.get("CFLAGS", ""), legacy_cflags) if value
+                )
             if configure_ldflags:
-                configure_environment["LDFLAGS"] = configure_ldflags
+                configure_environment["LDFLAGS"] = " ".join(
+                    value for value in (configure_environment.get("LDFLAGS", ""), configure_ldflags) if value
+                )
             result = subprocess.run(configure, cwd=source, capture_output=True, text=True, check=False, env=configure_environment)
             if result.returncode != 0:
                 raise RuntimeError((result.stderr or result.stdout).strip()[-3000:] or "PHP configure failed")
+            if legacy_icu_root and icu_link_flags:
+                # PHP 5.6 can detect ICU through configure but omit ICU_LIBS
+                # from the generated FPM link rule. Patch only the temporary
+                # build Makefiles so the final linker always receives ICU 57
+                # after the intl objects that reference uidna/uspoof symbols.
+                makefile_marker = "# Server Engine isolated ICU linker flags"
+                for makefile in source.rglob("Makefile"):
+                    try:
+                        content = makefile.read_text(errors="replace")
+                    except OSError:
+                        continue
+                    if makefile_marker in content:
+                        continue
+                    # Use standalone += assignments instead of editing the
+                    # existing values. PHP 5.6 emits multi-line Makefile
+                    # variables; appending to their first line can place the
+                    # flags inside a continuation and omit them from FPM.
+                    additions = "\n".join([
+                        makefile_marker,
+                        # ``override`` is required because PHP's generated
+                        # Makefiles reassign these variables in recursive
+                        # sub-makes (notably sapi/fpm). A plain ``+=`` at the
+                        # end of the parent Makefile is therefore lost before
+                        # the final php-fpm link command is generated.
+                        f"override EXTRA_LIBS += {icu_link_flags}",
+                        f"override LIBS += {icu_link_flags}",
+                        f"override INTL_SHARED_LIBADD += {icu_link_flags}",
+                        "",
+                    ])
+                    makefile.write_text(content.rstrip() + "\n" + additions)
             jobs = str(max(1, min(os.cpu_count() or 1, 4)))
-            self._update(job_id, progress=45, message="Compiling PHP…", log=[f"$ make -j{jobs}"])
-            result = subprocess.run(["make", f"-j{jobs}"], cwd=source, capture_output=True, text=True, check=False)
-            if result.returncode != 0:
-                raise RuntimeError((result.stderr or result.stdout).strip()[-3000:] or "PHP compilation failed")
+            make_command = ["make", f"-j{jobs}"]
+            self._update(job_id, progress=45, message="Compiling PHP…", log=[f"$ {' '.join(make_command)}"])
+            make_output: list[str] = []
+            started = time.monotonic()
+            last_update = started
+            build = subprocess.Popen(
+                make_command,
+                cwd=source,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                env=configure_environment,
+            )
+            self._track_process(job_id, build)
+            try:
+                for line in build.stdout or []:
+                    line = line.rstrip()
+                    if not line:
+                        continue
+                    make_output.append(line)
+                    # Keep the WebSocket payload bounded while continuously
+                    # exposing the compiler output instead of appearing hung.
+                    if len(make_output) > 1000:
+                        del make_output[:-1000]
+                    now = time.monotonic()
+                    if now - last_update >= 0.35:
+                        elapsed = max(1, int(now - started))
+                        progress = min(78, 45 + min(33, len(make_output) // 8))
+                        self._update(
+                            job_id,
+                            progress=progress,
+                            message=f"Compiling PHP… {elapsed}s elapsed",
+                            log=[f"$ {' '.join(make_command)}", *make_output[-999:]],
+                        )
+                        last_update = now
+                    self._raise_if_cancelled(job_id)
+                return_code = build.wait()
+            except InstallCancelled:
+                # The cancellation endpoint can now terminate the compiler
+                # instead of leaving this serialized worker blocked in make.
+                self._terminate_process(build)
+                raise
+            finally:
+                self._untrack_process(job_id, build)
+            self._update(
+                job_id,
+                progress=78 if return_code == 0 else 45,
+                message="PHP compilation finished; installing the isolated runtime…" if return_code == 0 else "PHP compilation failed.",
+                log=[f"$ {' '.join(make_command)}", *make_output[-999:]],
+            )
+            if return_code != 0:
+                raise RuntimeError("\n".join(make_output[-30:]) or "PHP compilation failed")
             self._update(job_id, progress=80, message="Installing PHP into the isolated Server Engine runtime…", log=["$ make install"])
-            result = subprocess.run(["make", "install"], cwd=source, capture_output=True, text=True, check=False)
+            result = subprocess.run(["make", "install"], cwd=source, capture_output=True, text=True, check=False, env=configure_environment)
             if result.returncode != 0:
                 raise RuntimeError((result.stderr or result.stdout).strip()[-3000:] or "PHP installation failed")
             (root / "conf").mkdir(parents=True, exist_ok=True)
@@ -3312,11 +3736,15 @@ class JobStore:
             (root / ".serverengine-install-method").write_text("source\n")
             self._update(job_id, status="succeeded", progress=100, message=f"PHP-FPM {requested_version} was built inside {root}; the host PHP installation was not changed.")
         except Exception as error:
-            self._update(job_id, status="failed", message=str(error))
+            preserve_build_workspace = True
+            workspace_message = str(error)
+            workspace_message += f"\nFailed PHP build workspace preserved at {staging}"
+            self._update(job_id, status="failed", message=workspace_message)
         finally:
             archive.unlink(missing_ok=True)
-            shutil.rmtree(staging, ignore_errors=True)
-            shutil.rmtree(build_dependencies, ignore_errors=True)
+            if not preserve_build_workspace:
+                shutil.rmtree(staging, ignore_errors=True)
+                shutil.rmtree(build_dependencies, ignore_errors=True)
 
     def _run_isolated_package(self, job_id: str, service_id: str, requested_version: str, package_override: str | None = None):
         if service_id in {"apache", "mariadb", "stalwart", "mongodb", "opensearch", "wp-cli", "postfix", "dovecot", "rspamd", "bind9", "unbound", "clamav", "supervisor", "lynis", "openlitespeed", "caddy"}:
@@ -6478,6 +6906,79 @@ class JobStore:
             archive.unlink(missing_ok=True)
             shutil.rmtree(staging, ignore_errors=True)
 
+    def _ensure_isolated_icu(self, job_id: str, requested_version: str) -> Path:
+        """Build and cache an ICU release compatible with legacy PHP intl."""
+        root = service_root("icu", requested_version)
+        marker = root / ".serverengine-version"
+        icu_config = root / "bin/icu-config"
+        if marker.exists() and icu_config.is_file() and (root / "lib/libicuuc.so").exists():
+            return root
+        make = shutil.which("make")
+        compiler = shutil.which("cc") or shutil.which("gcc")
+        if not make or not compiler:
+            raise RuntimeError("ICU source builds require make and a C compiler.")
+        staging = root.parent.parent / f".icu-{job_id}-staging"
+        archive = staging / f"icu4c-{requested_version.replace('.', '_')}-src.tgz"
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True, exist_ok=True)
+            self._update(job_id, progress=27, message=f"Downloading ICU {requested_version} source for PHP intl…", log=[])
+            url = f"https://github.com/unicode-org/icu/releases/download/release-{requested_version.replace('.', '-')}/icu4c-{requested_version.replace('.', '_')}-src.tgz"
+            with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "Server-Engine-Control-Panel"}), timeout=120) as response, archive.open("wb") as output:
+                shutil.copyfileobj(response, output)
+            with tarfile.open(archive, "r:*") as package:
+                members = package.getmembers()
+                if any(member.name.startswith("/") or ".." in Path(member.name).parts for member in members):
+                    raise RuntimeError("The ICU archive contains an unsafe path")
+                package.extractall(staging)
+            extracted = next((item for item in staging.iterdir() if item.is_dir()), None)
+            source = extracted / "source" if extracted and (extracted / "source").is_dir() else extracted
+            if source is None or not (source / "configure").is_file():
+                raise RuntimeError(f"ICU {requested_version} source archive has an unexpected layout.")
+            configure = [str(source / "configure"), f"--prefix={root}", "--disable-samples", "--disable-tests"]
+            build_env = {**os.environ, "CXXFLAGS": "-std=gnu++11"}
+            self._update(job_id, progress=30, message=f"Configuring isolated ICU {requested_version}…", log=[f"$ {' '.join(configure)}"])
+            configured = subprocess.run(configure, cwd=source, env=build_env, capture_output=True, text=True, check=False)
+            if configured.returncode != 0:
+                raise RuntimeError("ICU configure failed: " + (configured.stderr or configured.stdout).strip()[-1600:])
+            make_command = [make, "-j1"]
+            self._update(job_id, progress=34, message=f"Compiling isolated ICU {requested_version}…", log=[f"$ {' '.join(make_command)}"])
+            build = subprocess.Popen(make_command, cwd=source, env=build_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            output = []
+            for line in build.stdout or []:
+                line = line.rstrip()
+                if line:
+                    output.append(line)
+                    if len(output) > 1000:
+                        del output[:-1000]
+                    self._update(job_id, progress=min(78, 34 + len(output) // 12), message=f"Compiling isolated ICU {requested_version}…", log=[f"$ {' '.join(make_command)}", *output[-999:]])
+                self._raise_if_cancelled(job_id)
+            if build.wait() != 0:
+                raise RuntimeError("ICU build failed: " + ("\n".join(output[-30:]) or "make returned a non-zero exit code"))
+            self._update(job_id, progress=84, message=f"Installing isolated ICU {requested_version}…", log=[f"$ {make} install", *output[-999:]])
+            installed = subprocess.run([make, "install"], cwd=source, env=build_env, capture_output=True, text=True, check=False)
+            if installed.returncode != 0:
+                raise RuntimeError("ICU installation failed: " + (installed.stderr or installed.stdout).strip()[-1600:])
+            if not icu_config.is_file():
+                raise RuntimeError(f"ICU {requested_version} installed without icu-config.")
+            marker.write_text(requested_version + "\n")
+            return root
+        finally:
+            archive.unlink(missing_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+
+    def _latest_legacy_openssl_version(self) -> str:
+        """Resolve the newest archived OpenSSL 1.1.1 source release."""
+        try:
+            definition, _, _ = refresh_service_versions("openssl", install_method="source")
+            versions = [item.version for item in definition.versions if item.version.startswith("1.1.1")]
+            if versions:
+                return max(versions, key=version_sort_key)
+        except Exception:
+            pass
+        return "1.1.1w"
+
     def _ensure_isolated_openssl(self, job_id: str, requested_version: str) -> Path:
         """Build and cache a reusable private OpenSSL runtime for legacy tools."""
         root = service_root("openssl", requested_version)
@@ -6495,7 +6996,8 @@ class JobStore:
             shutil.rmtree(staging, ignore_errors=True)
             staging.mkdir(parents=True, exist_ok=True)
             self._update(job_id, progress=36, message=f"Building reusable OpenSSL {requested_version}…", log=[])
-            url = f"https://www.openssl.org/source/old/1.0.2/openssl-{requested_version}.tar.gz"
+            branch = "1.1.1" if requested_version.startswith("1.1.1") else "1.0.2"
+            url = openssl_source_for(requested_version) or f"https://www.openssl.org/source/old/{branch}/openssl-{requested_version}.tar.gz"
             with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "Server-Engine-Control-Panel"}), timeout=60) as response, archive.open("wb") as output:
                 output.write(response.read())
             with tarfile.open(archive, "r:gz") as package:
@@ -6508,12 +7010,47 @@ class JobStore:
             configured = subprocess.run(configure, cwd=source, capture_output=True, text=True, check=False)
             if configured.returncode != 0:
                 raise RuntimeError("OpenSSL configure failed: " + (configured.stderr or configured.stdout).strip()[-1200:])
-            self._update(job_id, progress=39, message=f"Compiling reusable OpenSSL {requested_version}…", log=[f"$ {make} -j2"])
-            built = subprocess.run([make, "-j2"], cwd=source, capture_output=True, text=True, check=False)
-            if built.returncode != 0:
-                raise RuntimeError("OpenSSL build failed: " + (built.stderr or built.stdout).strip()[-1200:])
+            # OpenSSL 1.0.2 uses recursive Makefiles that cannot reliably
+            # inherit GNU make's parallel jobserver through this managed
+            # subprocess. Build the compatibility runtime serially so the
+            # job does not fail with "write jobserver: Bad file descriptor".
+            make_command = [make, "-j1"]
+            self._update(job_id, progress=39, message=f"Compiling reusable OpenSSL {requested_version}…", log=[f"$ {' '.join(make_command)}"])
+            build_output: list[str] = []
+            started = time.monotonic()
+            last_update = started
+            with subprocess.Popen(
+                make_command,
+                cwd=source,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            ) as build:
+                for line in build.stdout or []:
+                    line = line.rstrip()
+                    if not line:
+                        continue
+                    build_output.append(line)
+                    if len(build_output) > 1000:
+                        del build_output[:-1000]
+                    now = time.monotonic()
+                    if now - last_update >= 0.35:
+                        elapsed = max(1, int(now - started))
+                        self._update(
+                            job_id,
+                            progress=min(78, 39 + min(39, len(build_output) // 8)),
+                            message=f"Compiling reusable OpenSSL {requested_version}… {elapsed}s elapsed",
+                            log=[f"$ {' '.join(make_command)}", *build_output[-999:]],
+                        )
+                        last_update = now
+                    self._raise_if_cancelled(job_id)
+                return_code = build.wait()
+            if return_code != 0:
+                raise RuntimeError("OpenSSL build failed: " + ("\n".join(build_output[-30:]) or "make returned a non-zero exit code"))
             if root.exists():
                 shutil.rmtree(root)
+            self._update(job_id, progress=82, message=f"Installing reusable OpenSSL {requested_version}…", log=[f"$ {make} install_sw", *build_output[-999:]])
             installed = subprocess.run([make, "install_sw"], cwd=source, capture_output=True, text=True, check=False)
             if installed.returncode != 0:
                 raise RuntimeError("OpenSSL installation failed: " + (installed.stderr or installed.stdout).strip()[-1200:])
@@ -6522,6 +7059,20 @@ class JobStore:
         finally:
             archive.unlink(missing_ok=True)
             shutil.rmtree(staging, ignore_errors=True)
+
+    def _run_openssl_compatibility_runtime(self, job_id: str, requested_version: str):
+        """Build an explicit, reusable legacy OpenSSL runtime on request."""
+        try:
+            root = self._ensure_isolated_openssl(job_id, requested_version)
+            self._update(
+                job_id,
+                status="succeeded",
+                progress=100,
+                message=f"OpenSSL {requested_version} was built in the isolated runtime at {root}. The host OpenSSL installation was not changed.",
+                log=[f"Runtime: {root}", "Warning: OpenSSL 1.1.1 is end-of-life and should only support legacy applications."],
+            )
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
 
     def _run_sqlserver_container(self, job_id: str, requested_version: str):
         if platform.machine().lower() not in {"x86_64", "amd64"}:

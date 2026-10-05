@@ -13,6 +13,13 @@ export default defineConfig({
         changeOrigin: true,
         ws: true,
       },
+      // PHP info is rendered by the Python control plane as a real HTML
+      // document. Keep the React `/services/php` page intact, but forward
+      // only the versioned info URL during Vite development.
+      '^/services/php/[^/]+/info$': {
+        target: 'http://core-dev:8000',
+        changeOrigin: true,
+      },
     },
   },
 });
