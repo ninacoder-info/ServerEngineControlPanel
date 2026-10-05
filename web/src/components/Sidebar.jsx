@@ -15,7 +15,6 @@ import {
   Network,
   Package,
   Server,
-  Settings,
   ScanSearch,
   ShieldCheck,
   ShieldAlert,
@@ -89,7 +88,7 @@ const sections = [
 export default function Sidebar({ open, onClose, active, onSelect }) {
   return (
     <aside
-      className={`fixed inset-y-0 left-0 z-30 w-64 -translate-x-full overflow-hidden border-r border-neutral-200 bg-white transition-transform duration-200 dark:border-dark-border dark:bg-dark md:translate-x-0 ${open ? "translate-x-0" : ""}`}
+      className={`fixed inset-y-0 left-0 z-30 flex w-64 -translate-x-full flex-col overflow-hidden border-r border-neutral-200 bg-white transition-transform duration-200 dark:border-dark-border dark:bg-dark md:relative md:col-start-1 md:row-start-1 md:w-64 md:translate-x-0 ${open ? "translate-x-0" : ""}`}
     >
       <div className="flex items-center justify-between px-5 py-6">
         <Brand />
@@ -97,7 +96,7 @@ export default function Sidebar({ open, onClose, active, onSelect }) {
           ×
         </button>
       </div>
-      <nav className="h-[calc(100vh-14rem)] space-y-5 overflow-y-auto px-3 pb-4">
+      <nav className="min-h-0 flex-1 space-y-5 overflow-y-auto px-3 pb-4">
         {sections.map(([title, items]) => (
           <div key={title}>
             <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
@@ -125,53 +124,6 @@ export default function Sidebar({ open, onClose, active, onSelect }) {
           </div>
         ))}
       </nav>
-      <div className="absolute bottom-4 left-3 right-3">
-        <div className="rounded-lg border border-neutral-200 bg-white p-3 dark:border-dark-border dark:bg-dark-editor">
-          <div className="flex items-center justify-between gap-2">
-            <span className="flex items-center gap-2 text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-              <HardDrive size={14} className="text-neutral-500 dark:text-neutral-400" />
-              Storage
-            </span>
-            <span className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-neutral-400">68%</span>
-              <a
-                href="/settings"
-                className="grid h-6 w-6 place-items-center rounded-md text-neutral-500 hover:bg-neutral-200 hover:text-neutral-800 dark:hover:bg-dark-hover dark:hover:text-neutral-200"
-                title="Open settings"
-                aria-label="Open settings"
-                onClick={(event) => {
-                  event.preventDefault();
-                  onSelect("/settings");
-                  onClose();
-                }}
-              >
-                <Settings size={14} />
-              </a>
-            </span>
-          </div>
-          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-neutral-200 dark:bg-dark-border">
-            <span className="block h-full w-[68%] rounded-full bg-neutral-500" />
-          </div>
-          <div className="mt-2 flex justify-between text-[10px] text-neutral-500">
-            <span>68 GB used</span>
-            <span>100 GB</span>
-          </div>
-          <div className="mt-3 grid grid-cols-2 gap-2 border-t border-neutral-200 pt-3 dark:border-neutral-800">
-            <span className="text-[10px] text-neutral-500">
-              Websites
-              <strong className="mt-0.5 block text-xs text-neutral-700 dark:text-neutral-300">
-                0 / 50
-              </strong>
-            </span>
-            <span className="text-[10px] text-neutral-500">
-              Backups
-              <strong className="mt-0.5 block text-xs text-neutral-700 dark:text-neutral-300">
-                Healthy
-              </strong>
-            </span>
-          </div>
-        </div>
-      </div>
     </aside>
   );
 }

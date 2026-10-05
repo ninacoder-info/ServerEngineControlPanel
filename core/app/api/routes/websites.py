@@ -9,11 +9,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.api.dependencies import require_user
 from app.models.website import WebsiteActionRequest, WebsiteCreateRequest, WebsiteDeployRequest, WebsiteDirectoryRequest, WebsiteUpdateRequest
 from app.services.job_service import job_store
-from app.services.service_runtime import php_cli_path, service_root
+from app.services.service_runtime import composer_path, php_cli_path
 from app.services.website_service import website_service
 
 router = APIRouter(prefix="/api/v1/websites", tags=["websites"])
 _wordpress_versions: tuple[float, list[str]] = (0, [])
+_laravel_versions: tuple[float, list[str]] = (0, [])
 
 
 @router.get("")
@@ -53,6 +54,31 @@ def wordpress_versions(user=Depends(require_user)):
     return _wordpress_versions[1]
 
 
+@router.get("/laravel/versions")
+def laravel_versions(user=Depends(require_user)):
+    """Return stable Laravel application versions from Packagist, cached briefly."""
+    global _laravel_versions
+    if time.time() - _laravel_versions[0] < 3600 and _laravel_versions[1]:
+        return _laravel_versions[1]
+    versions = []
+    try:
+        request = urllib.request.Request(
+            "https://repo.packagist.org/p2/laravel/laravel.json",
+            headers={"User-Agent": "Server-Engine-Control-Panel"},
+        )
+        with urllib.request.urlopen(request, timeout=8) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        for package in payload.get("packages", {}).get("laravel/laravel", []):
+            version = str(package.get("version", "")).removeprefix("v")
+            if re.fullmatch(r"\d+\.\d+(?:\.\d+)?", version):
+                versions.append(version)
+    except Exception:
+        pass
+    versions = sorted(set(versions), key=lambda value: tuple(int(part) for part in value.split(".")), reverse=True)
+    _laravel_versions = (time.time(), versions)
+    return versions
+
+
 @router.get("/{website_id}/configuration")
 def get_website_configuration(website_id: str, user=Depends(require_user)):
     return website_service.configuration(website_id)
@@ -88,7 +114,7 @@ def deploy_website(payload: WebsiteDeployRequest, user=Depends(require_user)):
     project_status = website_service.project_path_status(payload.project_path)
     if project_status["exists"] and (not project_status["is_directory"] or not project_status["is_empty"]):
         raise HTTPException(400, "Project folder is not empty. Choose a new domain or project folder before deploying.")
-    if payload.application_template != "wordpress" and not (service_root("composer") / "bin/composer").exists():
+    if payload.application_template != "wordpress" and not composer_path().exists():
         raise HTTPException(400, "Install Composer before deploying this PHP application.")
     if payload.database_enabled and payload.database_engine != "mysql":
         raise HTTPException(400, "One-click database provisioning currently supports running MySQL only.")
@@ -100,6 +126,8 @@ def deploy_website(payload: WebsiteDeployRequest, user=Depends(require_user)):
         payload.framework = "wordpress"
     if payload.application_template == "laravel" and payload.framework != "laravel":
         payload.framework = "laravel"
+    if payload.application_template == "laravel" and payload.laravel_version and not re.fullmatch(r"[0-9A-Za-z.*^~_-]+", payload.laravel_version):
+        raise HTTPException(400, "The Laravel version is invalid.")
     if payload.application_template == "wordpress":
         if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", payload.wordpress_admin_user.strip()):
             raise HTTPException(400, "WordPress admin username must start with a letter and use only letters, numbers, hyphens, and underscores.")
@@ -119,6 +147,7 @@ def deploy_website(payload: WebsiteDeployRequest, user=Depends(require_user)):
         payload.wordpress_admin_password,
         payload.wordpress_database_prefix,
         payload.wordpress_site_title,
+        payload.laravel_version,
     )
     return {"website": site, "job": job}
 

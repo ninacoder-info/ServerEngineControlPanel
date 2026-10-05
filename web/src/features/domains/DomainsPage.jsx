@@ -18,8 +18,10 @@ import {
 } from "lucide-react";
 import { apiRequest, readApiError } from "../../lib/api";
 import ServiceNotInstalledState from "../../components/ServiceNotInstalledState";
+import ActionDialog from "../../components/ActionDialog";
 import { useServiceInstallationState } from "../../hooks/useServiceInstallationState";
 import FormField from "../../components/FormField";
+import PowerDnsConfigModal from "../services/PowerDnsConfigModal";
 
 const tabs = ["Domains", "DNS records", "Redirects", "TLS certificates", "Cloudflare edge", "BIND 9 DNS", "Unbound resolver"];
 const domainSchema = z.object({
@@ -70,6 +72,7 @@ export default function DomainsPage() {
   const [domainFormError, setDomainFormError] = React.useState("");
   const [menuDomain, setMenuDomain] = React.useState(null);
   const [menuPosition, setMenuPosition] = React.useState(null);
+  const [deleteDialog, setDeleteDialog] = React.useState(null);
   const [selectedDomain, setSelectedDomain] = React.useState("");
   const [domainRecords, setDomainRecords] = React.useState([]);
   const [recordsLoading, setRecordsLoading] = React.useState(false);
@@ -100,6 +103,8 @@ export default function DomainsPage() {
   });
   const [unboundMessage, setUnboundMessage] = React.useState("");
   const [unboundLoading, setUnboundLoading] = React.useState(false);
+  const [powerDnsConfig, setPowerDnsConfig] = React.useState(null);
+  const [powerDnsConfigLoading, setPowerDnsConfigLoading] = React.useState(false);
   const [form, setForm] = React.useState({
     domain: "",
     root: "/server-engine/www/",
@@ -114,6 +119,22 @@ export default function DomainsPage() {
     setLoading(false);
   }, []);
   React.useEffect(() => { loadDomains(); }, [loadDomains]);
+  React.useEffect(() => {
+    const applyDnsUpdate = (event) => {
+      const updates = event.detail?.domains || [];
+      if (!updates.length) return;
+      setDomains((current) => current.map((item) => {
+        const update = updates.find((candidate) => candidate.domain === item.domain);
+        return update ? { ...item, records: update.records.length, dns: "Healthy" } : item;
+      }));
+      if (selectedDomain) {
+        const update = updates.find((candidate) => candidate.domain === selectedDomain);
+        if (update) setDomainRecords(update.records);
+      }
+    };
+    window.addEventListener("serverengine:domains-updated", applyDnsUpdate);
+    return () => window.removeEventListener("serverengine:domains-updated", applyDnsUpdate);
+  }, [selectedDomain]);
   React.useEffect(() => {
     const closeMenu = () => {
       setMenuDomain(null);
@@ -239,6 +260,20 @@ export default function DomainsPage() {
     setMenuDomain(null);
     setMenuPosition(null);
   };
+  const deleteDomain = async (domain) => {
+    const response = await apiRequest(`/api/v1/domains/${encodeURIComponent(domain)}`, { method: "DELETE" });
+    if (!response.ok) {
+      setMessage(await readApiError(response));
+      return;
+    }
+    setDomains((items) => items.filter((item) => item.domain !== domain));
+    if (selectedDomain === domain) {
+      setSelectedDomain("");
+      setDomainRecords([]);
+    }
+    setDeleteDialog(null);
+    setMessage(`${domain} was removed. Project files were preserved.`);
+  };
   const saveRecord = async () => {
     setRecordError("");
     const endpoint = `/api/v1/domains/${encodeURIComponent(selectedDomain)}/records${editingRecord ? `/${editingRecord.id}` : ""}`;
@@ -247,11 +282,14 @@ export default function DomainsPage() {
       setRecordError(await readApiError(response));
       return;
     }
+    const savedRecord = await response.json();
     setRecordModal(false);
     setEditingRecord(null);
     setRecordForm({ record_type: "A", name: "", value: "", ttl: 300 });
-    await loadRecords(selectedDomain);
-    if (!editingRecord) setDomains((items) => items.map((item) => item.domain === selectedDomain ? { ...item, records: (item.records || 0) + 1 } : item));
+    setDomainRecords((items) => editingRecord
+      ? items.map((item) => item.id === savedRecord.id ? savedRecord : item)
+      : [...items, savedRecord]);
+    setDomains((items) => items.map((item) => item.domain === selectedDomain ? { ...item, records: editingRecord ? item.records || 0 : (item.records || 0) + 1, dns: "Healthy" } : item));
   };
   const openRecordEditor = (record) => {
     setEditingRecord(record);
@@ -298,6 +336,33 @@ export default function DomainsPage() {
   };
   const activeTls = domains.filter((item) => item.tls === "Active").length;
   const aliases = domains.filter((item) => item.type === "Alias").length;
+  const openPowerDnsConfig = async () => {
+    if (powerDnsConfigLoading) return;
+    setPowerDnsConfigLoading(true);
+    try {
+      const [catalogResponse, installedResponse] = await Promise.all([
+        apiRequest("/api/v1/services/catalog"),
+        apiRequest("/api/v1/services/installed"),
+      ]);
+      if (!catalogResponse.ok || !installedResponse.ok) {
+        throw new Error("Unable to load the PowerDNS configuration.");
+      }
+      const [catalog, installed] = await Promise.all([
+        catalogResponse.json(),
+        installedResponse.json(),
+      ]);
+      const service = catalog.find((item) => item.id === "powerdns");
+      if (!service) throw new Error("PowerDNS configuration is unavailable.");
+      setPowerDnsConfig({
+        service,
+        versions: installed.filter((item) => item.id === "powerdns" || item.id.startsWith("powerdns@")),
+      });
+    } catch (error) {
+      setMessage(error.message || "Unable to load the PowerDNS configuration.");
+    } finally {
+      setPowerDnsConfigLoading(false);
+    }
+  };
   const selectedServiceLoading = tab === "BIND 9 DNS" ? bindState.loading : tab === "Unbound resolver" ? unboundState.loading : dnsState.loading;
   if (loading || selectedServiceLoading) {
     return <DomainsSkeleton />;
@@ -310,6 +375,40 @@ export default function DomainsPage() {
   }
   if (!loading && !dnsState.loading && !dnsState.installed && !["#cloudflare", "#bind", "#unbound"].includes(window.location.hash)) {
     return <ServiceNotInstalledState state={dnsState} icon={Globe2} eyebrow="DNS management" title="PowerDNS is not installed" description="Install PowerDNS to manage authoritative zones, records, and DNSSEC from this panel." installLabel="Install PowerDNS" />;
+  }
+  const powerDnsTabs = ["Domains", "DNS records", "Redirects", "TLS certificates"];
+  if (powerDnsTabs.includes(tab) && !dnsState.running) {
+    return (
+      <>
+        <div className="flex min-h-[calc(100vh-12rem)] items-center justify-center">
+          <section className="w-full max-w-xl rounded-xl border border-neutral-200 bg-white p-8 text-center shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
+            <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-amber-50 text-amber-600 dark:bg-amber-950/30 dark:text-amber-400">
+              <Globe2 size={23} />
+            </div>
+            <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400">
+              PowerDNS service stopped
+            </p>
+            <h1 className="mt-2 text-xl font-semibold text-neutral-950 dark:text-neutral-100">
+              PowerDNS is not running
+            </h1>
+            <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-neutral-500 dark:text-neutral-400">
+              Start PowerDNS before managing authoritative zones and DNS records. Your existing domain data is preserved.
+            </p>
+            <div className="mt-6 flex flex-wrap justify-center gap-3">
+              <button type="button" onClick={openPowerDnsConfig} disabled={powerDnsConfigLoading} className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-70">
+                {powerDnsConfigLoading && <RefreshCw size={15} className="animate-spin" />}
+                {powerDnsConfigLoading ? "Loading configuration…" : "Open service configuration"}
+              </button>
+              <button type="button" onClick={dnsState.loadStatus} className="inline-flex cursor-pointer items-center gap-2 rounded-md px-3.5 py-2 text-sm font-semibold text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800">
+                <RefreshCw size={15} />
+                Check again
+              </button>
+            </div>
+          </section>
+        </div>
+        {powerDnsConfig && <PowerDnsConfigModal service={powerDnsConfig.service} installed={powerDnsConfig.versions} onClose={() => setPowerDnsConfig(null)} />}
+      </>
+    );
   }
   const updateCloudflare = (key, value) => setCloudflare((current) => ({ ...current, [key]: value }));
   const saveCloudflare = async () => {
@@ -604,7 +703,8 @@ export default function DomainsPage() {
           </div>
         )}
       </section>
-      {menuDomain && menuPosition && <div className="fixed z-[100] w-48 rounded-lg border border-neutral-200 bg-white p-1.5 shadow-xl dark:border-neutral-700 dark:bg-neutral-900" style={{ top: menuPosition.top, left: menuPosition.left }} onMouseDown={(event) => event.stopPropagation()}><button type="button" onClick={() => openRecords(menuDomain)} className="flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"><Globe2 size={15} />Manage DNS records</button><button type="button" onClick={() => { navigator.clipboard?.writeText(menuDomain); setMessage(`${menuDomain} copied.`); setMenuDomain(null); setMenuPosition(null); }} className="flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"><Copy size={15} />Copy domain</button><a href={`https://${menuDomain}`} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"><ExternalLink size={15} />Open website</a></div>}
+      {menuDomain && menuPosition && <div className="fixed z-[100] w-48 rounded-lg border border-neutral-200 bg-white p-1.5 shadow-xl dark:border-neutral-700 dark:bg-neutral-900" style={{ top: menuPosition.top, left: menuPosition.left }} onMouseDown={(event) => event.stopPropagation()}><button type="button" onClick={() => openRecords(menuDomain)} className="flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"><Globe2 size={15} />DNS records</button><button type="button" onClick={() => { navigator.clipboard?.writeText(menuDomain); setMessage(`${menuDomain} copied.`); setMenuDomain(null); setMenuPosition(null); }} className="flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"><Copy size={15} />Copy domain</button><a href={`https://${menuDomain}`} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"><ExternalLink size={15} />Open website</a><button type="button" onClick={() => { setDeleteDialog(menuDomain); setMenuDomain(null); setMenuPosition(null); }} className="flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/30"><Trash2 size={15} />Delete domain</button></div>}
+      <ActionDialog dialog={deleteDialog ? { kind: "confirm", title: "Delete hosted domain?", message: `Remove ${deleteDialog} from Server Engine and PowerDNS? The project files will be preserved.`, submitLabel: "Delete domain", tone: "danger" } : null} onClose={() => setDeleteDialog(null)} onSubmit={() => deleteDomain(deleteDialog)} />
       {modal && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-neutral-950/50 p-4">
           <div className="w-full max-w-lg rounded-xl border border-neutral-200 bg-white p-6 shadow-xl dark:border-neutral-700 dark:bg-neutral-900">

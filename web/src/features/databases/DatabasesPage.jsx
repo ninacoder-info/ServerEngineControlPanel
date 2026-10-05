@@ -39,6 +39,13 @@ const engines = [
     background: "bg-orange-50 dark:bg-orange-950/30",
   },
   {
+    id: "mariadb",
+    name: "MariaDB",
+    description: "MySQL-compatible relational database for web applications.",
+    color: "text-teal-500",
+    background: "bg-teal-50 dark:bg-teal-950/30",
+  },
+  {
     id: "postgresql",
     name: "PostgreSQL",
     description: "Advanced relational database with strong SQL features.",

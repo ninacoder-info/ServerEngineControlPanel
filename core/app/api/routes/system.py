@@ -1,14 +1,21 @@
 import os
 import json
+import re
 import time
+import subprocess
+import urllib.error
+import urllib.request
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Event, Lock, Thread
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.dependencies import require_user
 from app.services.job_service import job_store
+from app.services.settings_service import settings_service
 from app.version import APP_VERSION
 
 router = APIRouter(prefix="/api/v1", tags=["system"])
@@ -26,6 +33,116 @@ HEALTH_THRESHOLD_DEFAULTS = {
     "disk_critical": 90,
     "load_warning": 1.0,
 }
+
+UPDATE_REPOSITORY = os.getenv("SE_GITHUB_REPO", "ninacoder-info/ServerEngineControlPanel")
+
+
+def _github_release() -> dict:
+    request = urllib.request.Request(
+        f"https://api.github.com/repos/{UPDATE_REPOSITORY}/releases/latest",
+        headers={
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+    token = os.getenv("SE_GITHUB_TOKEN", "").strip() or settings_service.github_token()
+    if token:
+        request.add_header("Authorization", f"Bearer {token}")
+    with urllib.request.urlopen(request, timeout=10) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _github_changelog(tag: str) -> str:
+    request = urllib.request.Request(
+        f"https://api.github.com/repos/{UPDATE_REPOSITORY}/contents/CHANGELOG.md?ref={quote(tag)}",
+        headers={
+            "Accept": "application/vnd.github.raw+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+    token = os.getenv("SE_GITHUB_TOKEN", "").strip() or settings_service.github_token()
+    if token:
+        request.add_header("Authorization", f"Bearer {token}")
+    with urllib.request.urlopen(request, timeout=10) as response:
+        return response.read().decode("utf-8")
+
+
+def _release_changelog_section(markdown: str, version: str) -> str:
+    lines = markdown.splitlines()
+    heading = re.compile(rf"^##\s+\[?v?{re.escape(version)}\]?\s*$", re.IGNORECASE)
+    start = next((index for index, line in enumerate(lines) if heading.match(line.strip())), None)
+    if start is None:
+        return markdown.strip()
+    end = next((index for index in range(start + 1, len(lines)) if re.match(r"^##\s+", lines[index])), len(lines))
+    return "\n".join(lines[start:end]).strip()
+
+
+def _version_tuple(value: str) -> tuple[int, int, int]:
+    parts = str(value or "0.0.0").lstrip("v").split(".")
+    numbers = []
+    for part in parts[:3]:
+        digits = "".join(character for character in part if character.isdigit())
+        numbers.append(int(digits or 0))
+    return tuple((numbers + [0, 0, 0])[:3])
+
+
+@router.get("/system/update")
+def check_for_panel_update(user=Depends(require_user)):
+    current = APP_VERSION
+    try:
+        release = _github_release()
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
+        status = getattr(error, "code", None)
+        detail = "GitHub release check failed"
+        if status == 404:
+            detail = "The configured GitHub release is unavailable or requires a server-side token."
+        return {"current_version": current, "available": False, "checked": False, "message": detail}
+    latest = str(release.get("tag_name", "")).lstrip("v")
+    notes = release.get("body") or "No release notes were published for this version."
+    if latest:
+        try:
+            notes = _release_changelog_section(_github_changelog(str(release.get("tag_name", latest))), latest)
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, UnicodeDecodeError):
+            pass
+    return {
+        "current_version": current,
+        "latest_version": latest,
+        "available": bool(latest and _version_tuple(latest) > _version_tuple(current)),
+        "checked": True,
+        "repository": UPDATE_REPOSITORY,
+        "release_url": release.get("html_url", ""),
+        "published_at": release.get("published_at"),
+        "name": release.get("name") or f"Server Engine v{latest}",
+        "notes": notes,
+    }
+
+
+@router.post("/system/update")
+def update_panel(user=Depends(require_user)):
+    """Start the installer and let it replace the panel after this response."""
+    helper = "/usr/local/sbin/server-engine-update"
+    if not Path(helper).is_file():
+        raise HTTPException(status_code=503, detail="The panel updater is not installed. Run the latest Server Engine installer once before using panel updates.")
+    job_id = f"panel-update-{uuid.uuid4().hex}"
+    installer_log = Path(os.getenv("SE_LOG_ROOT", "/server-engine/logs")) / "panel-update.log"
+    installer_log.parent.mkdir(parents=True, exist_ok=True)
+    with installer_log.open("a") as stream:
+        stream.write(f"Starting panel update {job_id}.\n")
+        stream.flush()
+        subprocess.Popen(
+            ["/usr/bin/sudo", "-n", helper],
+            stdout=stream,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            close_fds=True,
+        )
+    job_store.publish({
+        "type": "panel-update",
+        "status": "started",
+        "job_id": job_id,
+        "message": "Panel update started. Server Engine will restart when the replacement is ready.",
+    })
+    return {"status": "started", "job_id": job_id, "log": str(installer_log)}
 
 
 def _history_path() -> Path:

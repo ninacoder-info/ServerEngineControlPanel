@@ -86,6 +86,8 @@ export function TerminalSession({
   visible,
   enabled,
   restart,
+  initialCommand = "",
+  className = "",
   onStatus,
   onControls,
 }) {
@@ -118,6 +120,7 @@ export function TerminalSession({
           container_id: profile.container_id || "",
         }),
       );
+      if (initialCommand) ws.send(JSON.stringify({ type: "input", data: initialCommand }));
       term.current?.writeln(`\r\n\x1b[32mConnected to ${profile.name}\x1b[0m`);
       fit.current?.fit();
       term.current?.focus();
@@ -128,7 +131,11 @@ export function TerminalSession({
       onStatus(profile.id, "disconnected");
     };
     ws.onerror = () => onStatus(profile.id, "error");
-  }, [enabled, onStatus, profile]);
+  }, [enabled, initialCommand, onStatus, profile]);
+  React.useEffect(() => {
+    if (!initialCommand || socket.current?.readyState !== WebSocket.OPEN) return;
+    socket.current.send(JSON.stringify({ type: "input", data: initialCommand }));
+  }, [initialCommand]);
   const resize = React.useCallback(() => {
     const dimensions = fit.current?.proposeDimensions();
     if (dimensions && socket.current?.readyState === WebSocket.OPEN)
@@ -232,7 +239,7 @@ export function TerminalSession({
     <div
       ref={root}
       onClick={() => term.current?.focus()}
-      className={`${visible ? "" : "hidden"} box-border h-[32rem] max-h-[32rem] min-h-0 w-full overflow-hidden rounded-lg bg-white p-3 dark:bg-neutral-900`}
+      className={`${visible ? "" : "hidden"} box-border min-h-0 w-full overflow-hidden rounded-lg bg-white p-3 dark:bg-neutral-900 ${className || "h-[32rem] max-h-[32rem]"}`}
     />
   );
 }

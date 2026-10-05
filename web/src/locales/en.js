@@ -1,7 +1,7 @@
 export default {
   nav: { overview: "Overview" },
   dashboard: {
-    greeting: "Good afternoon",
+    greeting: "Good day",
     apiOnline: "Manage your websites, services, databases, and server resources from one place.",
     servers: "Servers", websites: "Websites", storage: "Storage", systemHealth: "System health",
     developmentNode: "Development node", noSites: "No sites configured", agentNotConnected: "Agent not connected",

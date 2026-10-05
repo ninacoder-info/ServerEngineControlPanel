@@ -361,16 +361,17 @@ def _refresh_php_source_versions(definition: ServiceDefinition):
     versions = sorted(selected.values(), key=lambda item: tuple(int(part) for part in item.split(".")), reverse=True)
     if not versions:
         return None
-    # GitHub can expose a tag before its source archive is published (the
-    # MongoDB repository currently has such tags). Do not show a release that
-    # the installer cannot actually download.
+    # The PHP release page can expose a release before its source archive is
+    # published. Do not show a release that the installer cannot actually
+    # download. Keep this probe on the same authoritative provider used by
+    # php_source_for(); probing another project's tags here would make
+    # unrelated versions appear in the PHP selector.
     downloadable = []
     for version in versions:
-        source_url = f"https://codeload.github.com/mongodb/mongo/tar.gz/refs/tags/r{version}"
+        source_url = f"https://www.php.net/distributions/php-{version}.tar.gz"
         try:
-            # Use a ranged GET instead of HEAD: codeload.github.com can
-            # return a misleading success response to HEAD for unpublished
-            # tag archives.
+            # Use a ranged GET instead of HEAD so the provider must return a
+            # real archive response before the version is shown.
             probe = urllib.request.Request(
                 source_url,
                 headers={"Range": "bytes=0-0", "User-Agent": "Server-Engine-Control-Panel"},

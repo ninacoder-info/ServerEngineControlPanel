@@ -2,4 +2,4 @@
 name = "server-engine-core"
 version = "0.1.0"
 requires-python = ">=3.10"
-dependencies = ["fastapi>=0.115,<1", "uvicorn[standard]>=0.30,<1", "pydantic-settings>=2.6,<3", "python-multipart>=0.0.9,<1", "webauthn>=2.2,<3", "maxminddb>=2.6,<4", "boto3>=1.35,<2"]
+dependencies = ["fastapi>=0.115,<1", "uvicorn[standard]>=0.30,<1", "httpx>=0.27,<1", "websockets>=12,<16", "pydantic-settings>=2.6,<3", "python-multipart>=0.0.9,<1", "webauthn>=2.2,<3", "maxminddb>=2.6,<4", "boto3>=1.35,<2"]

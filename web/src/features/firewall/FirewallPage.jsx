@@ -50,7 +50,7 @@ const initialRules = [
     source: "Management network",
     destination: "Panel",
     service: "Control panel",
-    port: "8888",
+    port: "2309",
     interface: "WAN",
     states: 42,
     note: "Trusted administrators only",

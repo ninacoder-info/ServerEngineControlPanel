@@ -17,6 +17,12 @@ def create_domain(payload: DomainCreateRequest, user=Depends(require_user)):
     return domain_service.create(payload)
 
 
+@router.delete("/{domain}")
+def delete_domain(domain: str, user=Depends(require_user)):
+    domain_service.delete(domain)
+    return {"deleted": True}
+
+
 @router.get("/{domain}/records")
 def list_records(domain: str, user=Depends(require_user)):
     return {"domain": domain, "records": domain_service.records(domain)}

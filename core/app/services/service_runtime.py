@@ -248,6 +248,83 @@ def prepare_postgresql_runtime(root: Path) -> dict[str, str]:
     return environment
 
 
+def prepare_powerdns_runtime(root: Path) -> dict[str, str]:
+    """Stage PowerDNS shared libraries inside its managed service root."""
+    capability_helper = Path("/usr/local/sbin/server-engine-powerdns-bind-cap")
+    if capability_helper.exists() and shutil.which("sudo"):
+        granted = subprocess.run(["sudo", "-n", str(capability_helper)], capture_output=True, text=True, check=False)
+        if granted.returncode != 0:
+            raise RuntimeError("Unable to grant isolated PowerDNS permission to bind port 53: " + (granted.stderr or granted.stdout).strip())
+    library_dir = root / ".runtime-libraries"
+    library_dir.mkdir(parents=True, exist_ok=True)
+    apt = shutil.which("apt")
+    dpkg_deb = shutil.which("dpkg-deb")
+    apt_cache = shutil.which("apt-cache")
+    if not apt or not dpkg_deb:
+        raise RuntimeError("PowerDNS needs isolated runtime libraries, but apt and dpkg-deb are unavailable")
+
+    # Ubuntu ships the BIND backend separately from pdns-server. Recover an
+    # older Server Engine installation that extracted only the main package.
+    if not any(root.rglob("libbindbackend.so")):
+        policy = subprocess.run([apt_cache, "policy", "pdns-backend-bind"], capture_output=True, text=True, check=False).stdout if apt_cache else ""
+        if any(line.strip().startswith("Candidate:") and line.split(":", 1)[1].strip() not in {"", "(none)"} for line in policy.splitlines()):
+            backend_dir = root / ".runtime-backend"
+            backend_dir.mkdir(parents=True, exist_ok=True)
+            download = subprocess.run([apt, "download", "pdns-backend-bind"], cwd=backend_dir, capture_output=True, text=True, check=False)
+            if download.returncode != 0:
+                raise RuntimeError("Unable to stage the PowerDNS BIND backend: " + (download.stderr or download.stdout).strip())
+            backend_archives = sorted(backend_dir.glob("*.deb"))
+            if not backend_archives:
+                raise RuntimeError("The PowerDNS BIND backend package was not downloaded")
+            for archive in backend_archives:
+                subprocess.run([dpkg_deb, "-x", str(archive), str(root)], check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                archive.unlink(missing_ok=True)
+            shutil.rmtree(backend_dir, ignore_errors=True)
+
+    if not any(library_dir.rglob("libcurl.so*")):
+        package_groups = [
+            ("libcurl4t64", "libcurl4"),
+            ("libssl3t64", "libssl3"),
+            ("libnghttp2-14",),
+            ("libidn2-0",),
+            ("libpsl5t64", "libpsl5"),
+            ("libssh-4",),
+            ("libbrotli1",),
+            ("zlib1g",),
+            ("libzstd1",),
+        ]
+        packages = []
+        for candidates in package_groups:
+            selected = next(
+                (
+                    candidate
+                    for candidate in candidates
+                    if not apt_cache
+                    or subprocess.run([apt_cache, "show", candidate], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False).returncode == 0
+                ),
+                None,
+            )
+            if selected:
+                packages.append(selected)
+        if not packages:
+            raise RuntimeError("No compatible PowerDNS runtime library packages were found")
+        for archive in library_dir.glob("*.deb"):
+            archive.unlink(missing_ok=True)
+        download = subprocess.run([apt, "download", *packages], cwd=library_dir, capture_output=True, text=True, check=False)
+        if download.returncode != 0:
+            raise RuntimeError("Unable to stage PowerDNS runtime libraries: " + (download.stderr or download.stdout).strip())
+        archives = sorted(library_dir.glob("*.deb"))
+        if not archives:
+            raise RuntimeError("PowerDNS libcurl package was not downloaded")
+        for archive in archives:
+            subprocess.run([dpkg_deb, "-x", str(archive), str(library_dir)], check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            archive.unlink(missing_ok=True)
+    library_paths = [library_dir, *[path for path in library_dir.rglob("*") if path.is_dir()]]
+    environment = os.environ.copy()
+    environment["LD_LIBRARY_PATH"] = ":".join(str(path) for path in library_paths)
+    return environment
+
+
 def prepare_mongodb_runtime(root: Path) -> dict[str, str]:
     """Stage MongoDB's shared client and TLS libraries inside its root."""
     library_dir = root / ".runtime-libraries"
@@ -548,6 +625,9 @@ def ensure_php_terminal_launcher(version: str) -> Path:
 
 
 def composer_path() -> Path:
+    direct = service_root("composer") / "bin/composer"
+    if direct.exists():
+        return direct
     root = service_root("composer") / "versions"
     candidates = sorted(root.glob("*/bin/composer"), key=lambda path: version_sort_key(path.parent.parent.name), reverse=True)
     return candidates[0] if candidates else root / "current/bin/composer"

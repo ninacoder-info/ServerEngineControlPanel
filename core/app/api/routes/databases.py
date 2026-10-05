@@ -20,6 +20,7 @@ router = APIRouter(prefix="/api/v1/databases", tags=["databases"])
 
 ENGINE_SERVICES = {
     "mysql": {"name": "MySQL", "description": "Relational database for common PHP and web applications.", "service_id": "mysql"},
+    "mariadb": {"name": "MariaDB", "description": "MySQL-compatible relational database for web applications.", "service_id": "mariadb"},
     "postgresql": {"name": "PostgreSQL", "description": "Advanced relational database with strong SQL features.", "service_id": "postgresql"},
     "mongodb": {"name": "MongoDB", "description": "Document database for flexible application data.", "service_id": "mongodb"},
     "redis": {"name": "Redis", "description": "Fast in-memory store for cache, queues, and sessions.", "service_id": "redis"},
@@ -44,6 +45,10 @@ def _engine_state(engine_id: str) -> dict:
         root = service_root("mysql")
         installed = (root / "bin/mysqld").exists()
         running = _running(root / "run/mysqld.pid")
+    elif service_id == "mariadb":
+        root = service_root("mariadb")
+        installed = any((root / path).exists() for path in ("bin/mariadbd", "sbin/mariadbd", "usr/sbin/mariadbd"))
+        running = _running(root / "run/mariadbd.pid") or _running(root / "run/mysqld.pid")
     elif service_id == "mongodb":
         root = service_root("mongodb")
         installed = (root / "bin/mongod").exists()
@@ -94,6 +99,20 @@ def _mysql_query(sql: str) -> list[list[str]]:
     return [line.split("\t") for line in result.stdout.splitlines() if line.strip()]
 
 
+def _mariadb_query(sql: str) -> list[list[str]]:
+    root = service_root("mariadb")
+    client = next((candidate for candidate in (root / "bin/mariadb", root / "bin/mysql", root / "usr/bin/mariadb") if candidate.exists()), None)
+    socket = next((candidate for candidate in (root / "run/mariadb.sock", root / "run/mysqld.sock") if candidate.exists()), root / "run/mariadb.sock")
+    if client is None:
+        raise RuntimeError("MariaDB is not installed")
+    if not socket.exists():
+        raise RuntimeError("MariaDB is installed but stopped")
+    result = subprocess.run([str(client), "--protocol=SOCKET", f"--socket={socket}", "-uroot", "--batch", "--raw", "--skip-column-names", "-e", sql], capture_output=True, text=True, check=False, env=prepare_mysql_runtime(root), timeout=8)
+    if result.returncode != 0:
+        raise RuntimeError((result.stderr or result.stdout).strip() or "MariaDB query failed")
+    return [line.split("\t") for line in result.stdout.splitlines() if line.strip()]
+
+
 @router.get("/engines")
 def engines(user=Depends(require_user)):
     return [_engine_state(engine_id) for engine_id in ENGINE_SERVICES]
@@ -107,21 +126,23 @@ def list_databases(engine: str | None = None, user=Depends(require_user)):
         raise HTTPException(status_code=404, detail="Database engine is not supported")
     if selected != "all" and not states[selected]["installed"]:
         return {"engine": selected, "engine_state": states[selected], "databases": []}
-    if selected not in {"all", "mysql"}:
+    if selected not in {"all", "mysql", "mariadb"}:
         return {"engine": selected, "engine_state": states[selected], "databases": []}
-    if not states["mysql"]["installed"] or not states["mysql"]["running"]:
-        return {"engine": selected, "engine_state": states["mysql"], "databases": []}
+    active_engine = selected if selected in {"mysql", "mariadb"} else "mysql"
+    if not states[active_engine]["installed"] or not states[active_engine]["running"]:
+        return {"engine": selected, "engine_state": states[active_engine], "databases": []}
     try:
-        rows = _mysql_query("SELECT s.SCHEMA_NAME, COALESCE(SUM(t.DATA_LENGTH + t.INDEX_LENGTH), 0) FROM INFORMATION_SCHEMA.SCHEMATA s LEFT JOIN INFORMATION_SCHEMA.TABLES t ON t.TABLE_SCHEMA = s.SCHEMA_NAME WHERE s.SCHEMA_NAME NOT IN ('information_schema','mysql','performance_schema','sys') GROUP BY s.SCHEMA_NAME ORDER BY s.SCHEMA_NAME")
+        query = "SELECT s.SCHEMA_NAME, COALESCE(SUM(t.DATA_LENGTH + t.INDEX_LENGTH), 0) FROM INFORMATION_SCHEMA.SCHEMATA s LEFT JOIN INFORMATION_SCHEMA.TABLES t ON t.TABLE_SCHEMA = s.SCHEMA_NAME WHERE s.SCHEMA_NAME NOT IN ('information_schema','mysql','performance_schema','sys') GROUP BY s.SCHEMA_NAME ORDER BY s.SCHEMA_NAME"
+        rows = _mysql_query(query) if active_engine == "mysql" else _mariadb_query(query)
     except (RuntimeError, subprocess.TimeoutExpired) as error:
-        return {"engine": selected, "engine_state": states["mysql"], "databases": [], "error": str(error)}
+        return {"engine": selected, "engine_state": states[active_engine], "databases": [], "error": str(error)}
     databases = []
     for row in rows:
-        saved = database_credentials.public_for("mysql", row[0])
+        saved = database_credentials.public_for(active_engine, row[0])
         databases.append({
-            "id": f"mysql:{row[0]}",
+            "id": f"{active_engine}:{row[0]}",
             "name": row[0],
-            "engine": "mysql",
+            "engine": active_engine,
             "username": saved["username"] if saved else "—",
             "credentials_saved": bool(saved),
             "backup": _database_backup_frequency(row[0]),
@@ -129,27 +150,28 @@ def list_databases(engine: str | None = None, user=Depends(require_user)):
             "size": int(row[1] or 0),
             "location": "localhost",
         })
-    return {"engine": selected, "engine_state": states["mysql"], "databases": databases}
+    return {"engine": selected, "engine_state": states[active_engine], "databases": databases}
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create_database(payload: DatabaseCreateRequest, user=Depends(require_user)):
-    if payload.engine != "mysql":
-        raise HTTPException(status_code=400, detail="Database creation currently supports installed MySQL only")
-    state = _engine_state("mysql")
+    if payload.engine not in {"mysql", "mariadb"}:
+        raise HTTPException(status_code=400, detail="Database creation currently supports MySQL and MariaDB")
+    state = _engine_state(payload.engine)
     if not state["installed"]:
-        raise HTTPException(status_code=400, detail="MySQL is not installed")
+        raise HTTPException(status_code=400, detail=f"{ENGINE_SERVICES[payload.engine]['name']} is not installed")
     if not state["running"]:
-        raise HTTPException(status_code=400, detail="MySQL is installed but stopped")
+        raise HTTPException(status_code=400, detail=f"{ENGINE_SERVICES[payload.engine]['name']} is installed but stopped")
     if payload.backup != "manual" and cron_service_module.cron_service is None:
         raise HTTPException(status_code=503, detail="Cron scheduler is not ready")
     database = payload.name.replace("`", "``")
     username = payload.username.replace("`", "``")
     password = payload.password.replace("'", "''")
-    _mysql_query(f"CREATE DATABASE IF NOT EXISTS `{database}` CHARACTER SET {payload.charset}; CREATE USER IF NOT EXISTS '{username}'@'localhost' IDENTIFIED BY '{password}'; ALTER USER '{username}'@'localhost' IDENTIFIED BY '{password}'; GRANT ALL PRIVILEGES ON `{database}`.* TO '{username}'@'localhost'; FLUSH PRIVILEGES;")
-    database_credentials.save("mysql", payload.name, payload.username, payload.password)
-    backup_job = _ensure_database_backup_job(payload.name, payload.backup)
-    return {"created": True, "database": {"id": f"mysql:{payload.name}", "name": payload.name, "engine": "mysql", "username": payload.username, "backup": payload.backup, "status": "Ready", "size": 0, "location": "localhost"}, "backup_job": backup_job}
+    query = f"CREATE DATABASE IF NOT EXISTS `{database}` CHARACTER SET {payload.charset}; CREATE USER IF NOT EXISTS '{username}'@'localhost' IDENTIFIED BY '{password}'; ALTER USER '{username}'@'localhost' IDENTIFIED BY '{password}'; GRANT ALL PRIVILEGES ON `{database}`.* TO '{username}'@'localhost'; FLUSH PRIVILEGES;"
+    (_mysql_query if payload.engine == "mysql" else _mariadb_query)(query)
+    database_credentials.save(payload.engine, payload.name, payload.username, payload.password)
+    backup_job = _ensure_database_backup_job(payload.name, payload.backup) if payload.engine == "mysql" else None
+    return {"created": True, "database": {"id": f"{payload.engine}:{payload.name}", "name": payload.name, "engine": payload.engine, "username": payload.username, "backup": payload.backup, "status": "Ready", "size": 0, "location": "localhost"}, "backup_job": backup_job}
 
 
 @router.post("/{engine}/import", status_code=status.HTTP_202_ACCEPTED)
@@ -195,8 +217,8 @@ async def import_database(
 
 @router.get("/{engine}/{database_name}/credentials")
 def database_credentials_for_copy(engine: str, database_name: str, user=Depends(require_user)):
-    if engine != "mysql":
-        raise HTTPException(status_code=400, detail="Credential copy currently supports MySQL only")
+    if engine not in {"mysql", "mariadb"}:
+        raise HTTPException(status_code=400, detail="Credential copy currently supports MySQL and MariaDB only")
     saved = database_credentials.secret_for(engine, database_name)
     if not saved:
         raise HTTPException(status_code=404, detail="No saved panel credentials exist for this database")
@@ -236,7 +258,7 @@ def _ensure_database_backup_job(database_name: str, frequency: str):
 @router.post("/{engine}/{database_name}/backup-job")
 def create_backup_job(engine: str, database_name: str, user=Depends(require_user)):
     if engine != "mysql":
-        raise HTTPException(status_code=400, detail="Database backup jobs currently support MySQL only")
+        raise HTTPException(status_code=400, detail="MariaDB backup schedules are not available yet; use a manual backup from the Backup page.")
     if cron_service_module.cron_service is None:
         raise HTTPException(status_code=503, detail="Cron scheduler is not ready")
     job = _ensure_database_backup_job(database_name, "daily")

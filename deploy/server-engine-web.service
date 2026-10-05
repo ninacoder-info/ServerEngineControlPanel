@@ -10,7 +10,6 @@ ExecStart=/opt/server-engine/web/run.sh
 Restart=on-failure
 RestartSec=3
 User=serverengine
-NoNewPrivileges=true
 
 [Install]
 WantedBy=multi-user.target

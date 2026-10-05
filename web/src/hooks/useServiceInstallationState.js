@@ -12,6 +12,7 @@ export function useServiceInstallationState(serviceId) {
   );
   const installerId = serviceIds[0];
   const [installed, setInstalled] = React.useState(false);
+  const [running, setRunning] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
   const [service, setService] = React.useState(null);
   const [openingInstaller, setOpeningInstaller] = React.useState(false);
@@ -29,14 +30,17 @@ export function useServiceInstallationState(serviceId) {
       if (!response.ok) throw new Error(await readApiError(response, "Unable to check service status."));
       const services = await response.json();
       const jobs = jobsResponse.ok ? await jobsResponse.json() : [];
+      const matchingServices = services.filter((item) => serviceIds.some((id) => isMatchingService(item, id)));
       const activeJob = jobs.find((job) => {
         const type = String(job.type || "").toLowerCase();
         return (job.status === "queued" || job.status === "running") && serviceIds.some((id) => type.includes(`install ${id.toLowerCase()}`));
       });
-      setInstalled(services.some((item) => serviceIds.some((id) => isMatchingService(item, id))));
+      setInstalled(matchingServices.length > 0);
+      setRunning(matchingServices.some((item) => item.running === true || item.status === "running"));
       setInstallJob(activeJob || null);
     } catch (statusError) {
       setInstalled(false);
+      setRunning(false);
       setInstallJob(null);
       setError(statusError.message || "Unable to check service status.");
     } finally {
@@ -48,7 +52,7 @@ export function useServiceInstallationState(serviceId) {
     loadStatus();
     const updateFromSocket = (event) => {
       const detail = event.detail || {};
-      if (!serviceIds.includes(detail.serviceId)) return;
+      if (!serviceIds.some((id) => detail.serviceId === id || detail.serviceId?.startsWith(`${id}@`))) return;
       if (["queued", "running"].includes(detail.status)) {
         if (detail.action === "install") setInstallJob(detail.job || { status: detail.status });
         return;
@@ -56,11 +60,14 @@ export function useServiceInstallationState(serviceId) {
       if (detail.status !== "succeeded") return;
       if (detail.action === "install") {
         setInstalled(true);
+        setRunning(false);
         setInstallJob(null);
       } else if (detail.action === "uninstall") {
         setInstalled(false);
+        setRunning(false);
         setInstallJob(null);
       } else if (["stop", "start", "restart"].includes(detail.action)) {
+        setRunning(detail.action !== "stop");
         setInstallJob(null);
       }
     };
@@ -88,6 +95,7 @@ export function useServiceInstallationState(serviceId) {
 
   return {
     installed,
+    running,
     loading,
     service,
     openingInstaller,

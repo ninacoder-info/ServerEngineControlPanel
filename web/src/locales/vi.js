@@ -1,7 +1,7 @@
 export default {
   nav: { overview: "Tổng quan" },
   dashboard: {
-    greeting: "Chào buổi chiều",
+    greeting: "Chúc một ngày tốt lành",
     apiOnline: "Quản lý website, dịch vụ, cơ sở dữ liệu và tài nguyên máy chủ từ một nơi.",
     servers: "Máy chủ", websites: "Website", storage: "Lưu trữ", systemHealth: "Tình trạng hệ thống",
     developmentNode: "Nút phát triển", noSites: "Chưa có website", agentNotConnected: "Tác nhân chưa kết nối",

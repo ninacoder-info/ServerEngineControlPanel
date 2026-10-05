@@ -5,9 +5,10 @@ import {
   Download,
   ExternalLink,
   Info,
-  Server,
   Star,
 } from "lucide-react";
+
+import ServiceSvgIcon from "../../components/icons/ServiceSvgIcon";
 
 export default function ServiceCard({
   service,
@@ -26,8 +27,8 @@ export default function ServiceCard({
   return (
     <article className={`flex gap-4 rounded-lg border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900 ${pinned ? "ring-1 ring-blue-600 dark:ring-blue-400" : ""}`}>
       <div className="flex shrink-0 flex-col items-center gap-3">
-        <div className="grid h-10 w-10 place-items-center rounded-md bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
-          <Server size={21} />
+        <div className="grid h-10 w-10 place-items-center rounded-md bg-neutral-100 text-blue-600 dark:bg-neutral-800 dark:text-blue-400">
+          <ServiceSvgIcon serviceId={service.id} size={24} />
         </div>
       </div>
       <div className="min-w-0 flex-1">
@@ -68,7 +69,7 @@ export default function ServiceCard({
                     : "Not installed"}
             </span>
             <button
-              className={`inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200 ${pinned ? "text-amber-500 dark:text-amber-400" : ""}`}
+              className={`inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200 ${pinned ? "text-yellow-500 dark:text-yellow-400" : ""}`}
               title={pinned ? "Unstar service" : "Star service"}
               aria-label={
                 pinned ? `Unstar ${service.name}` : `Star ${service.name}`

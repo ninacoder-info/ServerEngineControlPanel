@@ -189,7 +189,7 @@ const securityValues = (values) => ({
   security_require_mfa: values.security_require_mfa === true,
   security_strong_passwords: values.security_strong_passwords !== false,
   security_panel_domain: values.security_panel_domain || "",
-  security_panel_port: values.security_panel_port ?? 8888,
+  security_panel_port: values.security_panel_port ?? 2309,
   security_authorized_ips: Array.isArray(values.security_authorized_ips)
     ? values.security_authorized_ips
     : [],
@@ -204,6 +204,7 @@ const securityValues = (values) => ({
   security_lockout_minutes: values.security_lockout_minutes ?? 15,
   security_audit_events: values.security_audit_events !== false,
   security_auth_alerts: values.security_auth_alerts !== false,
+  ...(values.security_github_token ? { security_github_token: values.security_github_token } : {}),
 });
 const notificationSettingsValues = (values) => ({
   notifications_enabled: values.notifications_enabled !== false,
@@ -928,6 +929,25 @@ function SecurityTab({ values, onChange, onSave, onReset, saving, dirty, message
           checked={o.security_strong_passwords}
           onChange={(v) => set("security_strong_passwords", v)}
         />
+        <Control
+          full
+          label="GitHub authentication token"
+          description="Used for private Server Engine release checks and panel updates. It is stored in a protected server-side credential file and never displayed again."
+        >
+          <input
+            className={input}
+            type="password"
+            autoComplete="new-password"
+            value={values.security_github_token || ""}
+            onChange={(e) => set("security_github_token", e.target.value)}
+            placeholder={values.security_github_token_configured ? "Configured — enter a new token to replace it" : "github_pat_…"}
+          />
+          {values.security_github_token_configured && !values.security_github_token && (
+            <span className="mt-1 block text-xs font-normal text-neutral-500 dark:text-neutral-400">
+              A token is configured. Leave this blank to keep it unchanged.
+            </span>
+          )}
+        </Control>
       </Section>
       <Section
         icon={Globe2}
@@ -2372,7 +2392,7 @@ export default function SettingsPage() {
     });
     if (r.ok) {
       const body = await r.json();
-      setValues((current) => ({ ...current, ...body.values }));
+      setValues((current) => ({ ...current, ...body.values, security_github_token: "" }));
       setSecuritySaved(body.values);
       setSecurityMessage("Security settings saved.");
       setSettingsToast("Security settings saved.");

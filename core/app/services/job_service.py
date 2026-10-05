@@ -27,7 +27,7 @@ from app.models.website import Website, WebsiteUpdateRequest
 from app.models.projects import NodeProject
 from app.services.website_service import website_service
 from app.services.service_catalog import apache_source_for, bind9_source_for, certbot_source_for, caddy_source_for, clamav_source_for, dovecot_source_for, ffmpeg_source_for, git_source_for, haproxy_source_for, imagemagick_source_for, lynis_source_for, mariadb_source_for, memcached_source_for, mongodb_prebuilt_for, mongodb_source_for, mysql_release_for, nginx_source_for, opensearch_source_for, openlitespeed_prebuilt_for, openlitespeed_source_for, php_source_for, postfix_source_for, powerdns_source_for, postgresql_source_for, prebuilt_package_for, python_asset_for, python_source_for, rabbitmq_source_for, redis_source_for, refresh_service_versions, rspamd_source_for, ruby_source_for, stalwart_prebuilt_for, stalwart_source_for, supervisor_source_for, unbound_source_for, valkey_source_for, vsftpd_source_for, wpcli_source_for
-from app.services.service_runtime import PHP_BASELINE_MODULES, PHP_REQUIRED_EXTENSIONS, SERVICE_PACKAGES, binary_path, enable_php_baseline_extensions, ensure_composer_cache, ensure_nginx_layout, ensure_node_runtime, ensure_php_fpm_layout, ensure_php_runtime_configuration, ensure_php_runtime_launcher, managed_library_environment, nginx_paths, normalize_php_runtime_layout, package_for, php_cli_path, php_fpm_paths, php_runtime_library_path, prepare_mongodb_runtime, prepare_mysql_runtime, prepare_postgresql_runtime, service_root, startup_enabled, version_sort_key
+from app.services.service_runtime import PHP_BASELINE_MODULES, PHP_REQUIRED_EXTENSIONS, SERVICE_PACKAGES, binary_path, composer_path, enable_php_baseline_extensions, ensure_composer_cache, ensure_nginx_layout, ensure_node_runtime, ensure_php_fpm_layout, ensure_php_runtime_configuration, ensure_php_runtime_launcher, managed_library_environment, nginx_paths, normalize_php_runtime_layout, package_for, php_cli_path, php_fpm_paths, php_runtime_library_path, prepare_mongodb_runtime, prepare_mysql_runtime, prepare_postgresql_runtime, prepare_powerdns_runtime, service_root, startup_enabled, version_sort_key
 from app.services.database_credentials import database_credentials
 
 
@@ -470,9 +470,9 @@ class JobStore:
         message = f"ClamAV scan completed cleanly. Scanned {total_files:,} files." if return_code == 0 else f"ClamAV scan completed and found one or more threats after scanning {total_files:,} files. Review the scan output before quarantine."
         self._update(job_id, status="succeeded", progress=100, message=message, log=[message])
 
-    def enqueue_application_deploy(self, job_id: str, site: Website, template: str, database_engine: str = "", database_password: str = "", wordpress_version: str = "latest", wordpress_admin_user: str = "", wordpress_admin_password: str = "", wordpress_database_prefix: str = "wp_", wordpress_site_title: str = "") -> JobSummary:
+    def enqueue_application_deploy(self, job_id: str, site: Website, template: str, database_engine: str = "", database_password: str = "", wordpress_version: str = "latest", wordpress_admin_user: str = "", wordpress_admin_password: str = "", wordpress_database_prefix: str = "wp_", wordpress_site_title: str = "", laravel_version: str = "") -> JobSummary:
         job = self.create(job_id, f"Deploy {template.title()} · {site.domain}")
-        Thread(target=self._run_serialized, args=(self._run_application_deploy, job_id, site, template, database_engine, database_password, wordpress_version, wordpress_admin_user, wordpress_admin_password, wordpress_database_prefix, wordpress_site_title), daemon=True).start()
+        Thread(target=self._run_serialized, args=(self._run_application_deploy, job_id, site, template, database_engine, database_password, wordpress_version, wordpress_admin_user, wordpress_admin_password, wordpress_database_prefix, wordpress_site_title, laravel_version), daemon=True).start()
         return job
 
     def enqueue_node_project_action(self, job_id: str, project: NodeProject, action: str) -> JobSummary:
@@ -635,22 +635,20 @@ class JobStore:
 
     @staticmethod
     def _write_application_database_config(site: Website, template: str, credentials: tuple[str, str, str] | None, wordpress_database_prefix: str = "wp_") -> None:
-        if not credentials:
-            return
-        database_name, database_user, database_password = credentials
         project = Path(site.project_path)
         if template == "laravel":
             env_file = project / ".env"
             if not env_file.exists():
                 return
-            values = {
-                "DB_CONNECTION": "mysql",
-                "DB_HOST": "127.0.0.1",
-                "DB_PORT": "3306",
-                "DB_DATABASE": database_name,
-                "DB_USERNAME": database_user,
-                "DB_PASSWORD": database_password,
-            }
+            if credentials:
+                database_name, database_user, database_password = credentials
+                values = {"DB_CONNECTION": "mysql", "DB_HOST": "127.0.0.1", "DB_PORT": "3306", "DB_DATABASE": database_name, "DB_USERNAME": database_user, "DB_PASSWORD": database_password}
+            else:
+                sqlite_file = project / "database/database.sqlite"
+                sqlite_file.parent.mkdir(parents=True, exist_ok=True)
+                sqlite_file.touch(exist_ok=True)
+                values = {"DB_CONNECTION": "sqlite", "DB_HOST": "", "DB_PORT": "", "DB_DATABASE": str(sqlite_file), "DB_USERNAME": "", "DB_PASSWORD": "", "SESSION_DRIVER": "file", "QUEUE_CONNECTION": "sync", "CACHE_STORE": "file"}
+            values["APP_URL"] = f"{'https' if site.ssl_enabled else 'http'}://{site.domain}"
             lines = env_file.read_text(errors="replace").splitlines()
             for key, value in values.items():
                 pattern = re.compile(rf"^{re.escape(key)}=")
@@ -662,7 +660,8 @@ class JobStore:
                 else:
                     lines.append(replacement)
             env_file.write_text("\n".join(lines) + "\n")
-        elif template == "wordpress":
+        elif template == "wordpress" and credentials:
+            database_name, database_user, database_password = credentials
             sample = project / "wp-config-sample.php"
             if not sample.exists() or (project / "wp-config.php").exists():
                 return
@@ -751,7 +750,7 @@ class JobStore:
         if site.web_root != "." and not (project / site.web_root).is_dir():
             raise RuntimeError(f"The configured document root {site.web_root} does not exist.")
 
-    def _run_application_deploy(self, job_id: str, site: Website, template: str, database_engine: str = "", database_password: str = "", wordpress_version: str = "latest", wordpress_admin_user: str = "", wordpress_admin_password: str = "", wordpress_database_prefix: str = "wp_", wordpress_site_title: str = ""):
+    def _run_application_deploy(self, job_id: str, site: Website, template: str, database_engine: str = "", database_password: str = "", wordpress_version: str = "latest", wordpress_admin_user: str = "", wordpress_admin_password: str = "", wordpress_database_prefix: str = "wp_", wordpress_site_title: str = "", laravel_version: str = ""):
         project = Path(site.project_path)
         staging = project.parent / f".server-engine-{template}-{job_id}-staging"
         archive = staging / "application.tar.gz"
@@ -776,13 +775,16 @@ class JobStore:
                         raise RuntimeError(f"The project folder already contains {item.name}; deployment stopped to avoid overwriting it.")
                     shutil.move(str(item), str(target))
             elif template in {"laravel", "drupal", "symfony", "cakephp", "codeigniter4", "yii", "slim", "laminas"}:
-                composer = service_root("composer") / "bin/composer"
+                composer = composer_path()
                 if not composer.exists():
                     raise RuntimeError("This PHP application requires Composer. Install Composer, then retry.")
                 if any(project.iterdir()):
                     raise RuntimeError(f"{template.title()} deployment requires an empty project folder to protect existing files.")
                 packages = {"laravel": "laravel/laravel", "drupal": "drupal/recommended-project", "symfony": "symfony/skeleton", "cakephp": "cakephp/app", "codeigniter4": "codeigniter4/appstarter", "yii": "yiisoft/yii2-app-basic", "slim": "slim/slim-skeleton", "laminas": "laminas/laminas-mvc-skeleton"}
-                command = [str(composer), "create-project", packages[template], str(project), "--no-interaction", "--prefer-dist"]
+                command = [str(composer), "create-project", packages[template], str(project)]
+                if template == "laravel" and laravel_version.strip():
+                    command.append(laravel_version.strip())
+                command.extend(["--no-interaction", "--prefer-dist"])
                 self._update(job_id, progress=15, message=f"Installing {template.title()} with the managed Composer runtime…", log=[f"$ {' '.join(shlex.quote(item) for item in command)}"])
                 process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env={**os.environ, "COMPOSER_MEMORY_LIMIT": "-1"})
                 output = []
@@ -792,6 +794,7 @@ class JobStore:
                 if process.wait() != 0:
                     raise RuntimeError(output[-1] if output else "Composer could not install Laravel.")
                 if template == "laravel":
+                    self._write_application_database_config(site, template, None)
                     self._finalize_laravel(job_id, site)
             else:
                 raise RuntimeError(f"Unsupported application template: {template}")
@@ -829,6 +832,7 @@ class JobStore:
         overlap. This protects APT/dpkg and prevents concurrent builds from
         exhausting the host.
         """
+        self._update(job_id, message="Waiting for the next available operation…", log=["Queued behind another operation; execution will start automatically."])
         with self._task_lock:
             if self._is_cancelled(job_id):
                 return
@@ -1861,7 +1865,7 @@ class JobStore:
 
     def _run_powerdns_action(self, job_id: str, action: str):
         root = service_root("powerdns")
-        binary = Path(shutil.which("pdns_server") or "/usr/sbin/pdns_server")
+        binary = binary_path("powerdns")
         config_dir = root / "conf"
         config = config_dir / "pdns.conf"
         log_file = root / "logs/pdns.log"
@@ -1869,6 +1873,12 @@ class JobStore:
             if not binary.exists():
                 raise RuntimeError("PowerDNS is not installed")
             self._prepare_service_runtime(root, "conf", "logs", "run")
+            prepare_powerdns_runtime(root)
+            # Build the authoritative BIND catalog from the panel registry
+            # before every start/restart. This keeps PowerDNS and the Domains
+            # page on the same source of truth without touching host DNS.
+            from app.services.domain_service import domain_service
+            domain_service._sync_powerdns(domain_service._read(), reload_powerdns=False)
             if not config.exists():
                 config.write_text("launch=local\nlocal-address=0.0.0.0\nlocal-port=53\nsetuid=serverengine\nsetgid=serverengine\n")
             if action in {"stop", "restart"}:
@@ -1876,14 +1886,20 @@ class JobStore:
             if action == "stop":
                 self._update(job_id, status="succeeded", message="PowerDNS stopped.", log=[])
                 return
-            command = [str(binary), "--daemon=no", "--config-dir", str(config_dir)]
+            command = [str(binary), "--daemon=no", f"--config-dir={config_dir}"]
             self._update(job_id, status="running", message=f"Starting PowerDNS with {config}…", log=[])
+            runtime_env = managed_library_environment(root)
             with log_file.open("a") as stream:
-                process = subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True)
+                process = subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT, env=runtime_env, start_new_session=True)
             import time
             time.sleep(0.4)
             if process.poll() is not None:
-                raise RuntimeError(f"PowerDNS exited with code {process.returncode}; inspect {log_file}")
+                details = ""
+                try:
+                    details = log_file.read_text(errors="replace")[-2000:].strip()
+                except OSError:
+                    pass
+                raise RuntimeError(f"PowerDNS exited with code {process.returncode}; {details or f'inspect {log_file}'}")
             self._update(job_id, status="succeeded", message=f"PowerDNS {action} completed.", log=[])
         except Exception as error:
             self._update(job_id, status="failed", message=str(error))
@@ -2699,20 +2715,21 @@ class JobStore:
             current = self._jobs[job_id]
             if current.status == "cancelled" and changes.get("status") != "cancelled":
                 return
-            if "log" in changes and changes["log"]:
-                incoming = list(changes["log"])
+            if "log" in changes:
+                incoming = list(changes["log"] or [])
                 existing = current.log
-                if existing and len(incoming) >= len(existing) and incoming[:len(existing)] == existing:
-                    changes["log"] = incoming
-                else:
-                    overlap = 0
-                    for size in range(1, min(len(existing), len(incoming)) + 1):
-                        if existing[-size:] == incoming[:size]:
-                            overlap = size
-            changes["log"] = existing + incoming[overlap:]
-            # Keep the browser payload and in-memory job state bounded even
-            # when a scan or build emits millions of lines.
-            changes["log"] = changes["log"][-1000:]
+                if incoming:
+                    if existing and len(incoming) >= len(existing) and incoming[:len(existing)] == existing:
+                        changes["log"] = incoming
+                    else:
+                        overlap = 0
+                        for size in range(1, min(len(existing), len(incoming)) + 1):
+                            if existing[-size:] == incoming[:size]:
+                                overlap = size
+                        changes["log"] = existing + incoming[overlap:]
+                    # Keep the browser payload and in-memory job state bounded
+                    # even when a scan or build emits millions of lines.
+                    changes["log"] = changes["log"][-1000:]
             updated = current.model_copy(update={"updated_at": datetime.now(timezone.utc), **changes})
             self._jobs[job_id] = updated
         self._broadcast(updated)
@@ -2822,8 +2839,15 @@ class JobStore:
                     if any(line.strip().startswith("Candidate:") and line.split(":", 1)[1].strip() not in {"", "(none)"} for line in policy.stdout.splitlines()):
                         package = candidate
                         break
+        services_root = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services"))
+        # The control plane is intentionally unprivileged.  The installer owns
+        # this directory for serverengine, but prepare it here as well for
+        # upgrades from older releases and non-installer deployments.
+        services_root.mkdir(parents=True, exist_ok=True)
+        base_root = services_root / service_id
+        if not base_root.exists():
+            base_root.mkdir(parents=True, exist_ok=True)
         root = service_root(service_id, requested_version) if service_id in {"nginx", "apache", "openlitespeed"} else service_root(service_id)
-        base_root = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / service_id
         nginx_shield_was_attached = False
         if service_id == "nginx":
             # Preserve the operator's Shield choice across a version swap.
@@ -2839,7 +2863,10 @@ class JobStore:
                 )
             )
             self._force_stop_nginx_runtime(job_id)
-        staging = base_root / f".{service_id}-{job_id}-prebuilt"
+        # Keep staging beside the service root.  For non-versioned services
+        # the final extraction below replaces ``base_root``; placing staging
+        # inside it would delete the staged package before it is copied.
+        staging = services_root / f".{service_id}-{job_id}-prebuilt"
         package_dir = staging / "packages"
         try:
             shutil.rmtree(staging, ignore_errors=True)
@@ -2878,14 +2905,25 @@ class JobStore:
             package_request = f"{package}={versioned_package}" if versioned_package else package
             self._update(job_id, status="running", progress=5, message=f"Downloading prebuilt {service_id} {requested_version}…", log=[f"$ apt download {package_request}"])
             packages = [package_request]
+            apt_cache = shutil.which("apt-cache")
             if service_id == "nginx":
                 # Ubuntu splits the executable into nginx-core. Downloading
                 # only the metapackage can leave an apparently installed
                 # runtime without a usable nginx binary.
                 packages.append(f"nginx-core={versioned_package}" if versioned_package else "nginx-core")
-            apt_cache = shutil.which("apt-cache")
+            if service_id == "powerdns":
+                # The BIND backend is a separate Ubuntu package. The
+                # pdns-server executable alone cannot load libbindbackend.so.
+                bind_backend = "pdns-backend-bind"
+                backend_policy = subprocess.run([apt_cache, "policy", bind_backend], capture_output=True, text=True, check=False).stdout if apt_cache else ""
+                backend_available = not apt_cache or any(
+                    line.strip().startswith("Candidate:") and line.split(":", 1)[1].strip() not in {"", "(none)"}
+                    for line in backend_policy.splitlines()
+                )
+                if backend_available:
+                    packages.append(f"{bind_backend}={versioned_package}" if versioned_package else bind_backend)
             if apt_cache:
-                pending = [package]
+                pending = list(packages)
                 seen = set()
                 while pending:
                     dependency_package = pending.pop(0)
@@ -3074,8 +3112,6 @@ class JobStore:
         }.get(service_id)
         if not dependencies:
             return
-        if os.geteuid() != 0:
-            raise RuntimeError(f"Installing {service_id} requires root privileges to prepare its isolated source build dependencies.")
         apt = shutil.which("apt-get")
         dnf = shutil.which("dnf")
         yum = shutil.which("yum")
@@ -3098,6 +3134,21 @@ class JobStore:
                 if len(output) == 1 or len(output) % 3 == 0:
                     self._update(job_id, progress=progress, message=message, log=output[-80:])
             return process.wait(), output
+
+        if os.geteuid() != 0:
+            helper = shutil.which("sudo")
+            dependency_helper = "/usr/local/sbin/server-engine-prepare-build-deps"
+            if helper and Path(dependency_helper).exists() and apt:
+                install_code, install_output = run_logged(
+                    [helper, "-n", dependency_helper, service_id],
+                    1,
+                    f"Preparing isolated build dependencies for {service_id}…",
+                )
+                if install_code != 0:
+                    raise RuntimeError("\n".join(install_output[-30:]) or f"Unable to prepare build dependencies for {service_id}")
+                self._update(job_id, progress=3, message=f"Build dependencies for {service_id} are ready.", log=install_output[-80:])
+                return
+            raise RuntimeError(f"Installing {service_id} requires the Server Engine build-dependency helper; update the installation first.")
 
         if apt:
             if service_id == "mariadb":
@@ -3163,11 +3214,14 @@ class JobStore:
             return
         root = service_root("php", requested_version)
         staging = root.parent / f".php-{requested_version}-{job_id}-staging"
+        build_dependencies = root.parent / f".php-{requested_version}-{job_id}-dependencies"
         archive = root.parent / f"php-{requested_version}.tar.gz"
         try:
             self._ensure_source_build_dependencies(job_id, "php")
             shutil.rmtree(staging, ignore_errors=True)
+            shutil.rmtree(build_dependencies, ignore_errors=True)
             staging.mkdir(parents=True, exist_ok=True)
+            build_dependencies.mkdir(parents=True, exist_ok=True)
             archive.unlink(missing_ok=True)
             self._update(job_id, status="running", progress=5, message=f"Downloading PHP {requested_version} source…", log=[f"$ curl -L {source_url}"])
             with urllib.request.urlopen(urllib.request.Request(source_url, headers={"User-Agent": "Server-Engine-Control-Panel"}), timeout=120) as response, archive.open("wb") as output:
@@ -3178,16 +3232,61 @@ class JobStore:
                 package.extractall(staging)
             source = next((item for item in staging.iterdir() if item.is_dir() and item.name.startswith("php-")), source)
             runtime_user = self._ensure_service_user()
+
+            # Older PHP configure scripts do not understand the PHP 7.4+
+            # GD options and do not find Debian's multiarch curl headers
+            # under /usr/include/<triplet>/curl. Stage a private include
+            # prefix for configure instead of modifying the host filesystem.
+            php_version_tuple = tuple(int(part) for part in requested_version.split(".")[:2])
+            curl_header = next(
+                (
+                    candidate
+                    for candidate in (
+                        Path("/usr/include/curl/easy.h"),
+                        *sorted(Path("/usr/include").glob("*/curl/easy.h")),
+                    )
+                    if candidate.is_file()
+                ),
+                None,
+            )
+            if not curl_header:
+                raise RuntimeError("PHP build dependency libcurl is missing curl/easy.h; reinstall libcurl development headers and try again.")
+            curl_include = build_dependencies / "include/curl"
+            curl_include.parent.mkdir(parents=True, exist_ok=True)
+            curl_include.symlink_to(curl_header.parent, target_is_directory=True)
+            curl_library = next(
+                (
+                    candidate.parent
+                    for candidate in (
+                        Path("/usr/lib/x86_64-linux-gnu/libcurl.so"),
+                        Path("/usr/lib/aarch64-linux-gnu/libcurl.so"),
+                        Path("/usr/lib/libcurl.so"),
+                    )
+                    if candidate.is_file()
+                ),
+                None,
+            )
+            if curl_library:
+                (build_dependencies / "lib").symlink_to(curl_library, target_is_directory=True)
+            configure_cppflags = f"-I{build_dependencies / 'include'} -I{curl_header.parent.parent}"
+            configure_ldflags = f"-L{build_dependencies / 'lib'}" if curl_library else ""
+            if php_version_tuple >= (7, 4):
+                gd_options = ["--enable-gd", "--with-jpeg", "--with-webp", "--with-freetype"]
+            else:
+                gd_options = ["--with-gd", "--with-jpeg-dir=/usr", "--with-png-dir=/usr", "--with-freetype-dir=/usr"]
             configure = [
                 "./configure", f"--prefix={root}", f"--with-config-file-path={root / 'conf'}",
                 f"--with-config-file-scan-dir={root / 'conf/conf.d'}", "--enable-fpm", f"--with-fpm-user={runtime_user}",
                 f"--with-fpm-group={runtime_user}", "--enable-mbstring", "--enable-bcmath", "--enable-opcache",
-                "--enable-zip", "--with-curl", "--with-openssl", "--with-zlib",
+                "--enable-zip", f"--with-curl={build_dependencies}", "--with-openssl", "--with-zlib",
                 "--with-mysqli=mysqlnd", "--with-pdo-mysql=mysqlnd", "--with-pdo-pgsql", "--with-sqlite3",
-                "--enable-intl", "--enable-gd", "--enable-fileinfo", "--with-jpeg", "--with-webp", "--with-freetype", "--enable-soap",
+                "--enable-intl", *gd_options, "--enable-fileinfo", "--enable-soap",
             ]
-            self._update(job_id, progress=25, message=f"Configuring PHP {requested_version} with FPM and web extensions…", log=[f"$ {' '.join(configure)}"])
-            result = subprocess.run(configure, cwd=source, capture_output=True, text=True, check=False)
+            self._update(job_id, progress=25, message=f"Configuring PHP {requested_version} with FPM and web extensions…", log=[f"$ {' '.join(configure)}", f"CPPFLAGS={configure_cppflags}", f"LDFLAGS={configure_ldflags}"])
+            configure_environment = {**os.environ, "CPPFLAGS": configure_cppflags}
+            if configure_ldflags:
+                configure_environment["LDFLAGS"] = configure_ldflags
+            result = subprocess.run(configure, cwd=source, capture_output=True, text=True, check=False, env=configure_environment)
             if result.returncode != 0:
                 raise RuntimeError((result.stderr or result.stdout).strip()[-3000:] or "PHP configure failed")
             jobs = str(max(1, min(os.cpu_count() or 1, 4)))
@@ -3217,6 +3316,7 @@ class JobStore:
         finally:
             archive.unlink(missing_ok=True)
             shutil.rmtree(staging, ignore_errors=True)
+            shutil.rmtree(build_dependencies, ignore_errors=True)
 
     def _run_isolated_package(self, job_id: str, service_id: str, requested_version: str, package_override: str | None = None):
         if service_id in {"apache", "mariadb", "stalwart", "mongodb", "opensearch", "wp-cli", "postfix", "dovecot", "rspamd", "bind9", "unbound", "clamav", "supervisor", "lynis", "openlitespeed", "caddy"}:
@@ -3575,11 +3675,13 @@ class JobStore:
                 if not config.exists():
                     config.write_text(
                         "# Server Engine PowerDNS Authoritative baseline\n"
-                        "launch=local\nlocal-address=0.0.0.0\nlocal-port=53\n"
+                        f"launch=bind\nbind-config={root / 'conf/named.conf'}\nprimary=yes\n"
+                        f"socket-dir={root / 'run'}\nlocal-address=0.0.0.0\nlocal-port=53\n"
                         "default-ttl=3600\napi=yes\nwebserver=yes\n"
                         "webserver-address=127.0.0.1\nwebserver-port=8081\n"
                         "webserver-allow-from=127.0.0.1,::1\n"
                     )
+                prepare_powerdns_runtime(root)
             if service_id == "postgresql":
                 config_dir = root / "conf"
                 config_dir.mkdir(parents=True, exist_ok=True)

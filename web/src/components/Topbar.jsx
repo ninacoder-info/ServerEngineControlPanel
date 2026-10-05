@@ -152,7 +152,7 @@ export default function Topbar({
         window.dispatchEvent(new CustomEvent("serverengine:jobs-updated", { detail: { job } }));
       }
       if (statusChanged) {
-        const actionMatch = String(job.type || "").match(/^(Start|Stop|Restart|Install|Uninstall)\s+([^\s·]+)/i);
+        const actionMatch = String(job.type || "").match(/^(Start|Stop|Restart|Install|Uninstall)\s+([^\s·]+)(?:\s+([^\s·]+))?/i);
         if (actionMatch) {
           const action = actionMatch[1].toLowerCase();
           const serviceId = actionMatch[2].toLowerCase();
@@ -161,6 +161,7 @@ export default function Topbar({
               detail: {
                 serviceId,
                 action,
+                version: action === "install" ? actionMatch[3] || null : null,
                 status: job.status,
                 running: job.status === "succeeded" && ["start", "restart"].includes(action),
                 installed: job.status === "succeeded" && action === "install",
@@ -176,6 +177,11 @@ export default function Topbar({
       if (!alive) return;
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
       socket = new WebSocket(`${protocol}//${window.location.host}/api/v1/jobs/ws`);
+      socket.onopen = () => {
+        window.dispatchEvent(new CustomEvent("serverengine:socket-status", {
+          detail: { status: "connected" },
+        }));
+      };
       socket.onmessage = (event) => {
         try {
           const message = JSON.parse(event.data);
@@ -184,6 +190,13 @@ export default function Topbar({
           if (message.type === "service-status") {
             window.dispatchEvent(
               new CustomEvent("serverengine:service-status", {
+                detail: message,
+              }),
+            );
+          }
+          if (message.type === "domains-updated") {
+            window.dispatchEvent(
+              new CustomEvent("serverengine:domains-updated", {
                 detail: message,
               }),
             );
@@ -219,6 +232,9 @@ export default function Topbar({
         } catch {}
       };
       socket.onclose = () => {
+        window.dispatchEvent(new CustomEvent("serverengine:socket-status", {
+          detail: { status: "disconnected" },
+        }));
         if (alive) reconnectTimer = window.setTimeout(connect, 2000);
       };
     };

@@ -34,7 +34,7 @@ DEFAULT_SETTINGS = {
     "security_require_mfa": False,
     "security_strong_passwords": True,
     "security_panel_domain": "",
-    "security_panel_port": 8888,
+    "security_panel_port": 2309,
     "security_authorized_ips": [],
     "security_entry_path": "",
     "security_proxy_mode": "direct",
@@ -242,6 +242,7 @@ class SettingsService:
     def __init__(self):
         state_dir = Path(os.getenv("SE_STATE_DIR", "/var/lib/server-engine"))
         self.path = Path(os.getenv("SE_SETTINGS_PATH", str(state_dir / "settings.json")))
+        self.github_token_path = state_dir / "github-token"
 
     def read(self) -> dict:
         values = dict(DEFAULT_SETTINGS)
@@ -333,23 +334,50 @@ class SettingsService:
 
     def read_security(self) -> dict:
         values = self.read()
-        return {key: values[key] for key in SECURITY_SETTINGS_KEYS}
+        result = {key: values[key] for key in SECURITY_SETTINGS_KEYS}
+        result["security_github_token"] = ""
+        result["security_github_token_configured"] = bool(self.github_token())
+        return result
 
     def update_security(self, changes: dict) -> dict:
+        changes = dict(changes)
+        token = changes.pop("security_github_token", None)
         unknown = sorted(set(changes) - SECURITY_SETTINGS_KEYS)
         if unknown:
             raise HTTPException(
                 status_code=400,
                 detail=f"Unknown security settings: {', '.join(unknown)}",
             )
-        values = self.update(changes)
-        return {key: values[key] for key in SECURITY_SETTINGS_KEYS}
+        self.update(changes)
+        if token is not None and str(token).strip():
+            self._write_github_token(str(token).strip())
+        return self.read_security()
 
     def reset_security(self) -> dict:
-        values = self.update(
+        self._remove_github_token()
+        self.update(
             {key: DEFAULT_SETTINGS[key] for key in SECURITY_SETTINGS_KEYS}
         )
-        return {key: values[key] for key in SECURITY_SETTINGS_KEYS}
+        return self.read_security()
+
+    def github_token(self) -> str:
+        try:
+            return self.github_token_path.read_text().strip()
+        except OSError:
+            return ""
+
+    def _write_github_token(self, token: str) -> None:
+        self.github_token_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.github_token_path.with_name(f".{self.github_token_path.name}.tmp")
+        temporary.write_text(f"{token}\n")
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, self.github_token_path)
+
+    def _remove_github_token(self) -> None:
+        try:
+            self.github_token_path.unlink()
+        except FileNotFoundError:
+            pass
 
     def read_notifications(self) -> dict:
         values = self.read()

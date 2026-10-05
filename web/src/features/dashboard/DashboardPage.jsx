@@ -13,7 +13,6 @@ import FileManagerPage from "../file-manager/FileManagerPage";
 import SettingsPage from "../settings/SettingsPage";
 import WebsitesPage from "../websites/WebsitesPage";
 import ResourceMetricCards from "./ResourceMetricCards";
-import DashboardWorkspace from "./DashboardWorkspace";
 import DatabasesPage from "../databases/DatabasesPage";
 import LogsPage from "../logs/LogsPage";
 import UsersPage from "../users/UsersPage";
@@ -36,6 +35,8 @@ import DockerPage from "../docker/DockerPage";
 import DockerContainerDetailsPage from "../docker/DockerContainerDetailsPage";
 import DockerImageDetailsPage from "../docker/DockerImageDetailsPage";
 import PlansPage from "../plans/PlansPage";
+import GlobalJobStatusBar from "../../components/GlobalJobStatusBar";
+import GlobalTerminalPane from "../../components/GlobalTerminalPane";
 import { useTranslation } from "../../lib/i18n";
 import { apiRequest } from "../../lib/api";
 import {
@@ -112,11 +113,36 @@ export default function DashboardPage({ user, onLogout }) {
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [panelPreferences, setPanelPreferences] =
     React.useState(readPanelPreferences);
+  const [terminalPane, setTerminalPane] = React.useState({ open: false, height: 46, session: 0, sessionName: "Local Server", panel: "terminal", initialCommand: "" });
   const overviewLoading = false;
   const location = useLocation();
   const navigate = useNavigate();
   const theme = useTheme();
   const { t } = useTranslation();
+  const openTerminal = React.useCallback((initialCommand = "") => setTerminalPane((current) => ({ ...current, open: true, panel: "terminal", initialCommand })), []);
+  const openWebsiteTerminal = React.useCallback(({ projectPath, phpVersion, domain } = {}) => {
+    const quote = (value) => `'${String(value || "").replace(/'/g, "'\\''")}'`;
+    const folder = quote(projectPath || "/server-engine/www");
+    const commands = [];
+    commands.push('for composer_bin in /opt/server-engine/services/composer/bin /opt/server-engine/services/composer/versions/*/bin; do [ -d "$composer_bin" ] && PATH="$composer_bin:$PATH"; done; export PATH');
+    if (phpVersion) {
+      const phpRoot = `/opt/server-engine/services/php/versions/${phpVersion}`;
+      commands.push(`export PATH=${quote(`${phpRoot}/usr/bin`)}:"$PATH"`);
+      commands.push(`export PHP_INI_SCAN_DIR=${quote(`${phpRoot}/conf/conf.d`)}`);
+    }
+    commands.push(`cd -- ${folder}`);
+    setTerminalPane((current) => ({
+      ...current,
+      open: true,
+      panel: "terminal",
+      session: `website-${String(domain || "site").replace(/[^A-Za-z0-9_-]/g, "-")}-${Date.now()}`,
+      sessionName: domain || "Website",
+      initialCommand: `${commands.join("; ")}\n`,
+    }));
+  }, []);
+  const openLogs = React.useCallback(() => setTerminalPane((current) => ({ ...current, open: true, panel: "logs" })), []);
+  const resizeTerminal = React.useCallback((height) => setTerminalPane((current) => ({ ...current, height })), []);
+  const closeTerminal = React.useCallback(() => setTerminalPane((current) => ({ ...current, open: false })), []);
   React.useEffect(() => {
     const update = (event) =>
       setPanelPreferences(event.detail || readPanelPreferences());
@@ -220,7 +246,7 @@ export default function DashboardPage({ user, onLogout }) {
                                                             letter.toUpperCase(),
                                                         );
   const content = location.pathname.startsWith("/websites") ? (
-    <WebsitesPage />
+    <WebsitesPage onOpenTerminal={openWebsiteTerminal} />
   ) : location.pathname === "/activity" ? (
     <ActivityPage />
   ) : location.pathname === "/cronjobs" ? (
@@ -278,7 +304,7 @@ export default function DashboardPage({ user, onLogout }) {
   ) : (
     <>
       <div>
-        <p className="text-sm text-cyan-300">{t("dashboard.greeting")}</p>
+        <p className="text-sm font-medium text-blue-600 dark:text-blue-400">{t("dashboard.greeting")}</p>
         <h2 className="mt-1 text-3xl font-semibold tracking-tight">
           {location.pathname === "/" ? t("nav.overview") : active}
         </h2>
@@ -286,7 +312,6 @@ export default function DashboardPage({ user, onLogout }) {
       </div>
       <ResourceMetricCards />
       <OverviewSummary onNavigate={navigate} />
-      <DashboardWorkspace onNavigate={navigate} />
       <section className="grid gap-5 xl:grid-cols-[1.4fr_1fr]">
         <ServerPanel />
         <ActivityPanel />
@@ -295,7 +320,8 @@ export default function DashboardPage({ user, onLogout }) {
   );
   return (
     <div
-      className="min-h-screen bg-[var(--se-bg)] text-[var(--se-text)]"
+      className="grid h-[calc(100vh-2rem)] min-h-0 grid-cols-1 grid-rows-[minmax(0,1fr)_0px] overflow-hidden bg-[var(--se-bg)] text-[var(--se-text)] md:grid-cols-[16rem_minmax(0,1fr)]"
+      style={{ gridTemplateRows: terminalPane.open ? `minmax(0, 1fr) ${terminalPane.height}vh` : "minmax(0, 1fr) 0px" }}
       data-show-hints={panelPreferences.panel_show_hints !== false}
     >
       <Sidebar
@@ -311,7 +337,7 @@ export default function DashboardPage({ user, onLogout }) {
           onClick={() => setMenuOpen(false)}
         />
       )}
-      <main className="md:pl-64">
+      <main className="flex min-h-0 min-w-0 flex-col md:col-start-2 md:row-start-1">
         <Topbar
           user={user}
           light={theme.light}
@@ -320,13 +346,17 @@ export default function DashboardPage({ user, onLogout }) {
           onMenu={() => setMenuOpen(true)}
           onNavigate={navigate}
         />
-        <div className="mx-auto max-w-7xl space-y-8 p-5 md:p-10">
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="mx-auto max-w-7xl space-y-8 p-5 pb-24 md:p-10 md:pb-24">
           {content}
           <div className={location.pathname === "/terminal" ? "" : "hidden"}>
             <TerminalPage autoConnect={location.pathname === "/terminal"} />
           </div>
+          </div>
         </div>
       </main>
+      <GlobalTerminalPane open={terminalPane.open} height={terminalPane.height} session={terminalPane.session} sessionName={terminalPane.sessionName} initialCommand={terminalPane.initialCommand} panel={terminalPane.panel} onResize={resizeTerminal} onClose={closeTerminal} />
+      <GlobalJobStatusBar onOpenTerminal={openTerminal} onOpenLogs={openLogs} terminalOpen={terminalPane.open} panel={terminalPane.panel} />
     </div>
   );
 }

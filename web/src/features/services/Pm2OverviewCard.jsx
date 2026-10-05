@@ -1,5 +1,5 @@
 import React from "react";
-import { Activity, ArrowRight, Download, Server, Star } from "lucide-react";
+import { Activity, ArrowRight, Download, Star } from "lucide-react";
 
 export default function Pm2OverviewCard({
   service,
@@ -15,8 +15,8 @@ export default function Pm2OverviewCard({
       onClick={onOpenWorkspace}
     >
       <div className="flex shrink-0 flex-col items-center gap-3">
-        <div className="grid h-10 w-10 place-items-center rounded-md bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
-          <Server size={21} />
+        <div className="grid h-10 w-10 place-items-center rounded-md bg-neutral-100 text-blue-600 dark:bg-neutral-800 dark:text-blue-400">
+          <img src={new URL("../../components/icons/pm2.svg", import.meta.url).href} width="24" height="24" alt="" aria-hidden="true" />
         </div>
       </div>
       <div className="min-w-0 flex-1">
@@ -31,7 +31,7 @@ export default function Pm2OverviewCard({
               Multi-version
             </span>
             <button
-              className={`inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200 ${pinned ? "text-amber-500 dark:text-amber-400" : ""}`}
+              className={`inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200 ${pinned ? "text-yellow-500 dark:text-yellow-400" : ""}`}
               title={pinned ? "Unstar service" : "Star service"}
               aria-label={pinned ? "Unstar PM2" : "Star PM2"}
               onClick={(event) => {

@@ -65,6 +65,7 @@ class WebsiteDeployRequest(WebsiteCreateRequest):
     wordpress_admin_password: str = Field(default="", max_length=256)
     wordpress_database_prefix: str = Field(default="wp_", max_length=32)
     wordpress_site_title: str = Field(default="", max_length=200)
+    laravel_version: str = Field(default="", max_length=64)
 
 
 class WebsiteUpdateRequest(BaseModel):

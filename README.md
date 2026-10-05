@@ -63,9 +63,9 @@ The installer currently supports:
 - 2 GiB RAM recommended for a production website with PHP, databases, and background services
 - At least 2 GiB free disk space for the panel installation
 - Python 3.10 or newer
-- Node.js 20.19 or newer for the panel runtime; npm is only needed when installing directly from a source checkout
+- Node.js and npm are needed only when building the React release from a source checkout; customer installations use the bundled production build and Python runtime
 
-The installer can install missing system dependencies when explicitly requested with `--install-system-deps`. The customer release runs the compiled `web/dist` frontend through the small `web/server.mjs` runtime; it does not run Vite development mode or ship the React source tree.
+The installer can install missing system dependencies when explicitly requested with `--install-system-deps`. The customer release runs the compiled `web/dist` frontend through the Python `web/server.py` runtime; it does not run Vite development mode or ship the React source tree.
 
 When the installer is executed remotely, it automatically installs the operating-system dependencies needed to run the downloaded bundle. A custom release artifact can be selected with `--release-url` or the `SE_RELEASE_URL` environment variable.
 
@@ -107,6 +107,17 @@ Stop the development stack:
 docker compose -f docker-compose.dev.yml down
 ```
 
+To test the public installer in an AMD64 Ubuntu container, stop the current
+development stack and start the AMD64 target with the replacement GitHub token
+exported only for that command:
+
+```bash
+docker compose -f docker-compose.dev.yml down
+SE_GITHUB_TOKEN="github_pat_REPLACEMENT_TOKEN" \
+  docker compose -f docker-compose.dev.yml -f docker-compose.amd64.yml \
+  --profile installer run --rm installer-amd64
+```
+
 The repository wrapper provides the same workflow:
 
 ```bash
@@ -128,7 +139,7 @@ docker compose up --build
 Open:
 
 - Web panel: http://localhost:8080
-- API: http://localhost:8000
+- API: http://localhost:2510
 
 The native installer test environment is separate from this stack:
 
@@ -144,16 +155,39 @@ The public installer downloads a prebuilt release bundle. It does not need a sou
 One-line installation:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ninacoder-info/ServerEngineWebServer/main/install.sh -o install.sh
-sudo bash install.sh --yes
+curl -fsSL https://secp.ninacoder.top/install.sh -o install.sh
+bash install.sh --yes
 ```
 
 The same command with `wget`:
 
 ```bash
-wget -qO install.sh https://raw.githubusercontent.com/ninacoder-info/ServerEngineWebServer/main/install.sh
-sudo bash install.sh --yes
+wget -qO install.sh https://secp.ninacoder.top/install.sh
+bash install.sh --yes
 ```
+
+For a private GitHub release during testing, provide the token only through
+the current shell environment. It is never stored in the installer:
+
+```bash
+export SE_GITHUB_TOKEN="github_pat_your_token_here"
+bash install.sh --install-system-deps --yes
+unset SE_GITHUB_TOKEN
+```
+
+### Build and publish a GitHub release
+
+The local build script only creates the archive. To build and upload it
+automatically, install and authenticate the GitHub CLI once:
+
+```bash
+./scripts/publish-release.sh ninacoder-info/ServerEngineControlPanel
+```
+
+The publish script installs/authenticates the GitHub CLI when needed, detects
+the latest release, increments the patch version automatically, creates the
+new tag, and uploads `server-engine-release.tar.gz`. The first release is
+`v0.1.0`.
 
 For local source or development installation, run the installer as root from the repository:
 
@@ -173,8 +207,8 @@ Useful options:
 sudo ./install.sh \
   --prefix /opt/server-engine \
   --state-dir /var/lib/server-engine \
-  --web-port 8888 \
-  --api-port 8000 \
+  --web-port 2309 \
+  --api-port 2510 \
   --api-host 127.0.0.1 \
   --install-system-deps \
   --yes
@@ -295,7 +329,7 @@ The API is built with FastAPI and exposes versioned routes under `/api/v1`. Brow
 The API health endpoint is intentionally lightweight:
 
 ```bash
-curl http://127.0.0.1:8000/api/v1/health
+curl http://127.0.0.1:2510/api/v1/health
 ```
 
 Before exposing a panel publicly:

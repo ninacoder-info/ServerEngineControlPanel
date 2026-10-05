@@ -13,6 +13,7 @@ import { apiRequest, readApiError } from "../../lib/api";
 import ConfigEditor from "./ConfigEditor";
 import StartupPolicyToggle from "./StartupPolicyToggle";
 import useServiceSocketStatus from "../../hooks/useServiceSocketStatus";
+import { showToast } from "../../components/Toast";
 
 const tabs = [
   ["settings", "DNS settings", Globe2],
@@ -107,19 +108,19 @@ function buildConfig(values, text) {
     "local-address": values.address,
     "local-port": values.port,
     "default-ttl": values.defaultTtl,
-    "default-soa-name": values.primary,
-    "default-soa-mail": values.hostmaster,
     api: values.apiEnabled ? "yes" : "no",
     webserver: values.apiEnabled ? "yes" : "no",
     "webserver-address": values.apiAddress,
     "webserver-port": values.apiPort,
     "webserver-allow-from": values.apiAllowFrom,
     "api-key": values.apiKey,
-    "default-zsk-algorithm": values.algorithm,
     "log-dns-queries": values.queryLogging ? "yes" : "no",
     loglevel: values.logLevel,
   };
-  let next = text || "# Server Engine PowerDNS configuration\n";
+  let next = (text || "# Server Engine PowerDNS configuration\n").replace(
+    /^\s*(?:default-soa-(?:name|mail)|default-(?:zsk|ksk)-algorithm)\s*=.*(?:\n|$)/gim,
+    "",
+  );
   Object.entries(entries).forEach(([key, value]) => {
     const line = `${key}=${value}`;
     const pattern = new RegExp(`^${key}\\s*=.*$`, "mi");
@@ -417,7 +418,6 @@ export default function PowerDnsConfigModal({ service, installed, onClose }) {
   const [text, setText] = React.useState("");
   const [values, setValues] = React.useState(defaults);
   const [busy, setBusy] = React.useState(false);
-  const [message, setMessage] = React.useState("");
   const [logs, setLogs] = React.useState(null);
   const { status: runtimeStatus, action, setAction } = useServiceSocketStatus("powerdns", current?.status);
 
@@ -459,10 +459,11 @@ export default function PowerDnsConfigModal({ service, installed, onClose }) {
     const body = response.ok
       ? await response.json()
       : { message: await readApiError(response) };
-    setMessage(
+    showToast(
       response.ok
         ? "PowerDNS configuration saved. Restart the service to apply runtime changes."
         : body.message,
+      response.ok ? "success" : "error",
     );
     if (response.ok) {
       setText(content);
@@ -473,7 +474,6 @@ export default function PowerDnsConfigModal({ service, installed, onClose }) {
   const saveValues = () => save(buildConfig(values, text));
   const serviceAction = async (actionName) => {
     setAction(actionName);
-    setMessage("");
     const response = await apiRequest("/api/v1/services/powerdns/action", {
       method: "POST",
       body: JSON.stringify({ action: actionName }),
@@ -482,7 +482,7 @@ export default function PowerDnsConfigModal({ service, installed, onClose }) {
       ? await response.json()
       : { message: await readApiError(response) };
     if (!response.ok || !body.job_id) {
-      setMessage(body.message || "PowerDNS action failed.");
+      showToast(body.message || "PowerDNS action failed.", "error");
       setAction("");
       return;
     }
@@ -509,9 +509,9 @@ export default function PowerDnsConfigModal({ service, installed, onClose }) {
             </h2>
             <p className="mt-1 flex items-center gap-2 text-sm text-neutral-500 dark:text-neutral-400">
               <span
-                className={`h-2 w-2 rounded-full ${current?.status === "running" ? "bg-emerald-500" : "bg-amber-500"}`}
+                className={`h-2 w-2 rounded-full ${runtimeStatus === "running" ? "bg-emerald-500" : "bg-amber-500"}`}
               />
-              {current?.status || "stopped"}
+              {runtimeStatus || current?.status || "stopped"}
               {current?.version && ` · v${current.version}`}
             </p>
           </div>
@@ -646,11 +646,6 @@ export default function PowerDnsConfigModal({ service, installed, onClose }) {
             </div>
           )}
         </div>
-        {message && (
-          <p className="mt-5 text-sm text-neutral-600 dark:text-neutral-300">
-            {message}
-          </p>
-        )}
       </section>
     </div>
   );

@@ -21,7 +21,7 @@ from app.services.service_runtime import PHP_BASELINE_MODULES, SERVICE_PACKAGES,
 
 router = APIRouter(prefix="/api/v1/services", tags=["services"])
 
-NON_DAEMON_SERVICES = {"git", "imagemagick", "ffmpeg", "ruby", "lynis"}
+NON_DAEMON_SERVICES = {"certbot", "git", "imagemagick", "ffmpeg", "ruby", "lynis"}
 
 
 @router.put("/stalwart/storage")
@@ -631,7 +631,10 @@ def installed(user=Depends(require_user)):
                 version = _installed_package_version(package)
             if version is not None:
                 definition = get_service(service_id)
-                running = subprocess.run(["pgrep", "-x", "pdns_server"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False).returncode == 0 if shutil.which("pgrep") else False
+                # Detect the managed binary path, matching the other isolated
+                # services. The process name is not reliable when PowerDNS is
+                # launched through a versioned or staged runtime path.
+                running = _process_running("powerdns")
                 detected.append(InstalledService(id=service_id, name=definition.name if definition else service_id, version=version, status="running" if running else "stopped", port=53, managed=False))
             continue
         if service_id == "docker":
@@ -1244,18 +1247,24 @@ def _installed_package_version(package: str) -> str | None:
 
 
 def _installed_service_version(service_id: str, package: str, version: str | None = None) -> str | None:
-    root = service_root(service_id, version)
-    marker = root / ".serverengine-version"
-    if marker.exists():
-        return marker.read_text().strip() or "staged"
-    binary = binary_path(service_id, version)
-    if not binary.exists():
+    try:
+        root = service_root(service_id, version)
+        marker = root / ".serverengine-version"
+        if marker.exists():
+            return marker.read_text().strip() or "staged"
+        binary = binary_path(service_id, version)
+        if not binary.exists():
+            return None
+        result = subprocess.run([binary, "-v"], capture_output=True, text=True, check=False)
+        output = result.stderr or result.stdout
+        if service_id == "nginx" and "nginx/" in output:
+            return output.split("nginx/", 1)[1].strip()
+        return "staged"
+    except (OSError, PermissionError):
+        # An unreadable optional runtime must not make the complete service
+        # inventory endpoint fail. The installer repairs managed ownership on
+        # the next update; until then treat this runtime as undetected.
         return None
-    result = subprocess.run([binary, "-v"], capture_output=True, text=True, check=False)
-    output = result.stderr or result.stdout
-    if service_id == "nginx" and "nginx/" in output:
-        return output.split("nginx/", 1)[1].strip()
-    return "staged"
 
 
 def _process_running(process_name: str, version: str | None = None) -> bool:
@@ -1622,13 +1631,15 @@ findtime = 1d
 maxretry = 5
 """
     if service_id == "powerdns":
-        return """# Server Engine PowerDNS Authoritative baseline
-launch=local
+        root = service_root("powerdns")
+        return f"""# Server Engine PowerDNS Authoritative baseline
+launch=bind
+bind-config={root / 'conf/named.conf'}
+primary=yes
+socket-dir={root / 'run'}
 local-address=0.0.0.0
 local-port=53
 default-ttl=3600
-default-soa-name=ns1.example.com.
-default-soa-mail=hostmaster.example.com.
 api=yes
 webserver=yes
 webserver-address=127.0.0.1

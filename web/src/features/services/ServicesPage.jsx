@@ -53,6 +53,8 @@ export default function ServicesPage() {
     settings: {},
     service: {},
   });
+  const catalogRef = React.useRef(catalog);
+  catalogRef.current = catalog;
 
   React.useEffect(() => {
     localStorage.setItem(
@@ -81,17 +83,48 @@ export default function ServicesPage() {
     const updateFromSocket = (event) => {
       const detail = event.detail || {};
       if (!detail.serviceId) return;
-      setInstalled((current) => current.map((item) => {
-        if (item.id !== detail.serviceId && !item.id.startsWith(`${detail.serviceId}@`)) return item;
-        if (detail.status !== "succeeded") return item;
-        if (detail.action === "uninstall") return { ...item, installed: false, running: false, status: "not-installed" };
-        if (["start", "restart", "stop"].includes(detail.action)) {
-          const running = detail.action !== "stop";
-          return { ...item, running, status: running ? "running" : "stopped" };
+      setInstalled((current) => {
+        if (detail.status !== "succeeded") return current;
+        if (detail.action === "install") {
+          const existing = current.find(
+            (item) => item.id === detail.serviceId || item.id.startsWith(`${detail.serviceId}@`),
+          );
+          if (existing) {
+            return current.map((item) =>
+              item.id === existing.id
+                ? { ...item, installed: true, running: false, status: "stopped", version: detail.version || item.version }
+                : item,
+            );
+          }
+          const definition = catalogRef.current.find((item) => item.id === detail.serviceId);
+          if (!definition) return current;
+          return [
+            ...current,
+            {
+              id: detail.serviceId,
+              name: definition.name,
+              version: detail.version || "installed",
+              status: "stopped",
+              running: false,
+              installed: true,
+              managed: false,
+            },
+          ];
         }
-        if (detail.action === "install") return { ...item, installed: true, running: false, status: "stopped" };
-        return item;
-      }));
+        if (detail.action === "uninstall") {
+          return current.filter(
+            (item) => item.id !== detail.serviceId && !item.id.startsWith(`${detail.serviceId}@`),
+          );
+        }
+        return current.map((item) => {
+          if (item.id !== detail.serviceId && !item.id.startsWith(`${detail.serviceId}@`)) return item;
+          if (["start", "restart", "stop"].includes(detail.action)) {
+            const running = detail.action !== "stop";
+            return { ...item, running, status: running ? "running" : "stopped" };
+          }
+          return item;
+        });
+      });
       if (detail.job) setJobs((current) => [detail.job, ...current.filter((job) => job.id !== detail.job.id)]);
     };
     window.addEventListener("serverengine:service-status", updateFromSocket);
@@ -160,6 +193,7 @@ export default function ServicesPage() {
     .filter(
       (service) =>
         !HIDDEN_SERVICE_IDS.has(service.id) &&
+        (service.category !== "DNS services" || service.id === "powerdns") &&
         (category === "All" || category === service.category) &&
         `${service.name} ${service.description}`
           .toLowerCase()

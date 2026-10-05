@@ -13,6 +13,7 @@ import {
   Server,
   ShieldCheck,
   Sparkles,
+  SquareTerminal,
   Trash2,
 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -40,7 +41,7 @@ function DetailRow({ label, children }) {
   );
 }
 
-export default function WebsitesPage() {
+export default function WebsitesPage({ onOpenTerminal }) {
   const navigate = useNavigate();
   const location = useLocation();
   const webServerState = useServiceInstallationState(WEB_SERVER_IDS);
@@ -198,7 +199,7 @@ export default function WebsitesPage() {
             save(site);
             setModal(null);
             if (job) {
-              setOperation({ job, title: job.type || (editing ? `Update ${site.domain}` : `Create ${site.domain}`) });
+              setOperation({ job, title: job.type || (editing ? `Update ${site.domain}` : `Create ${site.domain}`), projectPath: site.project_path });
             } else {
               setToast({
                 type: "success",
@@ -480,6 +481,14 @@ export default function WebsitesPage() {
                 <div className="flex shrink-0 gap-1">
                   <Button
                     iconOnly
+                    aria-label="Open website terminal"
+                    title="Open terminal in website folder"
+                    onClick={() => onOpenTerminal?.({ domain: site.domain, projectPath: site.project_path, phpVersion: site.php_version })}
+                  >
+                    <SquareTerminal size={15} />
+                  </Button>
+                  <Button
+                    iconOnly
                     aria-label="Open details"
                     title="Open details"
                     onClick={() => navigate(`/websites/${site.id}`)}
@@ -562,10 +571,10 @@ export default function WebsitesPage() {
       {projectModal && <ProjectCreateModal mode={projectModal.mode} template={projectModal.template} root={root} nodeVersions={nodeVersions} onClose={() => setProjectModal(null)} onCreated={(result, kind) => {
         setProjectModal(null);
         const created = result?.project || result?.route;
-        if (result?.job) setOperation({ job: result.job, title: `Create ${created?.domain || kind}` });
+        if (result?.job) setOperation({ job: result.job, title: `Create ${created?.domain || kind}`, projectPath: created?.project_path || "" });
         else setToast({ type: "success", message: `${kind} created successfully.` });
       }} />}
-      {operation && <ProjectOperationModal jobId={operation.job.id} title={operation.title} onClose={() => setOperation(null)} />}
+      {operation && <ProjectOperationModal jobId={operation.job.id} title={operation.title} projectPath={operation.projectPath} onClose={() => setOperation(null)} />}
       <ActionDialog
         dialog={dialog}
         onClose={() => setDialog(null)}

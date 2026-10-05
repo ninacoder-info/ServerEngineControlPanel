@@ -4,6 +4,7 @@ import LoginPage from "../features/auth/LoginPage";
 import DashboardPage from "../features/dashboard/DashboardPage";
 import { useAuth } from "../hooks/useAuth";
 import { Toaster } from "sonner";
+import PanelUpdateOverlay from "../components/PanelUpdateOverlay";
 
 export default function App() {
   const auth = useAuth();
@@ -45,6 +46,7 @@ export default function App() {
   return (
     <>
       {toaster}
+      <PanelUpdateOverlay />
       <Routes>
         <Route
           path="*"

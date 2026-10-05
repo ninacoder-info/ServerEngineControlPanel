@@ -9,8 +9,10 @@ WorkingDirectory=/opt/server-engine/core
 ExecStart=/opt/server-engine/core/run.sh
 Restart=on-failure
 RestartSec=3
-User=serverengine
-NoNewPrivileges=true
+# The control plane owns installation, package, firewall, port, ownership,
+# and service-management operations. Managed service workers still drop to
+# the dedicated serverengine account in their own configurations.
+User=root
 
 [Install]
 WantedBy=multi-user.target

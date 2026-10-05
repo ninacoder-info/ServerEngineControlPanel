@@ -4,7 +4,8 @@ services:
     platform: linux/arm64
     # Permit the Local Server terminal and firewall provider to manage this
     # container's network namespace during development. This does not grant
-    # access to the physical host firewall.
+    # access to the physical host firewall. The control plane runs as root in
+    # this harness, matching the native control-plane service.
     cap_add:
       - NET_ADMIN
     working_dir: /app
@@ -35,15 +36,19 @@ services:
       # tested without running a privileged nested Docker daemon.
       - /var/run/docker.sock:/var/run/docker.sock
     command: >-
-      bash -lc "apt-get update &&
+      bash -lc "export DEBIAN_FRONTEND=noninteractive TZ=UTC &&
+      apt-get update &&
       apt-get install -y --no-install-recommends python3 python3-pip python3-venv openssh-client ca-certificates passwd git golang-go build-essential nftables docker.io &&
       id -u serverengine >/dev/null 2>&1 || useradd --system --user-group --home-dir /var/lib/server-engine --shell /usr/sbin/nologin serverengine &&
       test -x /opt/server-engine-venv/bin/python || python3 -m venv /opt/server-engine-venv &&
       /opt/server-engine-venv/bin/pip install -e . &&
-      /opt/server-engine-venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+      mkdir -p /var/lib/server-engine /opt/server-engine/services /server-engine/www /server-engine/logs /server-engine/backups &&
+      chown -R serverengine:serverengine /opt/server-engine/services /server-engine/www /server-engine/logs /server-engine/backups &&
+      chmod 0750 /var/lib/server-engine &&
+      exec /opt/server-engine-venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health')"]
-      start_period: 10s
+      start_period: 180s
       interval: 10s
       timeout: 5s
       retries: 5

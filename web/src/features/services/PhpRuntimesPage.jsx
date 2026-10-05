@@ -44,7 +44,20 @@ export default function PhpRuntimesPage({ modal = false, onClose }) {
         .finally(() => alive && setLoading(false));
     };
     load();
-    const refreshAfterJob = () => load();
+    const refreshAfterJob = (event) => {
+      const job = event.detail?.job;
+      if (!job || !["succeeded", "failed", "cancelled"].includes(job.status)) {
+        return;
+      }
+      const type = String(job.type || "").toLowerCase();
+      if (!/(^|\s)(install|uninstall|switch)\s+php(?:-fpm)?\b/.test(type)) {
+        return;
+      }
+      // Do not reload the runtime inventory for every build-progress event.
+      // The shared jobs socket emits progress frequently; refresh once after
+      // the PHP operation reaches a terminal state.
+      load();
+    };
     window.addEventListener("serverengine:jobs-updated", refreshAfterJob);
     return () => {
       alive = false;

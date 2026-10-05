@@ -10,6 +10,8 @@ import urllib.parse
 import urllib.request
 import tempfile
 import uuid
+import shutil
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
@@ -57,13 +59,28 @@ class DomainService:
         with self._lock:
             entries = [item for item in self._read() if item.get("domain") != domain]
             entries.append({"domain": domain, "domain_type": payload.domain_type, "records": []})
-            self._write(entries)
+            self._persist_dns(entries)
         return self._view(site, entries[-1])
 
     def records(self, domain: str) -> list[dict]:
         self._site(domain)
         item = next((item for item in self._read() if item.get("domain") == domain), {})
         return item.get("records", [])
+
+    def delete(self, domain: str) -> None:
+        domain = self._domain(domain)
+        site = self._site(domain)
+        with self._lock:
+            previous = self._read()
+            entries = [item for item in previous if item.get("domain") != domain]
+            self._persist_dns(entries)
+            try:
+                # Remove the managed website configuration but preserve the
+                # project files. Deleting a domain must not erase user data.
+                website_service.delete(site.id, remove_files=False)
+            except Exception:
+                self._persist_dns(previous)
+                raise
 
     def add_record(self, domain: str, payload: DomainRecordRequest) -> dict:
         self._site(domain)
@@ -76,7 +93,7 @@ class DomainService:
                 item = {"domain": domain, "domain_type": "Addon domain", "records": []}
                 entries.append(item)
             item.setdefault("records", []).append(record)
-            self._write(entries)
+            self._persist_dns(entries)
         return record
 
     def update_record(self, domain: str, record_id: int, payload: DomainRecordRequest) -> dict:
@@ -89,7 +106,7 @@ class DomainService:
             if record is None:
                 raise HTTPException(404, "DNS record not found")
             record.update({"type": payload.record_type, "name": payload.name.strip(), "value": payload.value.strip(), "ttl": payload.ttl})
-            self._write(entries)
+            self._persist_dns(entries)
             return record
 
     def delete_record(self, domain: str, record_id: int) -> None:
@@ -100,7 +117,7 @@ class DomainService:
             if item is None or not any(record.get("id") == record_id for record in item.get("records", [])):
                 raise HTTPException(404, "DNS record not found")
             item["records"] = [record for record in item.get("records", []) if record.get("id") != record_id]
-            self._write(entries)
+            self._persist_dns(entries)
 
     def _site(self, domain: str):
         domain = self._domain(domain)
@@ -116,16 +133,16 @@ class DomainService:
             raise HTTPException(400, f"Invalid domain: {value}")
         return value
 
-    @staticmethod
-    def _view(site, metadata: dict) -> dict:
+    def _view(self, site, metadata: dict) -> dict:
         records = metadata.get("records", [])
         redirects = metadata.get("redirects", [])
+        zone_path = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / "powerdns" / "data" / "zones" / f"{site.domain}.zone"
         return {
             "id": site.id,
             "domain": site.domain,
             "type": metadata.get("domain_type", "Primary domain"),
             "root": site.document_root,
-            "dns": "Not configured",
+            "dns": "Healthy" if zone_path.is_file() else "Not configured",
             "tls": "Active" if site.ssl_enabled else "Off",
             "records": len(records),
             "redirects": len(redirects),
@@ -349,6 +366,208 @@ class DomainService:
             if os.path.exists(temporary):
                 os.unlink(temporary)
 
+    def _persist_dns(self, entries: list[dict]) -> None:
+        """Persist panel metadata and make the same data authoritative in PowerDNS.
+
+        The JSON registry remains the panel's durable metadata, while PowerDNS
+        serves generated BIND zones from the isolated service directory. A
+        failed zone write/reload rolls the registry back instead of reporting a
+        successful DNS change that is not actually being served.
+        """
+        previous = self._read()
+        self._write(entries)
+        try:
+            self._sync_powerdns(entries)
+        except Exception as error:
+            try:
+                self._write(previous)
+                self._sync_powerdns(previous, reload_powerdns=False)
+            except Exception:
+                pass
+            if isinstance(error, HTTPException):
+                raise
+            raise HTTPException(503, f"PowerDNS synchronization failed: {error}") from error
+
+    def _sync_powerdns(self, entries: list[dict], *, reload_powerdns: bool = True) -> None:
+        from app.services.service_runtime import binary_path, service_root
+
+        root = service_root("powerdns")
+        binary = binary_path("powerdns")
+        if not binary.exists():
+            raise HTTPException(503, "PowerDNS is not installed. Install and start PowerDNS before changing authoritative DNS records.")
+
+        config_dir = root / "conf"
+        zones_dir = root / "data" / "zones"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        zones_dir.mkdir(parents=True, exist_ok=True)
+        named_path = config_dir / "named.conf"
+        zone_entries = [item for item in entries if item.get("domain")]
+        active_domains = {str(item.get("domain")).lower().rstrip(".") for item in zone_entries}
+        for old_zone in zones_dir.glob("*.zone"):
+            if old_zone.stem.lower() not in active_domains:
+                old_zone.unlink(missing_ok=True)
+        named_lines = ["// Server Engine managed PowerDNS BIND zones", "// This file is generated from the Domains page; do not edit manually."]
+        for item in zone_entries:
+            domain = self._domain(str(item["domain"]))
+            zone_path = zones_dir / f"{domain}.zone"
+            self._atomic_text(zone_path, self._zone_text(domain, item.get("records", [])))
+            named_lines.append(f'zone "{domain}" in {{ type master; file "{zone_path}"; }};')
+        self._atomic_text(named_path, "\n".join(named_lines) + "\n")
+
+        pdns_conf = config_dir / "pdns.conf"
+        current = pdns_conf.read_text(errors="replace") if pdns_conf.exists() else ""
+        # These directives are not supported by the installed PowerDNS
+        # authoritative build. The SOA values are generated in each managed
+        # BIND zone file instead; remove old values left by earlier versions.
+        current = re.sub(r"(?mi)^\s*(?:default-soa-(?:name|mail)|default-(?:zsk|ksk)-algorithm)\s*=.*(?:\n|$)", "", current)
+        current = self._set_config_value(current, "launch", "bind")
+        current = self._set_config_value(current, "bind-config", str(named_path))
+        current = self._set_config_value(current, "primary", "yes")
+        current = self._set_config_value(current, "socket-dir", str(root / "run"))
+        bind_module = next(root.rglob("libbindbackend.so"), None)
+        if bind_module:
+            current = self._set_config_value(current, "module-dir", str(bind_module.parent))
+        self._atomic_text(pdns_conf, current if current.endswith("\n") else current + "\n")
+
+        if reload_powerdns:
+            self._reload_powerdns(root, [str(item["domain"]) for item in zone_entries])
+        from app.services.job_service import job_store
+        job_store.publish({
+            "type": "domains-updated",
+            "domains": [
+                {"domain": item.get("domain"), "records": item.get("records", [])}
+                for item in zone_entries
+            ],
+        })
+
+    @staticmethod
+    def _atomic_text(path: Path, content: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+        try:
+            with os.fdopen(fd, "w") as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, path)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+
+    @staticmethod
+    def _set_config_value(content: str, key: str, value: str) -> str:
+        line = f"{key}={value}"
+        pattern = re.compile(rf"(?mi)^\s*{re.escape(key)}\s*=.*$")
+        if pattern.search(content):
+            return pattern.sub(line, content)
+        return content.rstrip() + "\n" + line + "\n"
+
+    @staticmethod
+    def _zone_text(domain: str, records: list[dict]) -> str:
+        serial = int(datetime.now(timezone.utc).strftime("%Y%m%d01"))
+        lines = [
+            f"$ORIGIN {domain}.",
+            "$TTL 3600",
+            f"@ IN SOA ns1.{domain}. hostmaster.{domain}. (",
+            f"  {serial} 3600 600 86400 300",
+            ")",
+        ]
+        ns_records = [record for record in records if str(record.get("type", "")).upper() == "NS"]
+        if ns_records:
+            for record in ns_records:
+                lines.append(f"@ {int(record.get('ttl') or 300)} IN NS {DomainService._fqdn_value(str(record.get('value', '')).strip(), domain)}")
+        else:
+            lines.extend([f"@ IN NS ns1.{domain}.", f"@ IN NS ns2.{domain}."])
+        for record in records:
+            record_type = str(record.get("type", "")).upper()
+            name = str(record.get("name", "@")).strip() or "@"
+            value = str(record.get("value", "")).strip()
+            ttl = int(record.get("ttl") or 300)
+            if name == "@" or name.rstrip(".").lower() == domain:
+                owner = "@"
+            elif name.rstrip(".").lower().endswith(f".{domain}"):
+                owner = name.rstrip(".")[: -(len(domain) + 1)] or "@"
+            else:
+                owner = name.rstrip(".")
+            if record_type == "NS":
+                continue
+            if record_type in {"CNAME", "NS"}:
+                value = DomainService._fqdn_value(value, domain)
+            elif record_type == "MX":
+                parts = value.split(None, 1)
+                if len(parts) == 2:
+                    value = f"{parts[0]} {DomainService._fqdn_value(parts[1], domain)}"
+            elif record_type == "SRV":
+                parts = value.split()
+                if len(parts) >= 4:
+                    parts[-1] = DomainService._fqdn_value(parts[-1], domain)
+                    value = " ".join(parts)
+            elif record_type == "TXT":
+                value = '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+            lines.append(f"{owner} {ttl} IN {record_type} {value}")
+        return "\n".join(lines) + "\n"
+
+    @staticmethod
+    def _fqdn_value(value: str, domain: str) -> str:
+        if value == "@":
+            return f"{domain}."
+        if value.endswith("."):
+            return value
+        return value + "."
+
+    @staticmethod
+    def _reload_powerdns(root: Path, domains: list[str]) -> None:
+        from app.services.service_runtime import managed_library_environment
+
+        system_control = shutil.which("pdns_control")
+        controls = [root / "bin/pdns_control", root / "usr/bin/pdns_control"]
+        if system_control:
+            controls.append(Path(system_control))
+        control = next((path for path in controls if path.exists()), None)
+        if control is None:
+            raise RuntimeError("PowerDNS control utility is unavailable")
+        command = [str(control), f"--config-dir={root / 'conf'}", "rediscover"]
+        runtime_env = managed_library_environment(root)
+        result = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False, env=runtime_env)
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout).strip()
+            if "running" in detail.lower() or "socket" in detail.lower():
+                raise HTTPException(409, "PowerDNS is installed but not running. Start it before changing authoritative DNS records.")
+            raise RuntimeError(detail or "PowerDNS rejected the zone configuration")
+        # `rediscover` finds newly-created zones, but PowerDNS can keep an
+        # already-loaded zone in memory after its zone file changes. Reload
+        # after rediscover so DNS record edits become authoritative immediately.
+        reload_result = subprocess.run(
+            [str(control), f"--config-dir={root / 'conf'}", "reload"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+            env=runtime_env,
+        )
+        if reload_result.returncode != 0:
+            detail = (reload_result.stderr or reload_result.stdout).strip()
+            if "running" in detail.lower() or "socket" in detail.lower():
+                raise HTTPException(409, "PowerDNS is installed but not running. Start it before changing authoritative DNS records.")
+            raise RuntimeError(detail or "PowerDNS rejected the zone reload")
+        for domain in domains:
+            status = subprocess.run(
+                [str(control), f"--config-dir={root / 'conf'}", "bind-domain-status", domain],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+                env=runtime_env,
+            )
+            status_text = (status.stdout or status.stderr).strip()
+            # PowerDNS versions use different success wording for
+            # bind-domain-status: newer builds say "parsed successfully",
+            # while 4.8.x reports "parsed into memory at ...".
+            normalized_status = status_text.lower()
+            parsed = "parsed successfully" in normalized_status or "parsed into memory" in normalized_status
+            if status.returncode != 0 or not parsed:
+                raise RuntimeError(f"PowerDNS did not verify zone {domain}: {status_text or 'zone status unavailable'}")
+
     def _next_record_id(self) -> int:
         return max((record.get("id", 0) for item in self._read() for record in item.get("records", [])), default=0) + 1
 
@@ -356,6 +575,8 @@ class DomainService:
     def _validate_record(payload: DomainRecordRequest) -> None:
         name = payload.name.strip()
         value = payload.value.strip()
+        if any(character in name or character in value for character in ("\n", "\r")):
+            raise HTTPException(422, "DNS record names and values cannot contain line breaks")
         if name != "@" and not re.fullmatch(r"[a-z0-9_*.-]+", name, re.I):
             raise HTTPException(422, "Record name may contain letters, numbers, dots, hyphens, or @")
         if payload.record_type == "A":

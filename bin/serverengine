@@ -17,7 +17,7 @@ Usage: serverengine <command> [target]
 Commands:
   start [dev|panel]     Start the development stack or live test panel
   restart [dev|panel]   Restart running services without rebuilding
-  update [panel]        Recreate panel and run the current installer/code
+  update [panel]        Update the native panel or refresh the development panel
   stop [dev|panel]      Stop the selected environment
   logs [dev|panel]      Follow service logs
   status [dev|panel]    Show service status
@@ -48,6 +48,13 @@ case "${1:-help}" in
     if [ "$target" = panel ]; then "${test_compose[@]}" restart panel-live; else "${dev_compose[@]}" restart; fi
     ;;
   update)
+    if [ -x /usr/local/sbin/server-engine-update ]; then
+      if [ "$(id -u)" -ne 0 ]; then
+        echo "Run the native updater as root: sudo serverengine update" >&2
+        exit 1
+      fi
+      exec /usr/local/sbin/server-engine-update
+    fi
     if [ "$target" != panel ]; then echo "Use 'serverengine update panel' for the installer-backed panel." >&2; exit 2; fi
     if "${test_compose[@]}" ps --status running --services | grep -qx panel-live; then
       "${test_compose[@]}" exec -T panel-live bash -lc 'pkill -TERM -x node || true'

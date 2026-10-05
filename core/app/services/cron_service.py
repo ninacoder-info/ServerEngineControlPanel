@@ -68,6 +68,8 @@ class CronService:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._execution_lock = threading.Lock()
+        self._active_job_ids: set[str] = set()
+        self._active_job_lock = threading.Lock()
         self._stop = threading.Event()
         self._thread = None
         self._setup()
@@ -187,6 +189,20 @@ class CronService:
         return job
 
     def _execute(self, job_id):
+        # A manual Run now request and the scheduler tick can arrive at the
+        # same minute. Treat both as one execution for this cron entry instead
+        # of creating two backup jobs for the same schedule.
+        with self._active_job_lock:
+            if job_id in self._active_job_ids:
+                return
+            self._active_job_ids.add(job_id)
+        try:
+            self._execute_once(job_id)
+        finally:
+            with self._active_job_lock:
+                self._active_job_ids.discard(job_id)
+
+    def _execute_once(self, job_id):
         # Cron commands share the same serialized execution policy as panel jobs.
         # This prevents a manual run and a scheduled run from consuming the host
         # at the same time.

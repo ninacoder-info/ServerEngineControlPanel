@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.dependencies import require_user
-from app.api.routes import accounts, activity, api_access, application_shield, auth, backups, cron, databases, domains, docker_files, email, file_manager, firewall, ftp, jobs, malware, plans, projects, servers, services, settings, system, terminal, users, websites
+from app.api.routes import accounts, activity, api_access, application_shield, auth, backups, cron, databases, domains, docker_files, email, file_manager, firewall, ftp, jobs, logs, malware, plans, projects, servers, services, settings, system, terminal, users, websites
 from app.auth import AuthStore, SESSION_COOKIE
 from app.services.auth_service import AuthService
 from app.services.job_service import enqueue_startup_services
@@ -28,8 +28,14 @@ BOOTSTRAP_PASSWORD = os.getenv("SE_ADMIN_PASSWORD") or secrets.token_urlsafe(18)
 async def lifespan(application: FastAPI):
     store = AuthStore(DB_PATH, BOOTSTRAP_USER, BOOTSTRAP_PASSWORD)
     application.state.auth_service = AuthService(store)
+    bootstrap_file = os.getenv("SE_BOOTSTRAP_CREDENTIALS_FILE")
+    if bootstrap_file:
+        try:
+            Path(bootstrap_file).unlink(missing_ok=True)
+        except OSError:
+            pass
     if not os.getenv("SE_ADMIN_PASSWORD"):
-        print(f"Server Engine bootstrap password for {BOOTSTRAP_USER}: {BOOTSTRAP_PASSWORD}", flush=True)
+        print(f"Server Engine administrator account ready for {BOOTSTRAP_USER}", flush=True)
     enqueue_startup_services()
     log_rotation_service.start()
     scheduler = configure_cron_service(DB_PATH)
@@ -61,6 +67,7 @@ app.include_router(jobs.router)
 app.include_router(malware.router)
 app.include_router(cron.router)
 app.include_router(activity.router)
+app.include_router(logs.router)
 app.include_router(services.router)
 app.include_router(file_manager.router)
 app.include_router(settings.router)

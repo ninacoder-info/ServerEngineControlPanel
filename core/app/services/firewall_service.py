@@ -36,7 +36,7 @@ _ALIAS_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
 _IPV4 = re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?$")
 _DEFAULT_RULES = [
     {"id": "web", "enabled": True, "action": "Allow", "protocol": "TCP", "source": "Any", "destination": "Any", "service": "HTTP / HTTPS", "port": "80, 443", "interface": "WAN", "states": 1284, "note": "Public websites"},
-    {"id": "panel", "enabled": True, "action": "Allow", "protocol": "TCP", "source": "Management network", "destination": "Panel", "service": "Control panel", "port": "8888", "interface": "WAN", "states": 42, "note": "Trusted administrators only"},
+    {"id": "panel", "enabled": True, "action": "Allow", "protocol": "TCP", "source": "Management network", "destination": "Panel", "service": "Control panel", "port": "2309", "interface": "WAN", "states": 42, "note": "Trusted administrators only"},
     {"id": "ssh", "enabled": True, "action": "Allow", "protocol": "TCP", "source": "Any", "destination": "Any", "service": "SSH", "port": "22", "interface": "WAN", "states": 8, "note": "Review source restriction"},
     {"id": "blocklist", "enabled": True, "action": "Deny", "protocol": "TCP", "source": "Threat blocklist", "destination": "Any", "service": "All services", "port": "Any", "interface": "WAN", "states": 317, "note": "Automated protection"},
 ]
