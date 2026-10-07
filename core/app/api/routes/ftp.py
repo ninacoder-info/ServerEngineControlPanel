@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.api.dependencies import require_user
 from app.models.ftp import FTPAccountRequest, FTPSettingsRequest
 from app.services.service_runtime import binary_path, service_root
+from app.services.account_isolation import account_isolation
 
 router = APIRouter(prefix="/api/v1/ftp", tags=["ftp"])
 DEFAULT_SETTINGS = {"control_port": 21, "passive_min": 40000, "passive_max": 40100, "tls_required": True, "anonymous_enabled": False, "max_clients": 50}
@@ -55,7 +56,12 @@ def _service_state() -> dict:
     return {"installed": installed, "running": running, "status": "running" if running else "stopped" if installed else "not-installed", "root": str(root)}
 
 
-def _allowed_roots() -> list[Path]:
+def _allowed_roots(user=None) -> list[Path]:
+    if user is not None:
+        account = account_isolation.account_for_user(user)
+        if account:
+            root = Path(account["home_path"]).expanduser().resolve()
+            return [root] if root.is_dir() else []
     configured = os.getenv("SE_FTP_ROOTS")
     values = configured.split(":") if configured else [os.getenv("SE_WEB_ROOT", "/server-engine/www")]
     roots = []
@@ -71,14 +77,14 @@ def _allowed_roots() -> list[Path]:
     return roots
 
 
-def _safe_root(value: str) -> Path:
+def _safe_root(value: str, user=None) -> Path:
     if not value or "\x00" in value:
         raise HTTPException(status_code=400, detail="Choose an allowed account root folder")
     try:
         candidate = Path(value).expanduser().resolve()
     except (OSError, RuntimeError):
         raise HTTPException(status_code=400, detail="Account root is not a valid folder")
-    roots = _allowed_roots()
+    roots = _allowed_roots(user)
     if not any(candidate == root or root in candidate.parents for root in roots):
         raise HTTPException(status_code=400, detail="Account root must be inside an allowed FTP folder")
     if not candidate.is_dir():
@@ -89,14 +95,18 @@ def _safe_root(value: str) -> Path:
 @router.get("")
 def overview(user=Depends(require_user)):
     state = _read()
-    return {"service": _service_state(), "settings": state["settings"], "accounts": [_public(account) for account in state["accounts"]]}
+    accounts = [_public(account) for account in state["accounts"]]
+    owned = account_isolation.filter_owned(user, "ftp", [account["username"] for account in accounts])
+    if owned is not None:
+        accounts = [account for account in accounts if account["username"] in owned]
+    return {"service": _service_state(), "settings": state["settings"], "accounts": accounts}
 
 
 @router.get("/directories")
 def directories(path: str | None = None, user=Depends(require_user)):
-    roots = [root for root in _allowed_roots() if root.is_dir()]
+    roots = [root for root in _allowed_roots(user) if root.is_dir()]
     if path:
-        current = _safe_root(path)
+        current = _safe_root(path, user)
         if not current.is_dir():
             raise HTTPException(status_code=400, detail="That folder does not exist")
     else:
@@ -118,9 +128,10 @@ def directories(path: str | None = None, user=Depends(require_user)):
 
 @router.post("/accounts", status_code=status.HTTP_201_CREATED)
 def create_account(payload: FTPAccountRequest, user=Depends(require_user)):
+    account_isolation.assert_quota(user, "ftp")
     if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]+", payload.username):
         raise HTTPException(status_code=400, detail="Username contains unsupported characters")
-    root = _safe_root(payload.root)
+    root = _safe_root(payload.root, user)
     if payload.password is None:
         raise HTTPException(status_code=400, detail="Password is required for a new FTP account")
     state = _read()
@@ -130,17 +141,19 @@ def create_account(payload: FTPAccountRequest, user=Depends(require_user)):
     account.pop("password", None)
     state["accounts"].append(account)
     _write(state)
+    account_isolation.claim(user, "ftp", account["username"], check_quota=False)
     return _public(account)
 
 
 @router.put("/accounts/{username}")
 def update_account(username: str, payload: FTPAccountRequest, user=Depends(require_user)):
+    account_isolation.assert_access(user, "ftp", username)
     state = _read()
     account = next((item for item in state["accounts"] if item["username"] == username), None)
     if account is None:
         raise HTTPException(status_code=404, detail="FTP account not found")
     changes = payload.model_dump()
-    changes["root"] = str(_safe_root(changes["root"]))
+    changes["root"] = str(_safe_root(changes["root"], user))
     if changes.get("password"):
         account["password_set"] = True
     changes.pop("password", None)
@@ -151,17 +164,21 @@ def update_account(username: str, payload: FTPAccountRequest, user=Depends(requi
 
 @router.delete("/accounts/{username}")
 def delete_account(username: str, user=Depends(require_user)):
+    account_isolation.assert_access(user, "ftp", username)
     state = _read()
     before = len(state["accounts"])
     state["accounts"] = [item for item in state["accounts"] if item["username"] != username]
     if len(state["accounts"]) == before:
         raise HTTPException(status_code=404, detail="FTP account not found")
     _write(state)
+    account_isolation.release("ftp", username)
     return {"deleted": True, "username": username}
 
 
 @router.put("/settings")
 def update_settings(payload: FTPSettingsRequest, user=Depends(require_user)):
+    if not account_isolation.is_admin(user):
+        raise HTTPException(status_code=403, detail="Only the administrator can change FTP service settings")
     if payload.passive_min >= payload.passive_max:
         raise HTTPException(status_code=400, detail="Passive port start must be lower than passive port end")
     state = _read()

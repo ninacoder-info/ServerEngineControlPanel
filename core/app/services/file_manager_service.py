@@ -31,9 +31,9 @@ def is_editable_file(name: str) -> bool:
 
 
 class FileManagerService:
-    def __init__(self):
-        self.root = Path(os.getenv("SE_FILE_MANAGER_ROOT", "/"))
-        self.web_root = Path(os.getenv("SE_WEB_ROOT", "/server-engine/www"))
+    def __init__(self, root: str | Path | None = None):
+        self.root = Path(root or os.getenv("SE_FILE_MANAGER_ROOT", "/"))
+        self.web_root = self.root if root is not None else Path(os.getenv("SE_WEB_ROOT", "/server-engine/www"))
 
     def safe_path(self, relative: str = "") -> Path:
         candidate = (self.root / relative.lstrip("/")).resolve()

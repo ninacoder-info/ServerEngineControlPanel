@@ -62,6 +62,10 @@ class AuthStore:
                     disk_quota_mb INTEGER NOT NULL DEFAULT 10240,
                     bandwidth_quota_mb INTEGER NOT NULL DEFAULT 102400,
                     websites_quota INTEGER NOT NULL DEFAULT 1,
+                    databases_quota INTEGER NOT NULL DEFAULT 2,
+                    mailboxes_quota INTEGER NOT NULL DEFAULT 5,
+                    ftp_quota INTEGER NOT NULL DEFAULT 2,
+                    cron_quota INTEGER NOT NULL DEFAULT 5,
                     feature_flags TEXT NOT NULL DEFAULT '{}',
                     status TEXT NOT NULL DEFAULT 'active',
                     created_at TEXT NOT NULL
@@ -98,6 +102,12 @@ class AuthStore:
                     token_hash TEXT PRIMARY KEY,
                     user_id INTEGER NOT NULL REFERENCES users(id),
                     expires_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS login_attempts (
+                    attempt_key TEXT PRIMARY KEY,
+                    failed_attempts INTEGER NOT NULL DEFAULT 0,
+                    last_failed_at TEXT NOT NULL,
+                    locked_until TEXT
                 );
                 CREATE TABLE IF NOT EXISTS passkeys (
                     credential_id TEXT PRIMARY KEY,
@@ -181,6 +191,16 @@ class AuthStore:
             for name, definition in token_migrations.items():
                 if name not in token_columns:
                     db.execute(f"ALTER TABLE api_tokens ADD COLUMN {name} {definition}")
+            account_columns = {row["name"] for row in db.execute("PRAGMA table_info(hosting_accounts)").fetchall()}
+            account_migrations = {
+                "databases_quota": "INTEGER NOT NULL DEFAULT 2",
+                "mailboxes_quota": "INTEGER NOT NULL DEFAULT 5",
+                "ftp_quota": "INTEGER NOT NULL DEFAULT 2",
+                "cron_quota": "INTEGER NOT NULL DEFAULT 5",
+            }
+            for name, definition in account_migrations.items():
+                if name not in account_columns:
+                    db.execute(f"ALTER TABLE hosting_accounts ADD COLUMN {name} {definition}")
             if db.execute("SELECT 1 FROM users LIMIT 1").fetchone() is None:
                 db.execute("INSERT INTO users(username, password_hash, created_at, display_name, role) VALUES (?, ?, ?, ?, ?)", (self.bootstrap_user, hash_password(self.bootstrap_password), now().isoformat(), self.bootstrap_user, "administrator"))
             else:
@@ -213,6 +233,54 @@ class AuthStore:
             if row and row["status"] != "active":
                 return None
         return int(row["id"]) if row and verify_password(password, row["password_hash"]) else None
+
+    def login_is_locked(self, attempt_key: str) -> bool:
+        current = now()
+        with self.connection() as db:
+            row = db.execute("SELECT locked_until FROM login_attempts WHERE attempt_key = ?", (attempt_key,)).fetchone()
+            if not row or not row["locked_until"]:
+                return False
+            if datetime.fromisoformat(row["locked_until"]) > current:
+                return True
+            db.execute("DELETE FROM login_attempts WHERE attempt_key = ?", (attempt_key,))
+        return False
+
+    def record_login_failure(self, attempt_key: str, maximum_attempts: int, lockout_minutes: int) -> bool:
+        current = now()
+        with self.connection() as db:
+            row = db.execute("SELECT failed_attempts FROM login_attempts WHERE attempt_key = ?", (attempt_key,)).fetchone()
+            failed_attempts = (int(row["failed_attempts"]) if row else 0) + 1
+            locked_until = current + timedelta(minutes=lockout_minutes) if failed_attempts >= maximum_attempts else None
+            db.execute(
+                "INSERT INTO login_attempts(attempt_key, failed_attempts, last_failed_at, locked_until) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(attempt_key) DO UPDATE SET failed_attempts = excluded.failed_attempts, last_failed_at = excluded.last_failed_at, locked_until = excluded.locked_until",
+                (attempt_key, failed_attempts, current.isoformat(), locked_until.isoformat() if locked_until else None),
+            )
+        return locked_until is not None
+
+    def clear_login_failures(self, attempt_key: str) -> None:
+        with self.connection() as db:
+            db.execute("DELETE FROM login_attempts WHERE attempt_key = ?", (attempt_key,))
+
+    def clear_login_attempts(self, username: str | None = None, client_ip: str | None = None, clear_all: bool = False) -> int:
+        """Clear selected brute-force records for an operator recovery action."""
+        if not clear_all and not username and not client_ip:
+            return 0
+        with self.connection() as db:
+            if clear_all:
+                cursor = db.execute("DELETE FROM login_attempts")
+            else:
+                clauses = []
+                values = []
+                if username:
+                    normalized = username.strip().lower()
+                    clauses.extend(["attempt_key LIKE ?", "attempt_key LIKE ?"])
+                    values.extend([f"user|{normalized}|%", f"{normalized}|%"])
+                if client_ip:
+                    clauses.extend(["attempt_key = ?", "attempt_key LIKE ?"])
+                    values.extend([f"ip|{client_ip}", f"%|{client_ip}"])
+                cursor = db.execute(f"DELETE FROM login_attempts WHERE {' OR '.join(clauses)}", values)
+        return cursor.rowcount
 
     def create_session(self, user_id: int) -> str:
         token = secrets.token_urlsafe(40)
@@ -254,6 +322,16 @@ class AuthStore:
             cursor = db.execute("INSERT INTO users(username, password_hash, created_at, display_name, email, role) VALUES (?, ?, ?, ?, ?, ?)", (username, hash_password(password), created, display_name or username, email, role))
             user_id = cursor.lastrowid
         return self.user_by_id(user_id)
+
+    def reset_password(self, username: str, password: str) -> bool:
+        """Replace a user's password and revoke existing browser sessions."""
+        with self.connection() as db:
+            row = db.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
+            if row is None:
+                return False
+            db.execute("UPDATE users SET password_hash = ? WHERE id = ?", (hash_password(password), row["id"]))
+            db.execute("DELETE FROM sessions WHERE user_id = ?", (row["id"],))
+        return True
 
     def list_roles(self):
         with self.connection() as db:
@@ -336,7 +414,8 @@ class AuthStore:
                 """
                 SELECT a.id, a.user_id, a.account_name, a.primary_domain,
                        a.home_path, a.package_id, a.disk_quota_mb,
-                       a.bandwidth_quota_mb, a.websites_quota, a.feature_flags,
+                       a.bandwidth_quota_mb, a.websites_quota, a.databases_quota,
+                       a.mailboxes_quota, a.ftp_quota, a.cron_quota, a.feature_flags,
                        a.status, a.created_at, u.username, u.email,
                        u.last_login_at
                 FROM hosting_accounts a
@@ -431,6 +510,10 @@ class AuthStore:
         disk_quota_mb: int = 10240,
         bandwidth_quota_mb: int = 102400,
         websites_quota: int = 1,
+        databases_quota: int = 2,
+        mailboxes_quota: int = 5,
+        ftp_quota: int = 2,
+        cron_quota: int = 5,
         feature_flags: dict | None = None,
     ):
         created = now().isoformat()
@@ -457,12 +540,14 @@ class AuthStore:
                     INSERT INTO hosting_accounts(
                         user_id, account_name, primary_domain, home_path, package_id,
                         disk_quota_mb, bandwidth_quota_mb, websites_quota,
+                        databases_quota, mailboxes_quota, ftp_quota, cron_quota,
                         feature_flags, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         user_id, account_name, primary_domain, home_path, package_id,
-                        disk_quota_mb, bandwidth_quota_mb, websites_quota,
+                        disk_quota_mb, bandwidth_quota, websites_quota,
+                        databases_quota, mailboxes_quota, ftp_quota, cron_quota,
                         json.dumps(feature_flags or {}, sort_keys=True), created,
                     ),
                 )

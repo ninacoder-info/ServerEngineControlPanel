@@ -110,6 +110,9 @@ async def terminal_socket(websocket: WebSocket):
     if not user:
         await websocket.close(code=1008, reason="Authentication required")
         return
+    if user.get("role") != "administrator":
+        await websocket.close(code=1008, reason="Administrator access required")
+        return
 
     await websocket.accept()
     try:

@@ -51,6 +51,12 @@ def save_stalwart_storage(payload: StalwartStorageRequest, user=Depends(require_
     data_directory.mkdir(parents=True, exist_ok=True)
     storage = {"data_store": payload.data_store, "data_directory": str(data_directory)}
     (root / "conf/storage.json").write_text(json.dumps(storage, indent=2) + "\n")
+    datastore_type = {"RocksDB": "RocksDb", "SQLite": "Sqlite", "PostgreSQL": "PostgreSQL", "MySQL/MariaDB": "Mysql"}[payload.data_store]
+    if payload.data_store == "RocksDB":
+        config = {"@type": datastore_type, "path": str(data_directory)}
+    else:
+        raise HTTPException(422, f"{payload.data_store} storage provisioning is not implemented yet; use RocksDB for Phase 1.")
+    (root / "conf/config.json").write_text(json.dumps(config, indent=2) + "\n")
     return {"saved": True, **storage, "message": f"{payload.data_store} storage is prepared for Stalwart."}
 
 

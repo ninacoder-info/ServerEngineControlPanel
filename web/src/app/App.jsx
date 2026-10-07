@@ -5,8 +5,9 @@ import DashboardPage from "../features/dashboard/DashboardPage";
 import { useAuth } from "../hooks/useAuth";
 import { Toaster } from "sonner";
 import PanelUpdateOverlay from "../components/PanelUpdateOverlay";
+import WebmailPage from "../features/webmail/WebmailPage";
 
-export default function App() {
+function PanelApp() {
   const auth = useAuth();
   const toaster = (
     <Toaster
@@ -55,4 +56,9 @@ export default function App() {
       </Routes>
     </>
   );
+}
+
+export default function App() {
+  const webmailMode = import.meta.env.VITE_APP_MODE === "webmail" || window.location.pathname.startsWith("/webmail");
+  return webmailMode ? <WebmailPage /> : <PanelApp />;
 }

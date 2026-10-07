@@ -252,6 +252,57 @@ class JobStore:
         Thread(target=self._run_serialized, args=(self._run_action, job_id, service_id, action, version), daemon=True).start()
         return job
 
+    def enqueue_email_mailbox_create(self, job_id: str, payload: dict) -> JobSummary:
+        job = self.create(job_id, f"Create mailbox {payload.get('address', '')}".strip())
+        Thread(target=self._run_serialized, args=(self._run_email_mailbox_create, job_id, payload), daemon=True).start()
+        return job
+
+    def enqueue_email_mailbox_delete(self, job_id: str, mailbox_id: str) -> JobSummary:
+        job = self.create(job_id, "Delete email mailbox")
+        Thread(target=self._run_serialized, args=(self._run_email_mailbox_delete, job_id, mailbox_id), daemon=True).start()
+        return job
+
+    def enqueue_email_domain_sync(self, job_id: str, domain: str) -> JobSummary:
+        job = self.create(job_id, f"Sync email domain {domain}")
+        Thread(target=self._run_serialized, args=(self._run_email_domain_sync, job_id, domain), daemon=True).start()
+        return job
+
+    def _run_email_mailbox_create(self, job_id: str, payload: dict):
+        from app.models.email import MailboxRequest
+        from app.services.email_service import email_service
+
+        try:
+            self._update(job_id, status="running", progress=15, message="Validating the mailbox and domain…")
+            mailbox = email_service.create_mailbox(MailboxRequest(**payload))
+            self.publish({"type": "email-updated", "action": "mailbox-created", "mailbox": mailbox})
+            self._update(job_id, status="succeeded", progress=100, message=f"Mailbox {mailbox['address']} is ready.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+
+    def _run_email_mailbox_delete(self, job_id: str, mailbox_id: str):
+        from app.services.email_service import email_service
+
+        try:
+            self._update(job_id, status="running", progress=20, message="Removing the mailbox…")
+            if not email_service.delete_mailbox(mailbox_id):
+                raise RuntimeError("Mailbox not found")
+            self.publish({"type": "email-updated", "action": "mailbox-deleted", "mailboxId": mailbox_id})
+            self._update(job_id, status="succeeded", progress=100, message="Mailbox deleted.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+
+    def _run_email_domain_sync(self, job_id: str, domain: str):
+        from app.services.stalwart_provider import stalwart_provider
+
+        try:
+            self._update(job_id, status="running", progress=20, message=f"Provisioning {domain} in Stalwart…")
+            stalwart_provider.ensure_domain(domain)
+            self.publish({"type": "email-domain-updated", "action": "domain-synced", "domain": domain, "status": "ready"})
+            self._update(job_id, status="succeeded", progress=100, message=f"Email domain {domain} is ready.")
+        except Exception as error:
+            self.publish({"type": "email-domain-updated", "action": "domain-sync-failed", "domain": domain, "status": "error", "message": str(error)})
+            self._update(job_id, status="failed", message=str(error))
+
     def enqueue_certificate(self, job_id: str, website_id: str, method: str, email: str = "", staging: bool = False, certificate: str = "", private_key: str = "", chain: str = "") -> JobSummary:
         label = "Issue ACME certificate" if method == "acme" else "Install uploaded certificate"
         job = self.create(job_id, f"{label} for website {website_id[:8]}")
@@ -1929,6 +1980,9 @@ class JobStore:
         if service_id == "caddy":
             self._run_caddy_action(job_id, action)
             return
+        if service_id == "stalwart":
+            self._run_stalwart_action(job_id, action)
+            return
         if service_id == "haproxy":
             self._run_haproxy_action(job_id, action)
             return
@@ -2135,6 +2189,45 @@ class JobStore:
                 raise RuntimeError(f"vsftpd exited with code {process.returncode}; inspect {log_file}")
             pid_file.write_text(str(process.pid))
             self._update(job_id, status="succeeded", message=f"vsftpd {action} completed.", log=[])
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+
+    def _run_stalwart_action(self, job_id: str, action: str):
+        root = service_root("stalwart")
+        binary = root / "bin/stalwart"
+        config = root / "conf/config.json"
+        log_file = root / "logs/stalwart.log"
+        try:
+            if not binary.exists():
+                raise RuntimeError("Stalwart is not installed")
+            self._prepare_service_runtime(root, "conf", "data", "logs", "run")
+            if not config.exists():
+                config.write_text(json.dumps({"@type": "RocksDb", "path": str(root / "data")}, indent=2) + "\n")
+            credentials_file = root / "conf/serverengine-credentials.json"
+            if not credentials_file.exists():
+                credentials = {"username": "serverengine", "password": secrets.token_urlsafe(32)}
+                credentials_file.write_text(json.dumps(credentials) + "\n")
+                credentials_file.chmod(0o600)
+            else:
+                credentials = json.loads(credentials_file.read_text())
+            if action in {"stop", "restart"}:
+                self._stop_process_by_binary(binary)
+            if action == "stop":
+                self._update(job_id, status="succeeded", message="Stalwart stopped.", log=[])
+                return
+            self._update(job_id, status="running", progress=20, message=f"Starting Stalwart with {config}…", log=[f"$ {binary} --config {config}"])
+            runtime_env = managed_library_environment(root)
+            runtime_env["STALWART_RECOVERY_ADMIN"] = f"{credentials['username']}:{credentials['password']}"
+            with log_file.open("a") as stream:
+                process = subprocess.Popen([str(binary), "--config", str(config)], stdout=stream, stderr=subprocess.STDOUT, env=runtime_env, start_new_session=True)
+            import time
+            deadline = time.monotonic() + 3.0
+            while time.monotonic() < deadline and process.poll() is None:
+                time.sleep(0.1)
+            if process.poll() is not None:
+                details = log_file.read_text(errors="replace")[-3000:].strip() if log_file.exists() else ""
+                raise RuntimeError(f"Stalwart exited with code {process.returncode}; {details or f'inspect {log_file}'}")
+            self._update(job_id, status="succeeded", progress=100, message=f"Stalwart {action} completed.", log=[])
         except Exception as error:
             self._update(job_id, status="failed", message=str(error))
 
@@ -6523,6 +6616,9 @@ class JobStore:
             storage_path = root / "conf/storage.json"
             if not storage_path.exists():
                 storage_path.write_text(json.dumps({"data_store": "RocksDB", "data_directory": str(root / "data")}, indent=2) + "\n")
+            config_path = root / "conf/config.json"
+            if not config_path.exists():
+                config_path.write_text(json.dumps({"@type": "RocksDb", "path": str(root / "data")}, indent=2) + "\n")
             (root / ".serverengine-version").write_text(requested_version + "\n")
             (root / ".serverengine-install-method").write_text("prebuilt\n")
             self._prepare_service_runtime(root, "conf", "data", "logs", "run")
@@ -6651,6 +6747,9 @@ class JobStore:
             storage_path = root / "conf/storage.json"
             if not storage_path.exists():
                 storage_path.write_text(json.dumps({"data_store": "RocksDB", "data_directory": str(root / "data")}, indent=2) + "\n")
+            config_path = root / "conf/config.json"
+            if not config_path.exists():
+                config_path.write_text(json.dumps({"@type": "RocksDb", "path": str(root / "data")}, indent=2) + "\n")
             (root / ".serverengine-version").write_text(requested_version + "\n")
             self._update(job_id, status="succeeded", progress=100, message=f"Stalwart {requested_version} was built from source in {root}; no host mail package was changed.")
         except Exception as error:

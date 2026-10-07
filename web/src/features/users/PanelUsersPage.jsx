@@ -1,5 +1,6 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
+import { z } from "zod";
 import {
   CheckCircle2,
   CirclePlus,
@@ -13,6 +14,7 @@ import {
 import { apiRequest, readApiError } from "../../lib/api";
 import Toast from "../../components/Toast";
 import SecurePasswordInput from "../../components/SecurePasswordInput";
+import FormField from "../../components/FormField";
 
 const builtInRoles = [
   ["administrator", "Administrator"],
@@ -30,6 +32,20 @@ const inputClass =
 const panelClass =
   "rounded-xl border border-neutral-200 bg-white shadow-sm dark:border-neutral-800 dark:bg-neutral-900";
 
+const userSchema = z.object({
+  display_name: z.string().trim().min(1, "Display name is required.").max(120, "Display name is too long."),
+  username: z.string().trim().regex(/^[a-z][a-z0-9._-]{2,63}$/, "Use 3–64 lowercase letters, numbers, dots, underscores, or hyphens."),
+  email: z.union([z.literal(""), z.string().trim().email("Enter a valid email address.")]),
+  role: z.string().min(1, "Select an access role."),
+  password: z.string().min(12, "Use a password with at least 12 characters."),
+});
+
+function validationErrors(result) {
+  return result.success
+    ? {}
+    : Object.fromEntries(result.error.issues.map((issue) => [issue.path[0], issue.message]));
+}
+
 function roleLabel(role, options = roleOptionsForLabels) {
   return options.find((item) => (Array.isArray(item) ? item[0] : item.id) === role)?.[1] || options.find((item) => item.id === role)?.name || role;
 }
@@ -43,6 +59,7 @@ function UserFormModal({ onClose, onCreate, saving, roles }) {
     password: "",
   });
   const [error, setError] = React.useState("");
+  const [fieldErrors, setFieldErrors] = React.useState({});
 
   const setValue = (name, value) =>
     setForm((current) => ({ ...current, [name]: value }));
@@ -50,12 +67,15 @@ function UserFormModal({ onClose, onCreate, saving, roles }) {
   async function submit(event) {
     event.preventDefault();
     setError("");
-    if (form.password.length < 12) {
-      setError("Use a password with at least 12 characters.");
+    const validation = userSchema.safeParse(form);
+    const nextErrors = validationErrors(validation);
+    if (!validation.success) {
+      setFieldErrors(nextErrors);
       return;
     }
+    setFieldErrors({});
     try {
-      await onCreate(form);
+      await onCreate(validation.data);
     } catch (requestError) {
       setError(requestError.message || "Could not create panel user.");
     }
@@ -98,59 +118,45 @@ function UserFormModal({ onClose, onCreate, saving, roles }) {
 
         <div className="mt-7 space-y-5">
           <div className="grid gap-5 sm:grid-cols-2">
-            <label className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">
-              Display name
+            <FormField label="Display name" error={fieldErrors.display_name}>
               <input
-                required
                 className={inputClass}
                 value={form.display_name}
-                onChange={(event) => setValue("display_name", event.target.value)}
+                onChange={(event) => { setValue("display_name", event.target.value); setFieldErrors((current) => ({ ...current, display_name: "" })); }}
                 placeholder="Jane Smith"
               />
-            </label>
-            <label className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">
-              Username
+            </FormField>
+            <FormField label="Username" error={fieldErrors.username} hint="Lowercase letters, numbers, dots, underscores, or hyphens.">
               <input
-                required
-                pattern="[a-z][a-z0-9._-]{2,63}"
                 className={inputClass}
                 value={form.username}
-                onChange={(event) => setValue("username", event.target.value.toLowerCase())}
+                onChange={(event) => { setValue("username", event.target.value.toLowerCase()); setFieldErrors((current) => ({ ...current, username: "" })); }}
                 placeholder="jane.smith"
               />
-              <span className="mt-1.5 block text-xs font-normal text-neutral-500 dark:text-neutral-400">
-                Lowercase letters, numbers, dots, underscores, or hyphens.
-              </span>
-            </label>
+            </FormField>
           </div>
-          <label className="block text-sm font-semibold text-neutral-700 dark:text-neutral-300">
-            Email address
+          <FormField label="Email address" error={fieldErrors.email}>
             <input
-              type="email"
               className={inputClass}
               value={form.email}
-              onChange={(event) => setValue("email", event.target.value)}
+              onChange={(event) => { setValue("email", event.target.value); setFieldErrors((current) => ({ ...current, email: "" })); }}
               placeholder="jane@example.com"
             />
-          </label>
+          </FormField>
           <div className="grid gap-5 sm:grid-cols-2">
-            <label className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">
-              Access role
-              <select className={inputClass} value={form.role} onChange={(event) => setValue("role", event.target.value)}>
+            <FormField label="Access role" error={fieldErrors.role}>
+              <select className={inputClass} value={form.role} onChange={(event) => { setValue("role", event.target.value); setFieldErrors((current) => ({ ...current, role: "" })); }}>
                 {roles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}
               </select>
-            </label>
-            <label className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">
-              Initial password
+            </FormField>
+            <FormField label="Initial password" error={fieldErrors.password} hint="Use at least 12 characters.">
               <SecurePasswordInput
-                required
-                minLength={12}
                 className={inputClass}
                 value={form.password}
-                onChange={(event) => setValue("password", event.target.value)}
+                onChange={(event) => { setValue("password", event.target.value); setFieldErrors((current) => ({ ...current, password: "" })); }}
                 placeholder="At least 12 characters"
               />
-            </label>
+            </FormField>
           </div>
         </div>
         {error && <p className="mt-5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-300">{error}</p>}

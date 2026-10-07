@@ -5,14 +5,13 @@ import {
   Forward,
   LockKeyhole,
   Mail,
-  MoreHorizontal,
   Plus,
   RefreshCw,
   Search,
   Settings2,
   ShieldCheck,
   SlidersHorizontal,
-  AlertTriangle,
+  Trash2,
   X,
 } from "lucide-react";
 import { apiRequest } from "../../lib/api";
@@ -28,6 +27,7 @@ const tabs = [
   "Filters",
   "Deliverability",
 ];
+const mailDomainPattern = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
 
 function formatBytes(bytes) {
   if (!bytes) return "0 B";
@@ -213,6 +213,7 @@ export default function EmailPage() {
   const stalwartState = useServiceInstallationState("stalwart");
   const [tab, setTab] = React.useState("Mailboxes");
   const [mailboxes, setMailboxes] = React.useState([]);
+  const [mailDomains, setMailDomains] = React.useState([]);
   const [forwarders, setForwarders] = React.useState([]);
   const [autoresponders, setAutoresponders] = React.useState([]);
   const [filters, setFilters] = React.useState([]);
@@ -227,6 +228,14 @@ export default function EmailPage() {
   const [filterDataLoaded, setFilterDataLoaded] = React.useState(false);
   const [query, setQuery] = React.useState("");
   const [modal, setModal] = React.useState(false);
+  const [mailDomainModal, setMailDomainModal] = React.useState(false);
+  const [mailDomainStep, setMailDomainStep] = React.useState(1);
+  const [mailDomainDraft, setMailDomainDraft] = React.useState("");
+  const [mailDomainCheck, setMailDomainCheck] = React.useState(null);
+  const [mailDomainGuide, setMailDomainGuide] = React.useState(null);
+  const [mailDomainGuideLoading, setMailDomainGuideLoading] = React.useState(false);
+  const [mailDomainChecking, setMailDomainChecking] = React.useState("");
+  const [mailDomainCreating, setMailDomainCreating] = React.useState(false);
   const [forwarderModal, setForwarderModal] = React.useState(null);
   const [autoresponderModal, setAutoresponderModal] = React.useState(null);
   const [filterModal, setFilterModal] = React.useState(null);
@@ -234,6 +243,8 @@ export default function EmailPage() {
   const [mailboxDomain, setMailboxDomain] = React.useState("");
   const [mailboxQuota, setMailboxQuota] = React.useState("1073741824");
   const [mailboxPassword, setMailboxPassword] = React.useState("");
+  const [deletingMailboxId, setDeletingMailboxId] = React.useState("");
+  const [mailboxNotice, setMailboxNotice] = React.useState(null);
   const [postfix, setPostfix] = React.useState(() => {
     try {
       return JSON.parse(localStorage.getItem("serverengine:postfix") || "null") || { hostname: "mail.example.com", domain: "example.com", smtpPort: 25, submissionPort: 587, tls: "may", relay: "", networks: "127.0.0.0/8", maxQueue: 1000, rate: 100, queueRetention: "5d", rejectUnknown: true };
@@ -271,7 +282,6 @@ export default function EmailPage() {
   const [serviceCatalog, setServiceCatalog] = React.useState([]);
   const [installedServices, setInstalledServices] = React.useState([]);
   const [servicesLoaded, setServicesLoaded] = React.useState(false);
-  const [installStalwart, setInstallStalwart] = React.useState(false);
   const [stalwartConfigOpen, setStalwartConfigOpen] = React.useState(false);
   const [dismissedAlerts, setDismissedAlerts] = React.useState(() => {
     try {
@@ -281,11 +291,12 @@ export default function EmailPage() {
     }
   });
   const loadEmailServices = React.useCallback(async () => {
-    const [catalogResponse, installedResponse, summaryResponse, mailboxesResponse, forwardersResponse, domainsResponse, autorespondersResponse, filtersResponse] = await Promise.all([
+    const [catalogResponse, installedResponse, summaryResponse, mailboxesResponse, mailDomainsResponse, forwardersResponse, domainsResponse, autorespondersResponse, filtersResponse] = await Promise.all([
       apiRequest("/api/v1/services/catalog"),
       apiRequest("/api/v1/services/installed"),
       apiRequest("/api/v1/email/summary"),
       apiRequest("/api/v1/email/mailboxes"),
+      apiRequest("/api/v1/email/domains"),
       apiRequest("/api/v1/email/forwarders"),
       apiRequest("/api/v1/domains"),
       apiRequest("/api/v1/email/autoresponders"),
@@ -295,6 +306,7 @@ export default function EmailPage() {
     if (installedResponse.ok) setInstalledServices(await installedResponse.json());
     if (summaryResponse.ok) setSummary(await summaryResponse.json());
     if (mailboxesResponse.ok) setMailboxes(await mailboxesResponse.json());
+    if (mailDomainsResponse.ok) setMailDomains(await mailDomainsResponse.json());
     if (forwardersResponse.ok) setForwarders(await forwardersResponse.json());
     setForwarderDataLoaded(true);
     if (autorespondersResponse.ok) setAutoresponders(await autorespondersResponse.json());
@@ -323,6 +335,87 @@ export default function EmailPage() {
     loadEmailServices().catch(() => {});
     loadDeliverability().catch(() => {});
   }, [loadEmailServices, loadDeliverability]);
+  const mailboxesRef = React.useRef(mailboxes);
+  React.useEffect(() => {
+    mailboxesRef.current = mailboxes;
+  }, [mailboxes]);
+  React.useEffect(() => {
+    const onEmailUpdated = (event) => {
+      const update = event.detail;
+      if (update?.action === "mailbox-created" && update.mailbox) {
+        const mailboxAlreadyExists = mailboxesRef.current.some((item) => item.id === update.mailbox.id);
+        const domainAlreadyExists = mailboxesRef.current.some((item) => item.domain === update.mailbox.domain);
+        setMailboxes((current) => [
+          update.mailbox,
+          ...current.filter((item) => item.id !== update.mailbox.id),
+        ]);
+        setSummary((current) => current ? {
+          ...current,
+          mailboxes: current.mailboxes + (mailboxAlreadyExists ? 0 : 1),
+          domains: current.domains + (domainAlreadyExists ? 0 : 1),
+        } : current);
+      }
+      if (update?.action === "mailbox-deleted" && update.mailboxId) {
+        setDeletingMailboxId("");
+        setMailboxes((current) => {
+          const removed = current.find((item) => item.id === update.mailboxId);
+          if (!removed) return current;
+          const remainingDomainCount = current.filter((item) => item.domain === removed.domain && item.id !== update.mailboxId).length;
+          setSummary((summary) => summary ? {
+            ...summary,
+            mailboxes: Math.max(0, summary.mailboxes - 1),
+            domains: Math.max(0, summary.domains - (remainingDomainCount === 0 ? 1 : 0)),
+          } : summary);
+          return current.filter((item) => item.id !== update.mailboxId);
+        });
+      }
+    };
+    const onJobsUpdated = (event) => {
+      const job = event.detail?.job;
+      if (!job) return;
+      if (job.type?.startsWith("Create mailbox ") && ["queued", "running"].includes(job.status)) {
+        setMailboxNotice({ type: "info", message: job.message || "Mailbox creation is processing…" });
+      }
+      if (job.type === "Delete email mailbox" && ["queued", "running"].includes(job.status)) {
+        setMailboxNotice({ type: "info", message: job.message || "Mailbox deletion is processing…" });
+      }
+      if (job.type?.startsWith("Create mailbox ") && ["succeeded", "failed", "cancelled"].includes(job.status)) {
+        setMailboxNotice({ type: job.status === "succeeded" ? "success" : "error", message: job.message || `Mailbox creation ${job.status}.` });
+      }
+      if (job.type === "Delete email mailbox" && ["succeeded", "failed", "cancelled"].includes(job.status)) {
+        setDeletingMailboxId("");
+        setMailboxNotice({ type: job.status === "succeeded" ? "success" : "error", message: job.message || `Mailbox deletion ${job.status}.` });
+      }
+    };
+    const onEmailDomainUpdated = (event) => {
+      const update = event.detail;
+      if (update?.action === "domain-created" && update.domain) {
+        setDomains((current) => current.some((item) => item.domain === update.domain.domain) ? current : [...current, update.domain]);
+        setMailboxDomain((current) => current || update.domain.domain);
+      }
+      if (update?.action === "domain-deleted" && update.domain) {
+        setDomains((current) => current.filter((item) => item.domain !== update.domain));
+        setMailboxDomain((current) => current === update.domain ? "" : current);
+      }
+      if (update?.action === "domain-synced" && update.domain) {
+        setMailboxNotice({ type: "success", message: `${update.domain} is ready for mailbox provisioning.` });
+      }
+      if (update?.action === "domain-sync-failed" && update.domain) {
+        setMailboxNotice({ type: "error", message: `${update.domain} could not be provisioned in Stalwart: ${update.message || "check the mail service configuration."}` });
+      }
+      if (update?.action === "mail-domain-created" && update.domain) {
+        setMailDomains((current) => current.some((item) => item.domain === update.domain.domain) ? current : [...current, update.domain]);
+      }
+    };
+    window.addEventListener("serverengine:email-updated", onEmailUpdated);
+    window.addEventListener("serverengine:jobs-updated", onJobsUpdated);
+    window.addEventListener("serverengine:email-domain-updated", onEmailDomainUpdated);
+    return () => {
+      window.removeEventListener("serverengine:email-updated", onEmailUpdated);
+      window.removeEventListener("serverengine:jobs-updated", onJobsUpdated);
+      window.removeEventListener("serverengine:email-domain-updated", onEmailDomainUpdated);
+    };
+  }, []);
   const dismissSetupAlert = (key) => {
     setDismissedAlerts((current) => {
       const next = current.includes(key) ? current : [...current, key];
@@ -331,7 +424,6 @@ export default function EmailPage() {
     });
   };
   const stalwartService = serviceCatalog.find((service) => service.id === "stalwart");
-  const stalwartInstalled = installedServices.some((service) => service.id === "stalwart");
   const certbotInstalled = installedServices.some((service) => service.id === "certbot");
   const powerdnsInstalled = installedServices.some((service) => service.id === "powerdns");
   if (stalwartState.loading || !servicesLoaded) {
@@ -346,11 +438,76 @@ export default function EmailPage() {
   const create = async () => {
     if (!local.trim()) return;
     const response = await apiRequest("/api/v1/email/mailboxes", { method: "POST", body: JSON.stringify({ address: `${local}@${mailboxDomain}`, quota_bytes: Number(mailboxQuota), password: mailboxPassword }) });
-    if (!response.ok) throw new Error(await readApiError(response, "Unable to save forwarder."));
+    if (!response.ok) throw new Error(await readApiError(response, "Unable to queue mailbox creation."));
+    setMailboxNotice({ type: "info", message: "Mailbox creation queued. Waiting for Stalwart…" });
     setLocal("");
     setMailboxPassword("");
     setModal(false);
-    await loadEmailServices();
+  };
+  const checkMailDomain = async (record) => {
+    setMailDomainChecking(record);
+    try {
+      const response = await apiRequest("/api/v1/email/domains/check", { method: "POST", body: JSON.stringify({ domain: mailDomainDraft, record }) });
+      if (!response.ok) throw new Error(await readApiError(response, "Unable to check mail DNS."));
+      const checked = await response.json();
+      setMailDomainCheck((current) => {
+        const checks = { ...(current?.checks || {}), [record]: checked.check };
+        const passed = ["host", "mx", "spf", "dmarc"].every((key) => checks[key]?.status === "pass");
+        return { ...(current || {}), domain: checked.domain, checks, passed, message: passed ? "Required mail DNS records are present." : "Publish the missing required records before creating this mail domain." };
+      });
+    } catch (error) {
+      setMailboxNotice({ type: "error", message: error.message });
+    } finally {
+      setMailDomainChecking("");
+    }
+  };
+  const prepareMailDomain = async () => {
+    const domain = mailDomainDraft.trim().toLowerCase();
+    setMailDomainDraft(domain);
+    setMailDomainStep(2);
+    setMailDomainGuide(null);
+    setMailDomainCheck(null);
+    setMailDomainGuideLoading(true);
+    try {
+      const response = await apiRequest("/api/v1/email/domains/guide", { method: "POST", body: JSON.stringify({ domain }) });
+      if (!response.ok) throw new Error(await readApiError(response, "Unable to prepare mail DNS records."));
+      setMailDomainGuide(await response.json());
+    } catch (error) {
+      setMailboxNotice({ type: "error", message: error.message });
+    } finally {
+      setMailDomainGuideLoading(false);
+    }
+  };
+  const createMailDomain = async () => {
+    setMailDomainCreating(true);
+    try {
+      const response = await apiRequest("/api/v1/email/domains", { method: "POST", body: JSON.stringify({ domain: mailDomainDraft }) });
+      if (!response.ok) throw new Error(await readApiError(response, "Unable to create mail domain."));
+      const created = await response.json();
+      setMailDomains((current) => [...current.filter((item) => item.domain !== created.domain), created]);
+      setMailboxDomain(created.domain);
+      setMailDomainModal(false);
+      setMailDomainStep(1);
+      setMailDomainDraft("");
+      setMailDomainCheck(null);
+      setMailDomainGuide(null);
+      setMailboxNotice({ type: "success", message: `${created.domain} is ready. You can now create mailboxes for it.` });
+    } catch (error) {
+      setMailboxNotice({ type: "error", message: error.message });
+    } finally {
+      setMailDomainCreating(false);
+    }
+  };
+  const deleteMailbox = async (mailbox) => {
+    if (!window.confirm(`Delete ${mailbox.address}? This also removes the account from Stalwart.`)) return;
+    setDeletingMailboxId(mailbox.id);
+    const response = await apiRequest(`/api/v1/email/mailboxes/${mailbox.id}`, { method: "DELETE" });
+    if (!response.ok) {
+      setDeletingMailboxId("");
+      window.alert(await readApiError(response, "Unable to queue mailbox deletion."));
+      return;
+    }
+    setMailboxNotice({ type: "info", message: "Mailbox deletion queued. Waiting for Stalwart…" });
   };
   const saveForwarder = async (forwarder) => {
     const editing = forwarderModal?.id;
@@ -428,27 +585,21 @@ export default function EmailPage() {
           </button>
           <button
             type="button"
+            onClick={() => { setMailDomainModal(true); setMailDomainStep(1); setMailDomainDraft(""); setMailDomainCheck(null); setMailDomainGuide(null); }}
+            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-neutral-300 px-3 py-2.5 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+          >
+            <Plus size={16} /> Add mail domain
+          </button>
+          <button
+            type="button"
             onClick={() => setModal(true)}
+            disabled={!mailDomains.length}
             className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
           >
             <Plus size={16} /> Create mailbox
           </button>
         </div>
       </header>
-      {servicesLoaded && !stalwartInstalled && (
-        <section className="rounded-xl border border-amber-200 bg-amber-50 p-5 dark:border-amber-900/60 dark:bg-amber-950/20">
-          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" size={20} />
-              <div>
-                <h2 className="font-semibold text-amber-950 dark:text-amber-100">Stalwart Mail Server is not installed</h2>
-                <p className="mt-1 max-w-2xl text-sm leading-6 text-amber-800 dark:text-amber-200">Install Stalwart before creating real mail domains, mailboxes, aliases, and delivery rules.</p>
-              </div>
-            </div>
-            <button type="button" onClick={() => setInstallStalwart(true)} className="inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"><Plus size={15} />Install Stalwart</button>
-          </div>
-        </section>
-      )}
       {servicesLoaded && !certbotInstalled && !dismissedAlerts.includes("certbot") && (
         <div className="flex items-start justify-between gap-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 dark:border-blue-900/60 dark:bg-blue-950/20 dark:text-blue-100">
           <div><p className="font-semibold">TLS certificates are not ready</p><p className="mt-1 text-blue-800 dark:text-blue-200">Install Certbot to issue certificates for SMTP, IMAP, and the mail administration endpoint.</p><a href="/services#certbot" className="mt-2 inline-block cursor-pointer font-semibold text-blue-700 underline dark:text-blue-300">Open Certbot in Services</a></div>
@@ -503,6 +654,11 @@ export default function EmailPage() {
         ))}
       </section>
       <section className="rounded-xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
+        {mailboxNotice && (
+          <div className={`border-b px-5 py-3 text-sm ${mailboxNotice.type === "error" ? "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300" : mailboxNotice.type === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-300" : "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-300"}`}>
+            {mailboxNotice.message}
+          </div>
+        )}
         <div className="flex flex-wrap border-b border-neutral-200 px-4 dark:border-neutral-800">
           {tabs.map((item) => (
             <button
@@ -626,8 +782,15 @@ export default function EmailPage() {
                         {item.last_activity ? new Date(item.last_activity).toLocaleString() : "Never"}
                       </td>
                       <td className="px-5 py-4 text-right">
-                        <button className="rounded-md p-2 text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800">
-                          <MoreHorizontal size={17} />
+                        <button
+                          type="button"
+                          title="Delete mailbox"
+                          aria-label={`Delete ${item.address}`}
+                          disabled={deletingMailboxId === item.id}
+                          onClick={() => deleteMailbox(item)}
+                          className="rounded-md p-2 text-neutral-400 hover:bg-rose-50 hover:text-rose-600 disabled:cursor-wait disabled:opacity-50 dark:hover:bg-rose-950/30 dark:hover:text-rose-400"
+                        >
+                          <Trash2 size={17} className={deletingMailboxId === item.id ? "animate-pulse" : ""} />
                         </button>
                       </td>
                     </tr>
@@ -681,8 +844,65 @@ export default function EmailPage() {
           </div>
         )}
       </section>
-      {installStalwart && stalwartService && <InstallServiceModal service={stalwartService} onClose={() => { setInstallStalwart(false); loadEmailServices(); }} />}
       {stalwartConfigOpen && stalwartService && <StalwartConfigModal service={stalwartService} installed={installedServices.filter((service) => service.id === "stalwart")} onClose={() => setStalwartConfigOpen(false)} />}
+      {mailDomainModal && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-neutral-950/50 p-4">
+          <div className="w-full max-w-5xl rounded-xl border border-neutral-200 bg-white p-6 shadow-xl dark:border-neutral-700 dark:bg-neutral-900">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold text-neutral-950 dark:text-white">Add mail domain</h2>
+                <p className="mt-1 text-sm text-neutral-500">Verify DNS before activating a domain for mailbox creation.</p>
+              </div>
+              <button type="button" onClick={() => setMailDomainModal(false)} className="text-neutral-400"><X size={18} /></button>
+            </div>
+            <div className="mt-6 space-y-4">
+              {mailDomainStep === 1 ? (
+                <div className="space-y-4">
+                  <p className="text-sm text-neutral-600 dark:text-neutral-400">Enter the domain you want to use for mail. DNS setup comes next.</p>
+                  <label className="block text-sm font-medium">Domain name
+                    <input autoFocus value={mailDomainDraft} onChange={(event) => { setMailDomainDraft(event.target.value); setMailDomainCheck(null); }} placeholder="example.com" autoComplete="off" spellCheck="false" className="mt-2 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2.5 dark:border-neutral-700 dark:bg-neutral-900" />
+                  </label>
+                  {mailDomainDraft && !mailDomainPattern.test(mailDomainDraft.trim()) && <p className="text-sm text-rose-600 dark:text-rose-400">Enter a valid domain such as example.com. Use letters, numbers, dots, and hyphens only.</p>}
+                </div>
+              ) : (
+                <>
+                  {mailDomainGuideLoading && <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-200">Starting Stalwart domain setup and generating the complete DNS records…</div>}
+                  {mailDomainGuide && <div className="rounded-lg border border-neutral-200 dark:border-neutral-800">
+                    <div className="flex items-center justify-between gap-3 border-b border-neutral-200 bg-neutral-50 px-4 py-3 dark:border-neutral-800 dark:bg-neutral-950/50">
+                      <div><p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">DNS records for {mailDomainDraft}</p><p className="mt-1 text-xs text-neutral-500">Add these records at the authoritative DNS provider, then check them.</p></div>
+                    </div>
+                    <div className="divide-y divide-neutral-200 dark:divide-neutral-800">
+                      {mailDomainGuide.records.map((record) => {
+                        const check = mailDomainCheck?.checks?.[record.key];
+                        const status = check?.status || "not_checked";
+                        return <div key={record.key} className="grid gap-3 px-4 py-3 sm:grid-cols-[64px_minmax(220px,1fr)_minmax(260px,1.4fr)_auto] sm:items-center">
+                          <span className="text-xs font-semibold text-neutral-500">{record.type}</span>
+                          <div><p className="font-mono text-sm text-neutral-900 dark:text-neutral-100">{record.name === "@" ? mailDomainDraft : record.name}</p><p className="mt-1 text-xs text-neutral-500">{record.key === "host" ? "Resolves the mail hostname to this server." : record.key === "mx" ? "Routes incoming mail to Stalwart." : record.key === "spf" ? "Authorizes this server IP to send mail." : record.key === "dkim" ? "Public signing key generated by Stalwart." : "Defines the domain anti-spoofing policy."}</p></div>
+                          <p className="break-all text-sm text-neutral-600 dark:text-neutral-400">{record.value}</p>
+                          {status === "pass" ? <span className="text-xs font-semibold text-emerald-600">Pass</span> : <button type="button" onClick={() => checkMailDomain(record.key)} disabled={Boolean(mailDomainChecking)} className={`rounded-md border px-2.5 py-1 text-xs font-semibold disabled:cursor-wait disabled:opacity-50 ${status === "not_checked" ? "border-neutral-300 text-neutral-700 dark:border-neutral-700 dark:text-neutral-200" : "border-rose-300 text-rose-700 dark:border-rose-800 dark:text-rose-300"}`}>{mailDomainChecking === record.key ? "Checking…" : "Check"}</button>}
+                        </div>;
+                      })}
+                    </div>
+                    {mailDomainCheck && <p className={`border-t px-4 py-3 text-xs ${mailDomainCheck.passed ? "border-emerald-200 text-emerald-700 dark:border-emerald-900/50 dark:text-emerald-300" : "border-rose-200 text-rose-700 dark:border-rose-900/50 dark:text-rose-300"}`}>{mailDomainCheck.message}</p>}
+                  </div>}
+                  {!mailDomainGuideLoading && !mailDomainGuide && <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300">Stalwart could not generate the DNS records. Start and configure Stalwart, then try again.</div>}
+                </>
+              )}
+            </div>
+            <div className="mt-6 flex justify-end gap-3 border-t border-neutral-200 pt-4 dark:border-neutral-800">
+              <button type="button" onClick={() => { setMailDomainModal(false); setMailDomainStep(1); }} className="rounded-lg px-4 py-2 text-sm font-medium text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800">Cancel</button>
+              {mailDomainStep === 1 ? (
+                <button type="button" onClick={prepareMailDomain} disabled={!mailDomainPattern.test(mailDomainDraft.trim()) || mailDomainGuideLoading} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">Next</button>
+              ) : (
+                <>
+                  <button type="button" onClick={() => { setMailDomainStep(1); setMailDomainCheck(null); }} className="rounded-lg border border-neutral-300 px-4 py-2 text-sm font-semibold text-neutral-700 dark:border-neutral-700 dark:text-neutral-200">Back</button>
+                  <button type="button" onClick={createMailDomain} disabled={!mailDomainCheck?.passed || mailDomainCreating} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">{mailDomainCreating ? "Creating…" : "Create mail domain"}</button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       {modal && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-neutral-950/50 p-4">
           <div className="w-full max-w-lg rounded-xl border border-neutral-200 bg-white p-6 shadow-xl dark:border-neutral-700 dark:bg-neutral-900">
@@ -703,20 +923,13 @@ export default function EmailPage() {
               </button>
             </div>
             <div className="mt-6 space-y-4">
-              {domains.length === 0 ? (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-100">
-                  <p className="font-semibold">Add a mail domain first</p>
-                  <p className="mt-1 leading-6">A mailbox must belong to a domain managed by Server Engine. DNS records are configured after the domain exists.</p>
-                  <a href="/domains" className="mt-3 inline-block cursor-pointer font-semibold text-blue-700 underline dark:text-blue-300">Open Domains</a>
-                </div>
-              ) : (
-                <label className="block text-sm font-medium">
+              <label className="block text-sm font-medium">
                   Mail domain
                   <select value={mailboxDomain} onChange={(event) => setMailboxDomain(event.target.value)} className="mt-2 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2.5 dark:border-neutral-700 dark:bg-neutral-900">
-                    {domains.map((domain) => <option key={domain.domain} value={domain.domain}>{domain.domain}</option>)}
+                    {mailDomains.map((domain) => <option key={domain.domain} value={domain.domain}>{domain.domain}</option>)}
                   </select>
-                </label>
-              )}
+                  <span className="mt-1 block text-xs font-normal leading-5 text-neutral-500">Only verified mail domains are available here.</span>
+              </label>
               <label className="block text-sm font-medium">
                 Mailbox name
                 <div className="mt-2 flex items-center rounded-lg border border-neutral-300 dark:border-neutral-700">
@@ -759,7 +972,7 @@ export default function EmailPage() {
               </button>
               <button
                 onClick={create}
-                disabled={!mailboxDomain || !local.trim() || mailboxPassword.length < 8 || domains.length === 0}
+                disabled={!mailDomains.length || !mailboxDomain || !local.trim() || mailboxPassword.length < 8}
                 className="cursor-pointer rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Create mailbox

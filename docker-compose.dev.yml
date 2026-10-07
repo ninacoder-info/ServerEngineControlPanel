@@ -19,6 +19,12 @@ services:
       SE_BACKUP_ROOT: /server-engine/backups
       SE_FILE_MANAGER_ROOT: /
       SE_WEB_ROOT: /server-engine/www
+      SE_STALWART_URL: http://127.0.0.1:8080
+      SE_STALWART_TOKEN: "${SE_STALWART_TOKEN:-}"
+      SE_STALWART_USER: "${SE_STALWART_USER:-}"
+      SE_STALWART_PASSWORD: "${SE_STALWART_PASSWORD:-}"
+      SE_PUBLIC_IP: "${SE_PUBLIC_IP:-}"
+      SE_MAIL_HOSTNAME: "${SE_MAIL_HOSTNAME:-}"
       SE_WEBAUTHN_RP_ID: localhost
       SE_WEBAUTHN_ORIGIN: http://localhost:5173
       SE_ADMIN_USER: admin
@@ -75,6 +81,25 @@ services:
         condition: service_healthy
     command: >-
       bash -lc "npm install && npm run dev -- --host 0.0.0.0"
+
+  webmail-dev:
+    image: node:22-bookworm
+    platform: linux/arm64
+    working_dir: /app
+    volumes:
+      - ./web:/app
+      - web-dev-node-modules:/app/node_modules
+      - web-dev-npm-cache:/root/.npm
+    ports:
+      - "5174:2310"
+    environment:
+      VITE_APP_MODE: webmail
+      VITE_API_URL: "${VITE_API_URL:-http://localhost:18001}"
+    depends_on:
+      core-dev:
+        condition: service_healthy
+    command: >-
+      bash -lc "npm install && npm run dev -- --host 0.0.0.0 --port 2310"
 
 volumes:
   core-dev-pip-cache:

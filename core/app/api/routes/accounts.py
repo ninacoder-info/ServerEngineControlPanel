@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 from app.api.dependencies import require_user
 from app.services.job_service import job_store
+from app.services.account_isolation import account_isolation
 
 
 router = APIRouter(prefix="/api/v1/accounts", tags=["hosting-accounts"])
@@ -23,6 +24,10 @@ class HostingAccountCreate(BaseModel):
     bandwidth_quota_mb: int = Field(default=102400, ge=0, le=100_000_000)
     websites_quota: int = Field(default=1, ge=1, le=10_000)
     feature_flags: dict[str, bool] = Field(default_factory=dict)
+
+
+class HostingAccountStatus(BaseModel):
+    status: str = Field(pattern=r"^(active|suspended)$")
 
 
 def _require_admin(user):
@@ -63,6 +68,10 @@ def create_account(payload: HostingAccountCreate, request: Request, user=Depends
             disk_quota_mb=plan["disk_quota_mb"],
             bandwidth_quota_mb=plan["bandwidth_quota_mb"],
             websites_quota=plan["websites_quota"],
+            databases_quota=plan["databases_quota"],
+            mailboxes_quota=plan["mailboxes_quota"],
+            ftp_quota=plan["ftp_quota"],
+            cron_quota=plan["cron_quota"],
             feature_flags={"plan_features": plan["features"], **payload.feature_flags},
         )
     except sqlite3.IntegrityError as error:
@@ -70,3 +79,43 @@ def create_account(payload: HostingAccountCreate, request: Request, user=Depends
     job_store.publish({"type": "hosting-accounts", "action": "created", "account": account})
     _audit(request, user, "hosting-account.created", account["account_name"], f"Created hosting account {account['account_name']}.", metadata={"Username": account["username"], "Domain": account["primary_domain"], "Package": account["package_id"]})
     return account
+
+
+@router.get("/{account_id}/usage")
+def account_usage(account_id: int, request: Request, user=Depends(require_user)):
+    _require_admin(user)
+    account = next((item for item in request.app.state.auth_service.store.list_hosting_accounts() if item["id"] == account_id), None)
+    if account is None:
+        raise HTTPException(status_code=404, detail="Hosting account not found")
+    return {"account_id": account_id, "status": account["status"], "usage": account_isolation.usage(account_id), "quotas": {key: account[key] for key in ("websites_quota", "databases_quota", "mailboxes_quota", "ftp_quota", "cron_quota")}}
+
+
+@router.patch("/{account_id}/status")
+def update_account_status(account_id: int, payload: HostingAccountStatus, request: Request, user=Depends(require_user)):
+    _require_admin(user)
+    account = account_isolation.set_status(account_id, payload.status)
+    if account is None:
+        raise HTTPException(status_code=404, detail="Hosting account not found")
+    request.app.state.auth_service.store.record_activity("hosting", f"hosting-account.{payload.status}", user["username"], account["account_name"], f"Set hosting account status to {payload.status}.", "success", actor_user_id=user["id"])
+    job_store.publish({"type": "hosting-accounts", "action": "status-changed", "account": account})
+    return account
+
+
+@router.delete("/{account_id}")
+def delete_account(account_id: int, request: Request, user=Depends(require_user)):
+    _require_admin(user)
+    account = account_isolation.soft_delete(account_id)
+    if account is None:
+        raise HTTPException(status_code=404, detail="Hosting account not found")
+    job_store.publish({"type": "hosting-accounts", "action": "deleted", "account": account})
+    return {"deleted": True, "recoverable": True, "account": account}
+
+
+@router.post("/{account_id}/restore")
+def restore_account(account_id: int, request: Request, user=Depends(require_user)):
+    _require_admin(user)
+    account = account_isolation.restore(account_id)
+    if account is None:
+        raise HTTPException(status_code=404, detail="No deleted hosting account can be restored")
+    job_store.publish({"type": "hosting-accounts", "action": "restored", "account": account})
+    return {"restored": True, "account": account}

@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from app.api.dependencies import require_user
+from app.services.account_isolation import account_isolation
 from app.models.website import WebsiteActionRequest, WebsiteCreateRequest, WebsiteDeployRequest, WebsiteDirectoryRequest, WebsiteUpdateRequest
 from app.services.job_service import job_store
 from app.services.service_runtime import composer_path, php_cli_path
@@ -17,6 +18,24 @@ from app.services.website_service import website_service
 router = APIRouter(prefix="/api/v1/websites", tags=["websites"])
 _wordpress_versions: tuple[float, list[str]] = (0, [])
 _laravel_versions: tuple[float, list[str]] = (0, [])
+
+
+def _require_site(website_id: str, user):
+    account_isolation.assert_access(user, "website", website_id)
+    site = website_service.get(website_id)
+    if site is None:
+        raise HTTPException(status_code=404, detail="Website not found")
+    return site
+
+
+def _account_path_allowed(path: str, user) -> None:
+    account = account_isolation.account_for_user(user)
+    if not account:
+        return
+    try:
+        Path(path).expanduser().resolve().relative_to(Path(account["home_path"]).resolve())
+    except ValueError as error:
+        raise HTTPException(status_code=403, detail="This path is outside the hosting account home") from error
 
 
 class WebsiteConfigurationSaveRequest(BaseModel):
@@ -38,21 +57,27 @@ class WebsiteCertificateRequest(BaseModel):
 
 @router.get("")
 def list_websites(user=Depends(require_user)):
-    return website_service.list()
+    sites = website_service.list()
+    owned = account_isolation.filter_owned(user, "website", [site.id for site in sites])
+    return sites if owned is None else [site for site in sites if site.id in owned]
 
 
 @router.get("/directories")
 def list_directories(path: str | None = None, recursive: bool = False, user=Depends(require_user)):
+    if path:
+        _account_path_allowed(path, user)
     return website_service.directories(path, recursive)
 
 
 @router.get("/directories/status")
 def project_directory_status(path: str, user=Depends(require_user)):
+    _account_path_allowed(path, user)
     return website_service.project_path_status(path)
 
 
 @router.post("/directories", status_code=status.HTTP_201_CREATED)
 def create_directory(payload: WebsiteDirectoryRequest, user=Depends(require_user)):
+    _account_path_allowed(payload.path, user)
     return website_service.create_directory(payload.path, payload.name)
 
 
@@ -100,11 +125,11 @@ def laravel_versions(user=Depends(require_user)):
 
 @router.get("/{website_id}/configuration")
 def get_website_configuration(website_id: str, server_type: str | None = None, user=Depends(require_user)):
-    result = website_service.configuration(website_id, server_type)
+    site = _require_site(website_id, user)
+    result = website_service.configuration(site, server_type)
     path = Path(result["config_path"])
     if path.exists():
         result["content"] = path.read_text(errors="replace")
-    site = website_service.get(website_id)
     provider = server_type or (site.server_type if site else "")
     backup = website_service.config_backup_root / website_service._configuration_id(site) / f"{provider}.previous" if site else None
     result["has_previous"] = bool(backup and backup.exists())
@@ -113,9 +138,7 @@ def get_website_configuration(website_id: str, server_type: str | None = None, u
 
 @router.put("/{website_id}/configuration")
 def save_website_configuration(website_id: str, payload: WebsiteConfigurationSaveRequest, server_type: str | None = None, user=Depends(require_user)):
-    site = website_service.get(website_id)
-    if site is None:
-        raise HTTPException(404, "Website not found")
+    site = _require_site(website_id, user)
     provider = server_type or site.server_type
     result = website_service.save_provider_configuration(website_id, provider, payload.content)
     job_store.enqueue_action(f"provider-reload-site-config-{site.id}-{uuid.uuid4().hex[:8]}", provider, "restart")
@@ -125,9 +148,7 @@ def save_website_configuration(website_id: str, payload: WebsiteConfigurationSav
 
 @router.post("/{website_id}/configuration/restore")
 def restore_website_configuration(website_id: str, payload: WebsiteConfigurationRestoreRequest, server_type: str | None = None, user=Depends(require_user)):
-    site = website_service.get(website_id)
-    if site is None:
-        raise HTTPException(404, "Website not found")
+    site = _require_site(website_id, user)
     provider = server_type or site.server_type
     result = website_service.restore_provider_configuration(website_id, provider, payload.restore)
     job_store.enqueue_action(f"provider-restore-site-config-{site.id}-{uuid.uuid4().hex[:8]}", provider, "restart")
@@ -137,26 +158,19 @@ def restore_website_configuration(website_id: str, payload: WebsiteConfiguration
 
 @router.get("/{website_id}")
 def get_website(website_id: str, user=Depends(require_user)):
-    site = website_service.get(website_id)
-    if site is None:
-        from fastapi import HTTPException
-        raise HTTPException(404, "Website not found")
+    site = _require_site(website_id, user)
     return {**site.model_dump(mode="json"), "certificate": website_service.certificate_info(site)}
 
 
 @router.get("/{website_id}/certificate")
 def get_website_certificate(website_id: str, user=Depends(require_user)):
-    site = website_service.get(website_id)
-    if site is None:
-        raise HTTPException(404, "Website not found")
+    site = _require_site(website_id, user)
     return website_service.certificate_info(site)
 
 
 @router.post("/{website_id}/certificate", status_code=status.HTTP_202_ACCEPTED)
 def request_website_certificate(website_id: str, payload: WebsiteCertificateRequest, user=Depends(require_user)):
-    site = website_service.get(website_id)
-    if site is None:
-        raise HTTPException(404, "Website not found")
+    site = _require_site(website_id, user)
     if payload.method == "upload" and (not payload.certificate.strip() or not payload.private_key.strip()):
         raise HTTPException(400, "Certificate and private key are required for upload.")
     return {"job": job_store.enqueue_certificate(f"website-certificate-{uuid.uuid4().hex}", website_id, payload.method, payload.email, payload.staging, payload.certificate, payload.private_key, payload.chain).model_dump(mode="json")}
@@ -164,7 +178,10 @@ def request_website_certificate(website_id: str, payload: WebsiteCertificateRequ
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create_website(payload: WebsiteCreateRequest, user=Depends(require_user)):
+    account_isolation.assert_quota(user, "website")
+    _account_path_allowed(payload.project_path, user)
     site = website_service.create(payload)
+    account_isolation.claim(user, "website", site.id, check_quota=False)
     job_store.enqueue_action(f"provider-reload-site-{site.id}-{uuid.uuid4().hex[:8]}", site.server_type, "restart")
     job_store.publish({"type": "websites-updated", "action": "created", "website_id": site.id})
     return site
@@ -183,6 +200,8 @@ def deploy_website(payload: WebsiteDeployRequest, user=Depends(require_user)):
             raise HTTPException(400, "A WordPress database name is required.")
         if not payload.database_user.strip():
             raise HTTPException(400, "A WordPress database owner is required.")
+    account_isolation.assert_quota(user, "website")
+    _account_path_allowed(payload.project_path, user)
     project_status = website_service.project_path_status(payload.project_path)
     if project_status["exists"] and (not project_status["is_directory"] or not project_status["is_empty"]):
         raise HTTPException(400, "Project folder is not empty. Choose a new domain or project folder before deploying.")
@@ -208,6 +227,7 @@ def deploy_website(payload: WebsiteDeployRequest, user=Depends(require_user)):
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,31}", payload.wordpress_database_prefix.strip()):
             raise HTTPException(400, "WordPress database prefix is invalid.")
     site = website_service.create(payload)
+    account_isolation.claim(user, "website", site.id, check_quota=False)
     job = job_store.enqueue_application_deploy(
         f"website-deploy-{uuid.uuid4().hex}",
         site,
@@ -226,6 +246,9 @@ def deploy_website(payload: WebsiteDeployRequest, user=Depends(require_user)):
 
 @router.patch("/{website_id}")
 def update_website(website_id: str, payload: WebsiteUpdateRequest, user=Depends(require_user)):
+    _require_site(website_id, user)
+    if getattr(payload, "project_path", None):
+        _account_path_allowed(payload.project_path, user)
     site = website_service.update(website_id, payload)
     # Configuration changes, including maintenance mode, must be loaded by
     # the active provider immediately. The action is serialized with other
@@ -238,11 +261,14 @@ def update_website(website_id: str, payload: WebsiteUpdateRequest, user=Depends(
 
 @router.post("/{website_id}/actions")
 def website_action(website_id: str, payload: WebsiteActionRequest, user=Depends(require_user)):
+    _require_site(website_id, user)
     return website_service.action(website_id, payload.action)
 
 
 @router.delete("/{website_id}")
 def delete_website(website_id: str, remove_files: bool = False, user=Depends(require_user)):
+    _require_site(website_id, user)
     website_service.delete(website_id, remove_files)
+    account_isolation.release("website", website_id)
     job_store.publish({"type": "websites-updated", "action": "deleted", "website_id": website_id})
     return {"deleted": True}

@@ -8,6 +8,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 
 from app.api.dependencies import require_user
+from app.services.account_isolation import account_isolation
 from app.models.database import DatabaseCreateRequest
 from app.models.cron import CronJobRequest
 from app.services.service_runtime import binary_path, prepare_mysql_runtime, service_root
@@ -139,7 +140,7 @@ def list_databases(engine: str | None = None, user=Depends(require_user)):
     databases = []
     for row in rows:
         saved = database_credentials.public_for(active_engine, row[0])
-        databases.append({
+        database = {
             "id": f"{active_engine}:{row[0]}",
             "name": row[0],
             "engine": active_engine,
@@ -149,12 +150,22 @@ def list_databases(engine: str | None = None, user=Depends(require_user)):
             "status": "Ready",
             "size": int(row[1] or 0),
             "location": "localhost",
-        })
+        }
+        resource_id = f"{active_engine}:{row[0]}"
+        owned = account_isolation.filter_owned(user, "database", [resource_id])
+        if owned is None or resource_id in owned:
+            databases.append(database)
     return {"engine": selected, "engine_state": states[active_engine], "databases": databases}
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create_database(payload: DatabaseCreateRequest, user=Depends(require_user)):
+    account_isolation.assert_quota(user, "database")
+    account = account_isolation.account_for_user(user)
+    if account:
+        prefix = f"{account['username']}_"
+        if not payload.name.startswith(prefix) or not payload.username.startswith(prefix):
+            raise HTTPException(status_code=422, detail=f"Database and database user names must start with {prefix} for this hosting account.")
     if payload.engine not in {"mysql", "mariadb"}:
         raise HTTPException(status_code=400, detail="Database creation currently supports MySQL and MariaDB")
     state = _engine_state(payload.engine)
@@ -164,13 +175,18 @@ def create_database(payload: DatabaseCreateRequest, user=Depends(require_user)):
         raise HTTPException(status_code=400, detail=f"{ENGINE_SERVICES[payload.engine]['name']} is installed but stopped")
     if payload.backup != "manual" and cron_service_module.cron_service is None:
         raise HTTPException(status_code=503, detail="Cron scheduler is not ready")
+    if payload.backup != "manual":
+        account_isolation.assert_quota(user, "cron")
     database = payload.name.replace("`", "``")
     username = payload.username.replace("`", "``")
     password = payload.password.replace("'", "''")
     query = f"CREATE DATABASE IF NOT EXISTS `{database}` CHARACTER SET {payload.charset}; CREATE USER IF NOT EXISTS '{username}'@'localhost' IDENTIFIED BY '{password}'; ALTER USER '{username}'@'localhost' IDENTIFIED BY '{password}'; GRANT ALL PRIVILEGES ON `{database}`.* TO '{username}'@'localhost'; FLUSH PRIVILEGES;"
     (_mysql_query if payload.engine == "mysql" else _mariadb_query)(query)
     database_credentials.save(payload.engine, payload.name, payload.username, payload.password)
+    account_isolation.claim(user, "database", f"{payload.engine}:{payload.name}", check_quota=False)
     backup_job = _ensure_database_backup_job(payload.name, payload.backup) if payload.engine == "mysql" else None
+    if backup_job:
+        account_isolation.claim(user, "cron", backup_job["id"], check_quota=False)
     return {"created": True, "database": {"id": f"{payload.engine}:{payload.name}", "name": payload.name, "engine": payload.engine, "username": payload.username, "backup": payload.backup, "status": "Ready", "size": 0, "location": "localhost"}, "backup_job": backup_job}
 
 
@@ -187,6 +203,10 @@ async def import_database(
         raise HTTPException(status_code=400, detail=f"{ENGINE_SERVICES[engine]['name']} imports are not available yet.")
     if target_database and not re.fullmatch(r"[A-Za-z0-9_$-]{1,64}", target_database):
         raise HTTPException(status_code=422, detail="The target database name is invalid.")
+    if user.get("role") == "hosting_account":
+        if not target_database:
+            raise HTTPException(status_code=422, detail="A hosting account must choose one of its owned databases for import.")
+        account_isolation.assert_access(user, "database", f"{engine}:{target_database}")
     original_name = Path(file.filename or "database.sql").name
     extension = original_name.lower()
     supported = (".sql", ".sql.gz", ".zip", ".tar", ".tar.gz", ".tgz")
@@ -219,6 +239,7 @@ async def import_database(
 def database_credentials_for_copy(engine: str, database_name: str, user=Depends(require_user)):
     if engine not in {"mysql", "mariadb"}:
         raise HTTPException(status_code=400, detail="Credential copy currently supports MySQL and MariaDB only")
+    account_isolation.assert_access(user, "database", f"{engine}:{database_name}")
     saved = database_credentials.secret_for(engine, database_name)
     if not saved:
         raise HTTPException(status_code=404, detail="No saved panel credentials exist for this database")
@@ -257,6 +278,7 @@ def _ensure_database_backup_job(database_name: str, frequency: str):
 
 @router.post("/{engine}/{database_name}/backup-job")
 def create_backup_job(engine: str, database_name: str, user=Depends(require_user)):
+    account_isolation.assert_access(user, "database", f"{engine}:{database_name}")
     if engine != "mysql":
         raise HTTPException(status_code=400, detail="MariaDB backup schedules are not available yet; use a manual backup from the Backup page.")
     if cron_service_module.cron_service is None:

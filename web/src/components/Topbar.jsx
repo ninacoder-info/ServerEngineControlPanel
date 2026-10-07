@@ -236,6 +236,12 @@ export default function Topbar({
           if (message.type === "health-thresholds") {
             window.dispatchEvent(new CustomEvent("serverengine:health-thresholds", { detail: message.thresholds }));
           }
+          if (message.type === "email-updated") {
+            window.dispatchEvent(new CustomEvent("serverengine:email-updated", { detail: message }));
+          }
+          if (message.type === "email-domain-updated") {
+            window.dispatchEvent(new CustomEvent("serverengine:email-domain-updated", { detail: message }));
+          }
         } catch {}
       };
       socket.onclose = () => {

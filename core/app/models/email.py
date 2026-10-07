@@ -1,4 +1,14 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+
+class MailDomainRequest(BaseModel):
+    domain: str = Field(min_length=3, max_length=253)
+
+
+class MailDomainCheckRequest(MailDomainRequest):
+    record: Literal["host", "mx", "spf", "dkim", "dmarc"]
 
 
 class MailboxRequest(BaseModel):

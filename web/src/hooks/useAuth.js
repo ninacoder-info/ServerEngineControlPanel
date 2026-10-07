@@ -1,10 +1,24 @@
 import React from "react";
 import { apiRequest, readApiError } from "../lib/api";
 import { getPasskey } from "../lib/passkeys";
+
+const EXPLICIT_LOGOUT_KEY = "serverengine:explicit-logout";
+
 export function useAuth() {
-  const [user, setUser] = React.useState(undefined);
+  const [user, setUser] = React.useState(() => {
+    try {
+      return window.sessionStorage.getItem(EXPLICIT_LOGOUT_KEY) === "true" ? null : undefined;
+    } catch {
+      return undefined;
+    }
+  });
   const [error, setError] = React.useState("");
   React.useEffect(() => {
+    try {
+      if (window.sessionStorage.getItem(EXPLICIT_LOGOUT_KEY) === "true") return undefined;
+    } catch {
+      // Continue with the server session check when sessionStorage is unavailable.
+    }
     let alive = true;
     apiRequest("/api/v1/auth/me")
       .then((r) => (r.ok ? r.json() : null))
@@ -26,18 +40,30 @@ export function useAuth() {
         body: JSON.stringify(credentials),
       });
       if (!r.ok) {
-        setError(await readApiError(r, "Invalid username or password"));
-        return false;
+        const body = await r.json().catch(() => ({}));
+        const message = body.message || body.detail || "Invalid username or password";
+        setError(message);
+        return { ok: false, message, errors: body.errors || {}, retryAfter: Number(r.headers.get("retry-after") || 0) };
+      }
+      try {
+        window.sessionStorage.removeItem(EXPLICIT_LOGOUT_KEY);
+      } catch {
+        // Session storage is an optimization only.
       }
       setUser(await r.json());
       return true;
     } catch {
       setError("The control API is unavailable.");
-      return false;
+      return { ok: false, retryAfter: 0 };
     }
   }
   async function logout() {
     await apiRequest("/api/v1/auth/logout", { method: "POST" });
+    try {
+      window.sessionStorage.setItem(EXPLICIT_LOGOUT_KEY, "true");
+    } catch {
+      // Session storage is an optimization only.
+    }
     setUser(null);
   }
   async function passkeyLogin() {
@@ -51,6 +77,11 @@ export function useAuth() {
         body: JSON.stringify({ credential }),
       });
       if (!response.ok) throw new Error(await readApiError(response, "Passkey sign-in failed."));
+      try {
+        window.sessionStorage.removeItem(EXPLICIT_LOGOUT_KEY);
+      } catch {
+        // Session storage is an optimization only.
+      }
       setUser(await response.json());
       return true;
     } catch (reason) {

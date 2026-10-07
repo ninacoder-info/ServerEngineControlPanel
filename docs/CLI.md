@@ -33,11 +33,43 @@ se panel logs
 se panel logs --lines 200
 ```
 
+Reset a panel user's password from an SSH root session:
+
+```bash
+sudo se panel reset-password --user admin
+```
+
+The command prompts for the new password twice, requires at least eight
+characters, revokes the user's existing browser sessions, and records the
+reset in the security activity log. SSH access without `sudo` or root
+privileges cannot perform this recovery action.
+
 The panel commands operate on these systemd units:
 
 ```text
 server-engine-core.service
 server-engine-web.service
+```
+
+If you forgot the panel username, list the accounts from an SSH root session:
+
+```bash
+sudo se panel users
+```
+
+This prints each username, role, and status, but never prints passwords.
+
+Clear a brute-force lockout after verifying the recovery request:
+
+```bash
+sudo se panel unlock-login --user admin
+sudo se panel unlock-login --ip 203.0.113.10
+```
+
+For a local development environment, clear every lockout record explicitly:
+
+```bash
+sudo se panel unlock-login --all
 ```
 
 ## Service commands

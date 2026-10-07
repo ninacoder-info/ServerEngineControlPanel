@@ -7,8 +7,14 @@ from app.services.backup_service import backup_service
 from app.services import cron_service as cron_service_module
 from app.models.cron import CronJobRequest
 from app.services.cron_service import validate_schedule
+from app.services.account_isolation import account_isolation
 
 router = APIRouter(prefix="/api/v1/backups", tags=["backups"])
+
+
+def _require_admin(user):
+    if not account_isolation.is_admin(user):
+        raise HTTPException(status_code=403, detail="Only the administrator can manage server backup settings")
 
 
 def _backup_config_for_job(job: dict) -> dict | None:
@@ -26,16 +32,20 @@ def _backup_config_for_job(job: dict) -> dict | None:
 
 @router.get("")
 def list_backups(user=Depends(require_user)):
-    return backup_service.list()
+    entries = backup_service.list()
+    owned = account_isolation.filter_owned(user, "backup", [entry.get("id") for entry in entries])
+    return entries if owned is None else [entry for entry in entries if entry.get("id") in owned]
 
 
 @router.get("/config")
 def get_backup_config(user=Depends(require_user)):
+    _require_admin(user)
     return backup_service.read_config()
 
 
 @router.put("/config")
 def update_backup_config(payload: dict, user=Depends(require_user)):
+    _require_admin(user)
     try:
         return {"saved": True, "config": backup_service.save_config(payload)}
     except ValueError as error:
@@ -44,6 +54,7 @@ def update_backup_config(payload: dict, user=Depends(require_user)):
 
 @router.post("/config/test")
 def test_backup_destination(payload: dict, user=Depends(require_user)):
+    _require_admin(user)
     try:
         return backup_service.test_destination(payload)
     except ValueError as error:
@@ -53,19 +64,28 @@ def test_backup_destination(payload: dict, user=Depends(require_user)):
 @router.post("")
 def create_backup(payload: dict, user=Depends(require_user)):
     try:
-        return backup_service.create(
+        target_type = payload.get("target_type", "all")
+        target_id = payload.get("target_id")
+        if target_type == "website" and target_id:
+            account_isolation.assert_access(user, "website", target_id)
+        if target_type == "database" and target_id:
+            account_isolation.assert_access(user, "database", target_id)
+        entry = backup_service.create(
             payload.get("scope", "websites"),
             payload.get("destination", "local"),
             payload.get("compression", "balanced"),
-            payload.get("target_type", "all"),
-            payload.get("target_id"),
+            target_type,
+            target_id,
         )
+        account_isolation.claim(user, "backup", entry["id"], check_quota=False)
+        return entry
     except ValueError as error:
         raise HTTPException(422, str(error)) from error
 
 
 @router.get("/{backup_id}/download")
 def download_backup(backup_id: str, user=Depends(require_user)):
+    account_isolation.assert_access(user, "backup", backup_id)
     entry = next((item for item in backup_service.list() if item.get("id") == backup_id), None)
     if entry is None:
         raise HTTPException(404, "Backup not found")
@@ -85,13 +105,16 @@ def download_backup(backup_id: str, user=Depends(require_user)):
 
 @router.delete("/{backup_id}")
 def delete_backup(backup_id: str, user=Depends(require_user)):
+    account_isolation.assert_access(user, "backup", backup_id)
     if not backup_service.delete(backup_id):
         raise HTTPException(404, "Backup archive not found")
+    account_isolation.release("backup", backup_id)
     return {"deleted": True}
 
 
 @router.get("/schedules")
 def list_backup_schedules(user=Depends(require_user)):
+    _require_admin(user)
     if cron_service_module.cron_service is None:
         raise HTTPException(503, "Cron scheduler is not ready")
     return [
@@ -103,6 +126,7 @@ def list_backup_schedules(user=Depends(require_user)):
 
 @router.post("/schedules", status_code=status.HTTP_201_CREATED)
 def create_backup_schedule(payload: dict, user=Depends(require_user)):
+    _require_admin(user)
     scheduler = cron_service_module.cron_service
     if scheduler is None:
         raise HTTPException(503, "Cron scheduler is not ready")
@@ -136,6 +160,7 @@ def create_backup_schedule(payload: dict, user=Depends(require_user)):
 
 @router.post("/schedules/{job_id}/toggle")
 def toggle_backup_schedule(job_id: str, payload: dict, user=Depends(require_user)):
+    _require_admin(user)
     scheduler = cron_service_module.cron_service
     if scheduler is None:
         raise HTTPException(503, "Cron scheduler is not ready")
@@ -148,6 +173,7 @@ def toggle_backup_schedule(job_id: str, payload: dict, user=Depends(require_user
 
 @router.delete("/schedules/{job_id}")
 def delete_backup_schedule(job_id: str, user=Depends(require_user)):
+    _require_admin(user)
     scheduler = cron_service_module.cron_service
     if scheduler is None:
         raise HTTPException(503, "Cron scheduler is not ready")

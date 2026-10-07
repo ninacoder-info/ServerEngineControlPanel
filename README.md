@@ -101,6 +101,23 @@ Password: change-me-now
 
 Change these values before using the environment beyond local development.
 
+Email provisioning uses Stalwart's local management service. Server Engine
+creates and stores a private service credential under Stalwart's protected
+service directory; no Stalwart login or external Stalwart account is required.
+The optional environment variables below override that local credential when
+integrating an already-managed Stalwart installation:
+
+```bash
+export SE_STALWART_TOKEN="your-stalwart-api-token"
+# or:
+export SE_STALWART_USER="admin"
+export SE_STALWART_PASSWORD="your-stalwart-password"
+docker compose -f docker-compose.dev.yml up -d --force-recreate core-dev
+```
+
+The panel queues mailbox changes over HTTP and receives completion and failure
+events through the shared jobs WebSocket.
+
 Stop the development stack:
 
 ```bash
@@ -325,6 +342,21 @@ install.sh                  Native Linux installer
 ## API and authentication
 
 The API is built with FastAPI and exposes versioned routes under `/api/v1`. Browser requests use the authenticated session cookie. The terminal uses an authenticated WebSocket connection and supports both the local Server Engine container and saved external SSH connections.
+
+## Hosting account isolation
+
+Hosting-account users are scoped to one active hosting account. Server Engine
+stores ownership for websites, domains, databases, mailboxes, FTP accounts,
+cron jobs, and backups, and rejects access to resources owned by another
+account. Their file-manager root is the account home directory, and terminal
+access remains administrator-only.
+
+Plan quotas are copied onto the account and enforced at create/write time for
+websites, databases, mailboxes, FTP accounts, cron jobs, and account disk
+usage. Administrators can suspend or activate an account from Hosting
+accounts. Deleting an account is a recoverable archive operation: its home is
+moved into the protected `.deleted` area, sessions and API tokens are revoked,
+and the account can be restored from the same page.
 
 The API health endpoint is intentionally lightweight:
 

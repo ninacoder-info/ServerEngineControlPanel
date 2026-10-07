@@ -1,10 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 
 from app.api.dependencies import require_user
 from app.auth import SESSION_COOKIE, set_session
 from app.models.auth import LoginRequest
 from app.services.passkey_service import authentication_options, registration_options, verify_authentication, verify_registration
 from app.services.job_service import job_store
+from app.services.auth_service import LoginLockedError
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -16,10 +18,14 @@ def _audit(request, action, actor, target, detail, status, user_id=None):
 
 @router.post("/login")
 def login(payload: LoginRequest, request: Request, response: Response):
-    token = request.app.state.auth_service.login(payload.username, payload.password, request.client.host if request.client else None)
+    try:
+        token = request.app.state.auth_service.login(payload.username, payload.password, request.client.host if request.client else None)
+    except LoginLockedError as error:
+        _audit(request, "login.locked", payload.username, payload.username, "Panel login blocked by brute-force protection.", "error")
+        return JSONResponse(status_code=429, headers={"Retry-After": str(error.retry_after)}, content={"message": "Too Many Requests", "errors": {"username": [str(error)]}})
     if token is None:
         _audit(request, "login.failed", payload.username, payload.username, "Panel login failed.", "error")
-        raise HTTPException(status_code=401, detail="Invalid username or password")
+        return JSONResponse(status_code=401, content={"message": "Unauthorized", "errors": {"username": ["These credentials do not match our records."]}})
     user = request.app.state.auth_service.store.user_for_session(token)
     _audit(request, "login", user["username"] if user else payload.username, payload.username, "Panel login succeeded.", "success", user["id"] if user else None)
     set_session(response, token)
@@ -28,10 +34,14 @@ def login(payload: LoginRequest, request: Request, response: Response):
 
 @router.post("/mobile-login")
 def mobile_login(payload: LoginRequest, request: Request):
-    session_token = request.app.state.auth_service.login(payload.username, payload.password, request.client.host if request.client else None)
+    try:
+        session_token = request.app.state.auth_service.login(payload.username, payload.password, request.client.host if request.client else None)
+    except LoginLockedError as error:
+        _audit(request, "mobile-login.locked", payload.username, payload.username, "Mobile login blocked by brute-force protection.", "error")
+        return JSONResponse(status_code=429, headers={"Retry-After": str(error.retry_after)}, content={"message": "Too Many Requests", "errors": {"username": [str(error)]}})
     if session_token is None:
         _audit(request, "mobile-login.failed", payload.username, payload.username, "Mobile login failed.", "error")
-        raise HTTPException(status_code=401, detail="Invalid username or password")
+        return JSONResponse(status_code=401, content={"message": "Unauthorized", "errors": {"username": ["These credentials do not match our records."]}})
 
     user = request.app.state.auth_service.store.user_for_session(session_token)
     if user is None:

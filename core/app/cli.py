@@ -1,11 +1,13 @@
 """Native Server Engine command line interface."""
 
 import argparse
+import getpass
 import os
 import subprocess
 import sys
 from pathlib import Path
 
+from app.auth import AuthStore
 from app.services.job_service import job_store
 from app.services.service_runtime import php_fpm_paths, service_root
 
@@ -19,6 +21,72 @@ def _systemctl(*args: str) -> int:
 
 def _panel(args: argparse.Namespace) -> int:
     units = ("server-engine-core.service", "server-engine-web.service")
+    if args.action == "users":
+        if os.geteuid() != 0:
+            print("Listing panel users must be run as root (use sudo).", file=sys.stderr)
+            return 1
+        db_path = Path(os.getenv("SE_DB_PATH", "/var/lib/server-engine/control.db"))
+        if not db_path.is_file():
+            print(f"Panel database not found: {db_path}", file=sys.stderr)
+            return 1
+        store = AuthStore(str(db_path), os.getenv("SE_ADMIN_USER", "admin"), os.getenv("SE_ADMIN_PASSWORD") or "")
+        for user in store.list_users():
+            print(f"{user['username']}\t{user['role']}\t{user['status']}")
+        return 0
+    if args.action == "unlock-login":
+        if os.geteuid() != 0:
+            print("Unlocking login protection must be run as root (use sudo).", file=sys.stderr)
+            return 1
+        if not args.user and not args.ip and not args.all:
+            print("Choose --user, --ip, or --all.", file=sys.stderr)
+            return 2
+        db_path = Path(os.getenv("SE_DB_PATH", "/var/lib/server-engine/control.db"))
+        if not db_path.is_file():
+            print(f"Panel database not found: {db_path}", file=sys.stderr)
+            return 1
+        store = AuthStore(str(db_path), os.getenv("SE_ADMIN_USER", "admin"), os.getenv("SE_ADMIN_PASSWORD") or "")
+        cleared = store.clear_login_attempts(args.user, args.ip, args.all)
+        target = "all login records" if args.all else (f"user {args.user}" if args.user else f"IP {args.ip}")
+        print(f"Cleared {cleared} brute-force record(s) for {target}.")
+        return 0
+    if args.action == "reset-password":
+        if os.geteuid() != 0:
+            print("Password reset must be run as root (use sudo).", file=sys.stderr)
+            return 1
+        username = (args.user or "").strip()
+        if not username:
+            print("Password reset requires --user, for example: se panel reset-password --user admin", file=sys.stderr)
+            return 2
+        password = getpass.getpass("New panel password: ")
+        confirmation = getpass.getpass("Confirm new panel password: ")
+        if len(password) < 8:
+            print("Password must contain at least 8 characters.", file=sys.stderr)
+            return 2
+        if password != confirmation:
+            print("Passwords do not match.", file=sys.stderr)
+            return 2
+        db_path = Path(os.getenv("SE_DB_PATH", "/var/lib/server-engine/control.db"))
+        if not db_path.is_file():
+            print(f"Panel database not found: {db_path}", file=sys.stderr)
+            return 1
+        store = AuthStore(
+            str(db_path),
+            os.getenv("SE_ADMIN_USER", "admin"),
+            os.getenv("SE_ADMIN_PASSWORD") or "",
+        )
+        if not store.reset_password(username, password):
+            print(f"Panel user not found: {username}", file=sys.stderr)
+            return 1
+        store.record_activity(
+            "security",
+            "panel.password_reset",
+            "ssh-root",
+            username,
+            "Panel password reset from the Server Engine CLI.",
+            "success",
+        )
+        print(f"Panel password reset for {username}. Existing sessions were revoked.")
+        return 0
     if args.action == "status":
         return _systemctl("status", *units, "--no-pager")
     if args.action == "logs":
@@ -108,8 +176,11 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     panel = subparsers.add_parser("panel", help="Control the Server Engine panel")
-    panel.add_argument("action", choices=("start", "stop", "restart", "status", "logs"))
+    panel.add_argument("action", choices=("start", "stop", "restart", "status", "logs", "users", "unlock-login", "reset-password"))
     panel.add_argument("--lines", type=int, default=80)
+    panel.add_argument("--user", help="Panel username for reset-password")
+    panel.add_argument("--ip", help="Source IP for unlock-login")
+    panel.add_argument("--all", action="store_true", help="Clear all login lockout records")
     panel.set_defaults(handler=_panel)
 
     service = subparsers.add_parser("service", help="Control a managed service")
