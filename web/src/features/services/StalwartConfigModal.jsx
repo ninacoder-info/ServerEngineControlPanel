@@ -24,11 +24,11 @@ const buttonClass =
   "inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60";
 
 const tabs = [
+  ["runtime", "Runtime", Activity],
   ["overview", "Overview", Mail],
   ["network", "Network", Network],
   ["security", "Security", ShieldCheck],
   ["storage", "Storage", Database],
-  ["runtime", "Runtime", Activity],
   ["logs", "Error log", FileText],
 ];
 
@@ -159,7 +159,7 @@ function SaveFooter({ onSave, saving }) {
 
 export default function StalwartConfigModal({ service, installed, onClose }) {
   const current = Array.isArray(installed) ? installed[0] : installed;
-  const [tab, setTab] = React.useState("overview");
+  const [tab, setTab] = React.useState("runtime");
   const [settings, setSettings] = React.useState(readSettings);
   const [saving, setSaving] = React.useState(false);
   const [action, setAction] = React.useState("");

@@ -8,6 +8,7 @@ export default function Pm2OverviewCard({
   onTogglePin,
   onInstall,
   onOpenWorkspace,
+  installing = false,
 }) {
   return (
     <article
@@ -62,10 +63,16 @@ export default function Pm2OverviewCard({
           <button
             className="inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
             type="button"
-            onClick={() => onInstall(service)}
+            disabled={installing}
+            onClick={() => installed.length > 0 ? onOpenWorkspace?.() : onInstall(service)}
           >
-            <Download size={14} />
-            Install another version
+            {installing ? (
+              "Installing…"
+            ) : installed.length > 0 ? (
+              "Configure service"
+            ) : (
+              <><Download size={14} />Install</>
+            )}
           </button>
           {installed.length > 0 && (
             <button

@@ -20,6 +20,7 @@ import StartupPolicyToggle from "./StartupPolicyToggle";
 import InstallServiceModal from "./InstallServiceModal";
 
 const tabs = [
+  ["runtime", "Runtime", Activity],
   ["overview", "Settings", Globe2],
   ["versions", "Versions", PackageOpen],
   ["performance", "Performance", Gauge],
@@ -27,7 +28,6 @@ const tabs = [
   ["modules", "Modules", Layers3],
   ["vhosts", "Virtual hosts", Globe2],
   ["configuration", "httpd.conf", Code2],
-  ["runtime", "Runtime", Activity],
   ["logs", "Error log", RefreshCw],
   ["response-log", "Response log", ScrollText],
 ];
@@ -597,7 +597,7 @@ export default function ApacheConfigModal({ service, installed, onClose }) {
     setRuntimeVersion(current?.version || "");
   }, [current?.status, current?.version]);
   const running = runtimeStatus === "running";
-  const [tab, setTab] = React.useState("overview");
+  const [tab, setTab] = React.useState("runtime");
   const [config, setConfig] = React.useState(null);
   const [text, setText] = React.useState("");
   const [logs, setLogs] = React.useState(null);

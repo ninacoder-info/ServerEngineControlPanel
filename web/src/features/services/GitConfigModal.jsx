@@ -13,11 +13,11 @@ import Toast from "../../components/Toast";
 
 const STORAGE_KEY = "serverengine:git";
 const tabs = [
+  ["runtime", "Runtime", Activity],
   ["configuration", "Configuration", SlidersHorizontal],
   ["identity", "Identity", GitBranch],
   ["security", "Security", ShieldCheck],
   ["storage", "Storage", Download],
-  ["runtime", "Runtime", Activity],
   ["logs", "Error log", FileText],
 ];
 const inputClass =
@@ -135,7 +135,7 @@ function SaveFooter({ onSave, saving }) {
 
 export default function GitConfigModal({ service, installed, onClose }) {
   const current = Array.isArray(installed) ? installed[0] : installed;
-  const [tab, setTab] = React.useState("configuration");
+  const [tab, setTab] = React.useState("runtime");
   const [settings, setSettings] = React.useState(readSettings);
   const [saving, setSaving] = React.useState(false);
   const [toast, setToast] = React.useState(null);

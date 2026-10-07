@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import crypt
+import ipaddress
 import os
 import pwd
 import re
+import subprocess
 import tempfile
 import uuid
 from datetime import datetime, timezone
@@ -13,6 +16,7 @@ from threading import RLock
 from fastapi import HTTPException
 
 from app.models.website import Website, WebsiteCreateRequest, WebsiteUpdateRequest
+from app.services.service_runtime import managed_library_environment, nginx_paths, service_root
 
 
 _DOMAIN = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$", re.I)
@@ -25,6 +29,9 @@ class WebsiteService:
         self.web_root = Path(os.getenv("SE_WEB_ROOT", "/server-engine/www")).resolve()
         self.service_root = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services"))
         self.log_root = Path(os.getenv("SE_LOG_ROOT", "/server-engine/logs")).resolve()
+        self.auth_root = state / "website-auth"
+        self.config_backup_root = state / "website-config-backups"
+        self.certificate_root = state / "website-certificates"
         self._lock = RLock()
 
     @property
@@ -39,6 +46,66 @@ class WebsiteService:
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             return 80
 
+    def certificate_paths(self, site: Website) -> tuple[Path, Path]:
+        if site.certificate_path and site.private_key_path:
+            return Path(site.certificate_path), Path(site.private_key_path)
+        base = self.certificate_root / self._configuration_id(site)
+        return base / "fullchain.pem", base / "privkey.pem"
+
+    def certificate_info(self, site: Website) -> dict:
+        certificate, private_key = self.certificate_paths(site)
+        return {"status": site.certificate_status, "source": site.certificate_source, "certificate_path": str(certificate), "private_key_path": str(private_key), "expires_at": site.certificate_expires_at, "available": certificate.is_file() and private_key.is_file()}
+
+    def store_certificate(self, website_id: str, certificate: str, private_key: str, source: str = "upload", expires_at: str = "") -> Website:
+        if "BEGIN CERTIFICATE" not in certificate or "END CERTIFICATE" not in certificate:
+            raise HTTPException(400, "Certificate must be PEM encoded.")
+        if "BEGIN" not in private_key or "PRIVATE KEY" not in private_key or "END" not in private_key:
+            raise HTTPException(400, "Private key must be PEM encoded.")
+        with self._lock:
+            sites = [Website.model_validate(item) for item in self._read()]
+            site = next((item for item in sites if item.id == website_id), None)
+            if site is None:
+                raise HTTPException(404, "Website not found")
+            certificate_path, private_key_path = self.certificate_paths(site)
+            certificate_path.parent.mkdir(parents=True, exist_ok=True)
+            certificate_path.write_text(certificate.strip() + "\n")
+            private_key_path.write_text(private_key.strip() + "\n")
+            certificate_path.chmod(0o644)
+            private_key_path.chmod(0o600)
+            site.ssl_enabled = True
+            site.certificate_status = "issued"
+            site.certificate_source = source
+            site.certificate_path = str(certificate_path)
+            site.private_key_path = str(private_key_path)
+            site.certificate_expires_at = expires_at
+            site.updated_at = self._now()
+            self._write_site(site, sites)
+            return site
+
+    def mark_certificate_failed(self, website_id: str) -> None:
+        with self._lock:
+            sites = [Website.model_validate(item) for item in self._read()]
+            site = next((item for item in sites if item.id == website_id), None)
+            if site is not None:
+                site.certificate_status = "failed"
+                site.updated_at = self._now()
+                self._write_site(site, sites)
+
+    def installed_web_servers(self) -> list[str]:
+        """Return installed managed web-server providers in stable order."""
+        binaries = {
+            "nginx": ("bin/nginx", "usr/sbin/nginx"),
+            "apache": ("bin/httpd",),
+            "openlitespeed": ("usr/local/lsws/bin/lshttpd", "bin/lshttpd"),
+            "caddy": ("bin/caddy", "usr/bin/caddy"),
+        }
+        installed = []
+        for provider, candidates in binaries.items():
+            root = service_root(provider)
+            if any((root / candidate).is_file() for candidate in candidates):
+                installed.append(provider)
+        return installed
+
     def set_nginx_http_port(self, port: int) -> int:
         if not 1 <= port <= 65535:
             raise HTTPException(400, "Nginx HTTP port must be between 1 and 65535")
@@ -48,6 +115,8 @@ class WebsiteService:
             for site in [Website.model_validate(item) for item in self._read() if item.get("server_type") == "nginx"]:
                 generated = self.configuration(site)
                 provider_path = Path(generated["config_path"])
+                if self._custom_marker(site, "nginx").exists():
+                    continue
                 provider_path.parent.mkdir(parents=True, exist_ok=True)
                 provider_path.write_text(generated["content"])
             # Migrate managed site files from older releases as well. This
@@ -76,19 +145,118 @@ class WebsiteService:
             # Repair records created by older releases that persisted the
             # registry before generating the provider configuration.
             for site in sites:
-                generated = self.configuration(site.id)
-                provider_path = Path(generated["config_path"])
-                existing = provider_path.read_text(errors="replace") if provider_path.exists() else ""
-                legacy_log_root = str(self.service_root / site.server_type / "logs")
-                if not provider_path.exists() or legacy_log_root in existing:
-                    provider_path.parent.mkdir(parents=True, exist_ok=True)
-                    provider_path.write_text(generated["content"])
+                for generated in self.provider_configurations(site):
+                    provider_path = Path(generated["config_path"])
+                    if self._custom_marker(site, generated["server_type"]).exists():
+                        continue
+                    existing = provider_path.read_text(errors="replace") if provider_path.exists() else ""
+                    legacy_log_root = str(self.service_root / generated["server_type"] / "logs")
+                    if not provider_path.exists() or legacy_log_root in existing:
+                        provider_path.parent.mkdir(parents=True, exist_ok=True)
+                        provider_path.write_text(generated["content"])
             return sites
 
     def get(self, website_id: str) -> Website | None:
         return next((site for site in self.list() if site.id == website_id), None)
 
-    def configuration(self, website_id: str | Website) -> dict:
+    def refresh_scheduled_maintenance(self) -> list[Website]:
+        """Apply maintenance windows that changed since the last provider render."""
+        changed = []
+        with self._lock:
+            for site in [Website.model_validate(item) for item in self._read()]:
+                provider_changed = False
+                for generated in self.provider_configurations(site):
+                    provider_path = Path(generated["config_path"])
+                    if self._custom_marker(site, generated["server_type"]).exists():
+                        continue
+                    content = generated["content"]
+                    existing = provider_path.read_text(errors="replace") if provider_path.exists() else None
+                    if existing != content:
+                        provider_path.parent.mkdir(parents=True, exist_ok=True)
+                        provider_path.write_text(content)
+                        provider_changed = True
+                if provider_changed:
+                    changed.append(site)
+        return changed
+
+    def save_provider_configuration(self, website_id: str, provider: str, content: str) -> dict:
+        site = self.get(website_id)
+        if site is None:
+            raise HTTPException(404, "Website not found")
+        generated = self.configuration(site, provider)
+        path = Path(generated["config_path"])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        backup = self.config_backup_root / self._configuration_id(site) / f"{provider}.previous"
+        backup.parent.mkdir(parents=True, exist_ok=True)
+        previous_content = path.read_text(errors="replace") if path.exists() else None
+        if path.exists():
+            backup.write_text(previous_content)
+        path.write_text(content)
+        try:
+            if provider == "nginx":
+                self._validate_nginx_configuration(path, content)
+        except Exception:
+            if previous_content is None:
+                path.unlink(missing_ok=True)
+            else:
+                path.write_text(previous_content)
+            raise
+        self._custom_marker(site, provider).parent.mkdir(parents=True, exist_ok=True)
+        self._custom_marker(site, provider).touch()
+        return {"website_id": site.id, "server_type": provider, "config_path": str(path), "content": content}
+
+    def restore_provider_configuration(self, website_id: str, provider: str, restore: str) -> dict:
+        site = self.get(website_id)
+        if site is None:
+            raise HTTPException(404, "Website not found")
+        generated = self.configuration(site, provider)
+        path = Path(generated["config_path"])
+        backup = self.config_backup_root / self._configuration_id(site) / f"{provider}.previous"
+        if restore == "previous":
+            if not backup.exists():
+                raise HTTPException(404, "No previous edit exists for this configuration")
+            content = backup.read_text(errors="replace")
+        elif restore == "original":
+            content = generated["content"]
+        else:
+            raise HTTPException(400, "Unknown configuration restore target")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+        try:
+            if provider == "nginx":
+                self._validate_nginx_configuration(path, content)
+        except Exception:
+            path.write_text(backup.read_text(errors="replace") if backup.exists() else generated["content"])
+            raise
+        marker = self._custom_marker(site, provider)
+        if restore == "original":
+            marker.unlink(missing_ok=True)
+        else:
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.touch()
+        return {"website_id": site.id, "server_type": provider, "config_path": str(path), "content": content}
+
+    @staticmethod
+    def _validate_nginx_configuration(path: Path, content: str) -> None:
+        if content.count("{") != content.count("}"):
+            raise HTTPException(400, "Nginx configuration has unbalanced braces")
+        nginx = nginx_paths()
+        if not nginx["binary"].exists() or not nginx["config"].exists():
+            return
+        # Validate the complete active configuration, including this site,
+        # before replacing the live file. The managed library environment is
+        # required when the ModSecurity connector is installed.
+        check = subprocess.run([str(nginx["binary"]), "-p", str(nginx["root"]), "-c", str(nginx["config"]), "-t"], capture_output=True, text=True, check=False, env=managed_library_environment(nginx["root"], service_root("modsecurity")))
+        if check.returncode != 0:
+            raise HTTPException(400, (check.stderr or check.stdout).strip() or "Nginx configuration validation failed")
+
+    def provider_configurations(self, site: Website) -> list[dict]:
+        providers = self.installed_web_servers()
+        if site.server_type not in providers:
+            providers.insert(0, site.server_type)
+        return [self.configuration(site, provider) for provider in providers]
+
+    def configuration(self, website_id: str | Website, provider: str | None = None) -> dict:
         # Creation generates the provider file before the registry is committed,
         # so it must be able to render from the in-memory site as well as from
         # an already persisted ID used by the configuration API.
@@ -98,16 +266,33 @@ class WebsiteService:
             site = next((Website.model_validate(item) for item in self._read() if item.get("id") == website_id), None)
             if site is None:
                 raise HTTPException(404, "Website not found")
+        server_type = provider or site.server_type
+        if server_type not in {"nginx", "apache", "openlitespeed", "caddy"}:
+            raise HTTPException(400, "Unsupported web-server provider")
         config_id = self._configuration_id(site)
         names = " ".join([site.domain, *site.aliases])
         index = "index.php index.html index.htm default.php default.htm default.html"
         root = site.document_root
         socket = self.service_root / "php" / "versions" / site.php_version / "run" / "php-fpm.sock"
-        site_log_root = self.log_root / site.server_type / "sites"
+        site_log_root = self.log_root / server_type / "sites"
         site_log_root.mkdir(parents=True, exist_ok=True)
-        if site.server_type == "apache":
+        maintenance = self._maintenance_active(site)
+        bypass = self._maintenance_bypass(site.maintenance_bypass)
+        access_ips = self._access_ips(site.access_allowed_ips)
+        auth_file = self.auth_root / f"{self._configuration_id(site)}.htpasswd"
+        certificate_path, private_key_path = self.certificate_paths(site)
+        tls_ready = site.ssl_enabled and certificate_path.is_file() and private_key_path.is_file()
+        if server_type == "apache":
             service_root = self.service_root / "apache"
             config_path = service_root / "conf" / "sites" / f"{config_id}.conf"
+            if access_ips and site.access_auth_enabled:
+                access_requirements = ["        <RequireAll", *[f"          Require ip {value}" for value in access_ips], "          Require valid-user", "        </RequireAll>"]
+            elif access_ips:
+                access_requirements = ["        <RequireAny", *[f"          Require ip {value}" for value in access_ips], "        </RequireAny>"]
+            elif site.access_auth_enabled:
+                access_requirements = ["        AuthType Basic", f"        AuthName \"{self._config_text(site.domain)}\"", f"        AuthUserFile \"{auth_file}\"", "        Require valid-user"]
+            else:
+                access_requirements = ["        Require all granted"]
             lines = [
                 f"<VirtualHost *:80>",
                 f"    ServerName {site.domain}",
@@ -118,9 +303,18 @@ class WebsiteService:
                 f"    CustomLog \"{site_log_root / f'{config_id}.access.log'}\" combined",
                 f"    <Directory \"{root}\">",
                 "        AllowOverride All",
-                "        Require all granted",
+                *access_requirements,
                 "    </Directory>",
             ]
+            if site.redirects:
+                lines.extend(["    RewriteEngine On", *[f"    Redirect {item['code']} {item['source_path']} {item['target']}" for item in site.redirects]])
+            for item in site.proxies:
+                lines.extend([f"    ProxyPass {item['path']} {item['target']}{'/' if item['path'] != '/' else ''}", f"    ProxyPassReverse {item['path']} {item['target']}{'/' if item['path'] != '/' else ''}"])
+            if maintenance:
+                lines.extend(["    RewriteEngine On"])
+                for value in bypass:
+                    lines.append(f"    RewriteCond expr \"! -R '{value}'\"")
+                lines.extend([f"    RewriteRule ^ - [R={site.maintenance_response_code},L]", f"    ErrorDocument {site.maintenance_response_code} \"{self._config_text(site.maintenance_message)}\""])
             if site.php_version:
                 lines.extend([
                     "    <FilesMatch \\\"\\\\.php$\\\">",
@@ -128,14 +322,23 @@ class WebsiteService:
                     "    </FilesMatch>",
                 ])
             lines.extend(["</VirtualHost>", ""])
-        elif site.server_type == "caddy":
+        elif server_type == "caddy":
             service_root = self.service_root / "caddy"
             config_path = service_root / "conf" / "sites" / f"{config_id}.caddy"
-            lines = [f"{names} {{", f"    root * {root}", "    encode zstd gzip", "    file_server"]
+            lines = [f"{names} {{", f"    root * {root}", "    encode zstd gzip"]
+            lines.extend([f"    redir {item['source_path']} {item['target']} {item['code']}" for item in site.redirects])
+            for item in site.proxies:
+                lines.extend([f"    handle_path {item['path']}* {{", f"        reverse_proxy {item['target']} {{", f"            transport http {{", f"                read_timeout {item['timeout']}s", "            }", "        }", "    }"])
+            if access_ips:
+                lines.extend([f"    @server_engine_access_denied not remote_ip {' '.join(access_ips)}", "    respond @server_engine_access_denied 403"])
+            if maintenance:
+                matcher = " ".join(bypass) if bypass else "0.0.0.0/0"
+                lines.extend([f"    @server_engine_maintenance not remote_ip {matcher}", f"    respond @server_engine_maintenance {self._caddy_text(site.maintenance_message)} {site.maintenance_response_code}"])
+            lines.append("    file_server")
             if site.php_version:
                 lines.append(f"    php_fastcgi unix/{socket}")
             lines.extend(["    log {", f"        output file {site_log_root / f'{config_id}.access.log'}", "    }", "}", ""])
-        elif site.server_type == "openlitespeed":
+        elif server_type == "openlitespeed":
             service_root = self.service_root / "openlitespeed"
             config_path = service_root / "conf" / "vhosts" / config_id / "vhost.conf"
             lines = [
@@ -154,27 +357,225 @@ class WebsiteService:
             if site.php_version:
                 lines.extend(["scriptHandler {"])
                 lines.extend([f"  add                     lsapi:php-{site.php_version} php", "}"])
+            if maintenance:
+                lines.extend(["rewrite  {", "  enable                  1", f"  rules                   RewriteRule ^(.*)$ - [R={site.maintenance_response_code},L]", "}"])
+            if site.redirects:
+                lines.extend(["rewrite  {", "  enable                  1", *[f"  rules                   RewriteRule ^{item['source_path'].lstrip('/')}$ {item['target']} [R={item['code']},L]" for item in site.redirects], "}"])
+            for item in site.proxies:
+                lines.extend(["context /" + item["path"].lstrip("/") + " {", "  type                    proxy", f"  handler                 {item['target']}", "}"])
             lines.append("")
         else:
             service_root = self.service_root / "nginx"
             config_path = service_root / "conf" / "sites" / f"{config_id}.conf"
+            fastcgi_params = nginx_paths()["root"] / "etc/nginx/fastcgi_params"
             lines = [
                 "server {",
                 f"    listen {self.nginx_http_port()};",
+                *(["    listen 443 ssl;", f"    ssl_certificate {certificate_path};", f"    ssl_certificate_key {private_key_path};"] if tls_ready else []),
                 f"    server_name {names};",
                 f"    index {index};",
                 f"    root {root};",
                 f"    access_log {site_log_root / f'{config_id}.access.log'};",
                 f"    error_log {site_log_root / f'{config_id}.error.log'};",
                 "",
-                "    location / {",
-                "        try_files $uri $uri/ /index.php?$query_string;",
-                "    }",
             ]
+            if tls_ready and site.ssl_enforce_tls:
+                lines.extend(["    if ($scheme = http) {", "        return 301 https://$host$request_uri;", "    }", ""])
+            if site.access_auth_enabled:
+                lines.extend(["    auth_basic \"Restricted website\";", f"    auth_basic_user_file {auth_file};", ""])
+            for item in site.redirects:
+                suffix = "$request_uri" if item["keep_path"] and item["source_path"] == "/" else "$is_args$args"
+                lines.extend([f"    location = {item['source_path']} {{", f"        return {item['code']} {item['target']}{suffix};", "    }"])
+            for item in site.proxies:
+                location = item["path"] if item["path"] == "/" else item["path"] + "/"
+                lines.extend([f"    location {location} {{", f"        proxy_pass {item['target']};", "        proxy_set_header Host $host;", "        proxy_set_header X-Real-IP $remote_addr;", "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;", "        proxy_set_header X-Forwarded-Proto $scheme;", f"        proxy_read_timeout {item['timeout']}s;", f"        proxy_buffering {'on' if item['buffering'] else 'off'};"])
+                if item["websockets"]:
+                    lines.extend(["        proxy_http_version 1.1;", "        proxy_set_header Upgrade $http_upgrade;", "        proxy_set_header Connection \"upgrade\";"])
+                lines.append("    }")
+            if site.hotlink.get("enabled"):
+                extensions = "|".join(re.escape(item) for item in site.hotlink["extensions"])
+                referers = (["none"] if site.hotlink["allow_empty"] else []) + ["blocked", "server_names", *site.hotlink["domains"], site.domain, *site.aliases]
+                lines.extend([f"    location ~* \\.(?:{extensions})$ {{", f"        valid_referers {' '.join(referers)};"])
+                if site.hotlink["action"] == "redirect":
+                    lines.append(f"        if ($invalid_referer) {{ return 302 {site.hotlink['redirect']}; }}")
+                else:
+                    lines.append("        if ($invalid_referer) { return 403; }")
+                lines.append("    }")
+            lines.append("    location ^~ /.well-known/acme-challenge/ {")
+            lines.extend([f"        root {root};", "        try_files $uri =404;", "    }"])
+            if not any(item["path"] == "/" for item in site.proxies):
+                lines.append("    location / {")
+                if maintenance:
+                    lines.extend(self._nginx_maintenance_body(site, list(dict.fromkeys(access_ips + bypass))))
+                elif access_ips:
+                    lines.extend(self._nginx_access_body(access_ips))
+                lines.extend([*(f"        {rule}" for rule in self._rewrite_rules(site.rewrite_rules)), "    }"])
             if site.php_version:
-                lines.extend(["", "    location ~ \\.php$ {", f"        fastcgi_pass unix:{socket};", "        include fastcgi_params;", "        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;", "    }"])
-            lines.extend(["", "    location ~ /\\. {", "        deny all;", "    }", "}", ""])
-        return {"website_id": site.id, "server_type": site.server_type, "config_path": str(config_path), "content": "\n".join(lines)}
+                lines.extend(["", "    location ~ \\.php$ {"])
+                if maintenance:
+                    lines.extend(self._nginx_maintenance_body(site, list(dict.fromkeys(access_ips + bypass))))
+                elif access_ips:
+                    lines.extend(self._nginx_access_body(access_ips))
+                lines.extend([f"        fastcgi_pass unix:{socket};", f"        include {fastcgi_params};", "        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;", "    }"])
+            if maintenance:
+                lines.extend(["", f"    location @server_engine_maintenance_{site.id.replace('-', '_')} {{", "        default_type text/plain;", f"        return {site.maintenance_response_code} \"{self._config_text(site.maintenance_message)}\\n\";", "    }"])
+            lines.extend(["", "    location ~ /\\.(?!well-known) {", "        deny all;", "    }", "}", ""])
+        return {"website_id": site.id, "server_type": server_type, "config_path": str(config_path), "content": "\n".join(lines)}
+
+    @staticmethod
+    def _config_text(value: str) -> str:
+        return str(value or "We’ll be back shortly.").replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+    @staticmethod
+    def _caddy_text(value: str) -> str:
+        return '"' + WebsiteService._config_text(value) + '"'
+
+    @staticmethod
+    def _maintenance_bypass(values: list[str]) -> list[str]:
+        result = []
+        for raw in values or []:
+            value = str(raw).strip()
+            try:
+                ipaddress.ip_network(value, strict=False)
+            except ValueError as exc:
+                raise HTTPException(400, f"Invalid maintenance bypass address: {value}") from exc
+            result.append(value)
+        return list(dict.fromkeys(result))
+
+    @staticmethod
+    def _access_ips(values: list[str]) -> list[str]:
+        result = []
+        for raw in values or []:
+            value = str(raw).strip()
+            try:
+                ipaddress.ip_network(value, strict=False)
+            except ValueError as exc:
+                raise HTTPException(400, f"Invalid allowed IP address: {value}") from exc
+            result.append(value)
+        return list(dict.fromkeys(result))
+
+    @staticmethod
+    def _rewrite_rules(value: str) -> list[str]:
+        rules = [line.strip() for line in str(value or "").splitlines() if line.strip()]
+        if not rules:
+            return ["try_files $uri $uri/ /index.php?$query_string;"]
+        if any(re.search(r"\b(?:http|server|location|events|upstream)\s*\{", line, re.I) for line in rules):
+            raise HTTPException(400, "URL rewrite rules may only contain directives inside the website location")
+        if any(";" not in line and not line.endswith("{") and not line.endswith("}") for line in rules):
+            raise HTTPException(400, "Each URL rewrite directive must end with a semicolon")
+        return rules
+
+    @staticmethod
+    def _redirects(values: list[dict] | None) -> list[dict]:
+        result = []
+        for item in values or []:
+            source = str(item.get("source_path", "")).strip()
+            target = str(item.get("target", "")).strip()
+            code = str(item.get("code", "301")).strip()
+            if not source.startswith("/") or any(char in source for char in ("\n", "\r", "{", "}", '"')):
+                raise HTTPException(400, "Redirect source must be a local path beginning with '/'")
+            if not target or any(char in target for char in ("\n", "\r", "{", "}", '"')):
+                raise HTTPException(400, "Redirect destination is invalid")
+            if code not in {"301", "302", "307", "308"}:
+                raise HTTPException(400, "Redirect status must be 301, 302, 307, or 308")
+            source = source if source == "/" else source.rstrip("/")
+            if any(existing["source_path"] == source for existing in result):
+                raise HTTPException(409, f"A redirect already exists for {source}")
+            result.append({"source_path": source, "target": target, "code": code, "keep_path": bool(item.get("keep_path", True))})
+        return result
+
+    @staticmethod
+    def _proxies(values: list[dict] | None) -> list[dict]:
+        result = []
+        for item in values or []:
+            target = str(item.get("target", "")).strip().rstrip("/")
+            path = str(item.get("path", "/")).strip() or "/"
+            timeout = str(item.get("timeout", "60")).strip()
+            if not re.fullmatch(r"https?://[^\s/]+(?::\d{1,5})?(?:/[^\s]*)?", target):
+                raise HTTPException(400, "Proxy upstream must be an HTTP or HTTPS URL")
+            if not path.startswith("/") or any(char in path for char in ("\n", "\r", "{", "}", '"')):
+                raise HTTPException(400, "Proxy path must begin with '/'")
+            if not timeout.isdigit() or not 1 <= int(timeout) <= 3600:
+                raise HTTPException(400, "Proxy timeout must be between 1 and 3600 seconds")
+            if any(existing["path"] == path for existing in result):
+                raise HTTPException(409, f"A proxy already exists for {path}")
+            result.append({"target": target, "path": path if path == "/" else path.rstrip("/"), "timeout": timeout, "websockets": bool(item.get("websockets", True)), "buffering": bool(item.get("buffering", True))})
+        return result
+
+    @staticmethod
+    def _hotlink(value: dict | None) -> dict:
+        value = value or {}
+        extensions = []
+        for raw in str(value.get("extensions", "jpg, jpeg, png, gif, webp, svg")).split(","):
+            extension = raw.strip().lower().lstrip(".")
+            if extension and re.fullmatch(r"[a-z0-9]+", extension):
+                extensions.append(extension)
+        if not extensions:
+            raise HTTPException(400, "Add at least one protected file extension")
+        domains = []
+        for raw in value.get("domains", []) if isinstance(value.get("domains", []), list) else str(value.get("domains", "")).split(","):
+            domain = str(raw).strip().lower()
+            if domain and re.fullmatch(r"[a-z0-9.*-]+", domain):
+                domains.append(domain)
+        action = str(value.get("action", "403"))
+        if action not in {"403", "redirect"}:
+            raise HTTPException(400, "Hotlink action must be 403 or redirect")
+        redirect = str(value.get("redirect", "")).strip()
+        if action == "redirect" and not re.fullmatch(r"https?://[^\s]+", redirect):
+            raise HTTPException(400, "Hotlink redirect must be an HTTP or HTTPS URL")
+        return {"enabled": bool(value.get("enabled", False)), "extensions": list(dict.fromkeys(extensions)), "domains": list(dict.fromkeys(domains)), "allow_empty": bool(value.get("allow_empty", True)), "action": action, "redirect": redirect}
+
+    def _write_auth_file(self, site: Website, username: str, password: str | None = None) -> None:
+        target = self.auth_root / f"{self._configuration_id(site)}.htpasswd"
+        if not site.access_auth_enabled:
+            target.unlink(missing_ok=True)
+            return
+        if password:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(f"{username}:{crypt.crypt(password, crypt.mksalt(crypt.METHOD_SHA512))}\n")
+            target.chmod(0o600)
+        elif not target.exists():
+            raise HTTPException(400, "Enter an HTTP authentication password before enabling authentication")
+
+    @staticmethod
+    def _validate_maintenance_schedule(start: str, end: str) -> None:
+        try:
+            start_at = datetime.fromisoformat(start.replace("Z", "+00:00")) if start else None
+            end_at = datetime.fromisoformat(end.replace("Z", "+00:00")) if end else None
+            if start_at and start_at.tzinfo is None:
+                start_at = start_at.replace(tzinfo=timezone.utc)
+            if end_at and end_at.tzinfo is None:
+                end_at = end_at.replace(tzinfo=timezone.utc)
+        except ValueError as exc:
+            raise HTTPException(400, "Maintenance schedule must use a valid date and time") from exc
+        if start_at and end_at and end_at <= start_at:
+            raise HTTPException(400, "Maintenance end must be later than maintenance start")
+
+    @staticmethod
+    def _maintenance_active(site: Website) -> bool:
+        if not site.maintenance_enabled:
+            return False
+        now = datetime.now(timezone.utc)
+        try:
+            start = datetime.fromisoformat(site.maintenance_start.replace("Z", "+00:00")) if site.maintenance_start else None
+            end = datetime.fromisoformat(site.maintenance_end.replace("Z", "+00:00")) if site.maintenance_end else None
+            if start and start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            if end and end.tzinfo is None:
+                end = end.replace(tzinfo=timezone.utc)
+        except ValueError as exc:
+            raise HTTPException(400, "Maintenance schedule must use a valid date and time") from exc
+        return not (start and now < start) and not (end and now >= end)
+
+    @staticmethod
+    def _nginx_maintenance_body(site: Website, bypass: list[str]) -> list[str]:
+        lines = [f"        allow {value};" for value in bypass]
+        lines.extend(["        deny all;", f"        error_page 403 = @server_engine_maintenance_{site.id.replace('-', '_')};"])
+        return lines
+
+    @staticmethod
+    def _nginx_access_body(allowed: list[str]) -> list[str]:
+        return [*(f"        allow {value};" for value in allowed), "        deny all;"]
 
     def create(self, payload: WebsiteCreateRequest) -> Website:
         with self._lock:
@@ -184,6 +585,10 @@ class WebsiteService:
             requested_project_path = payload.project_path.strip() or str(self.web_root / domain)
             project = self._safe_project_path(requested_project_path)
             web_root = self._normalize_web_root(payload.web_root)
+            self._validate_maintenance_schedule(payload.maintenance_start.strip(), payload.maintenance_end.strip())
+            access_ips = self._access_ips(payload.access_allowed_ips)
+            if payload.access_auth_enabled and not payload.access_auth_username.strip():
+                raise HTTPException(400, "Enter an HTTP authentication username")
             if payload.database_enabled and not payload.database_name.strip():
                 raise HTTPException(400, "Database name is required when database integration is enabled")
             project_created = not project.exists()
@@ -198,11 +603,24 @@ class WebsiteService:
                 php_version=payload.php_version.strip(), framework=payload.framework,
                 server_type=payload.server_type, ssl_enabled=payload.ssl_enabled,
                 ssl_enforce_tls=payload.ssl_enforce_tls, ssl_allow_http=payload.ssl_allow_http,
+                access_allowed_ips=access_ips,
+                access_auth_enabled=payload.access_auth_enabled,
+                access_auth_username=payload.access_auth_username.strip(),
+                rewrite_rules="\n".join(self._rewrite_rules(payload.rewrite_rules)),
+                redirects=self._redirects(payload.redirects),
+                proxies=self._proxies(payload.proxies),
+                hotlink=self._hotlink(payload.hotlink),
+                maintenance_enabled=payload.maintenance_enabled,
+                maintenance_response_code=payload.maintenance_response_code,
+                maintenance_message=payload.maintenance_message.strip() or "We’ll be back shortly.",
+                maintenance_bypass=self._maintenance_bypass(payload.maintenance_bypass),
+                maintenance_start=payload.maintenance_start.strip(), maintenance_end=payload.maintenance_end.strip(),
                 database_enabled=payload.database_enabled, database_name=payload.database_name.strip(),
                 database_user=payload.database_user.strip(), notes=payload.notes.strip(),
                 tags=self._tags(payload.tags), status="ready", enabled=True,
                 created_at=now, updated_at=now, config_path=str(config_path))
             try:
+                self._write_auth_file(site, site.access_auth_username, payload.access_auth_password)
                 self._write_site(site, sites + [site])
             except Exception:
                 if project_created:
@@ -220,6 +638,7 @@ class WebsiteService:
             if site is None:
                 raise HTTPException(404, "Website not found")
             changes = payload.model_dump(exclude_unset=True)
+            auth_password = changes.pop("access_auth_password", None)
             domain, aliases = self._domains(changes.get("domain", site.domain), changes.get("aliases", site.aliases))
             self._ensure_domains_free(sites, [domain, *aliases], website_id)
             if "project_path" in changes:
@@ -230,6 +649,26 @@ class WebsiteService:
                 self._set_hosting_owner(project)
             if "web_root" in changes:
                 changes["web_root"] = self._normalize_web_root(changes["web_root"])
+            if "maintenance_bypass" in changes:
+                changes["maintenance_bypass"] = self._maintenance_bypass(changes["maintenance_bypass"])
+            if "access_allowed_ips" in changes:
+                changes["access_allowed_ips"] = self._access_ips(changes["access_allowed_ips"])
+            if "rewrite_rules" in changes:
+                changes["rewrite_rules"] = "\n".join(self._rewrite_rules(changes["rewrite_rules"]))
+            if "redirects" in changes:
+                changes["redirects"] = self._redirects(changes["redirects"])
+            if "proxies" in changes:
+                changes["proxies"] = self._proxies(changes["proxies"])
+            if "hotlink" in changes:
+                changes["hotlink"] = self._hotlink(changes["hotlink"])
+            if "maintenance_message" in changes:
+                changes["maintenance_message"] = changes["maintenance_message"].strip() or "We’ll be back shortly."
+            for key in ("maintenance_start", "maintenance_end"):
+                if key in changes:
+                    changes[key] = changes[key].strip()
+            self._validate_maintenance_schedule(changes.get("maintenance_start", site.maintenance_start), changes.get("maintenance_end", site.maintenance_end))
+            if changes.get("access_auth_enabled", site.access_auth_enabled) and not changes.get("access_auth_username", site.access_auth_username).strip():
+                raise HTTPException(400, "Enter an HTTP authentication username")
             for key, value in changes.items():
                 if key in {"name", "php_version", "database_name", "database_user", "notes"} and isinstance(value, str):
                     value = value.strip()
@@ -238,6 +677,7 @@ class WebsiteService:
             site.domain, site.aliases = domain, aliases
             site.document_root = str(Path(site.project_path) if site.web_root == "." else Path(site.project_path) / site.web_root)
             site.updated_at = self._now()
+            self._write_auth_file(site, site.access_auth_username, auth_password)
             self._write_site(site, sites)
             return site
 
@@ -326,6 +766,9 @@ class WebsiteService:
             # upgrading generated filenames to the standard UUID format.
             return str(uuid.uuid5(uuid.NAMESPACE_URL, f"server-engine:website:{site.id}"))
 
+    def _custom_marker(self, site: Website, provider: str) -> Path:
+        return self.config_backup_root / self._configuration_id(site) / f"{provider}.custom"
+
     def delete(self, website_id: str, remove_files: bool = False) -> None:
         with self._lock:
             sites = [Website.model_validate(item) for item in self._read()]
@@ -336,7 +779,43 @@ class WebsiteService:
                 if project.exists():
                     import shutil
                     shutil.rmtree(project)
+            # Removing a website must also remove the app-owned registry
+            # metadata and every provider configuration generated for it.
+            # The project directory is intentionally preserved unless the
+            # caller explicitly requests remove_files.
+            config_id = self._configuration_id(site)
+            artifacts = [
+                self.service_root / "websites" / f"{site.id}.json",
+                self.service_root / "nginx" / "conf" / "sites" / f"{config_id}.conf",
+                self.service_root / "apache" / "conf" / "sites" / f"{config_id}.conf",
+                self.service_root / "caddy" / "conf" / "sites" / f"{config_id}.caddy",
+                self.service_root / "openlitespeed" / "conf" / "vhosts" / config_id / "vhost.conf",
+                self.auth_root / f"{config_id}.htpasswd",
+                self.config_backup_root / config_id / "nginx.custom",
+                self.config_backup_root / config_id / "apache.custom",
+                self.config_backup_root / config_id / "caddy.custom",
+                self.config_backup_root / config_id / "openlitespeed.custom",
+            ]
+            stored_metadata = Path(site.config_path)
+            metadata_root = (self.service_root / "websites").resolve()
+            try:
+                if stored_metadata.resolve().parent == metadata_root:
+                    artifacts.append(stored_metadata)
+            except OSError:
+                pass
             self._write_site(None, [item for item in sites if item.id != website_id])
+            for artifact in artifacts:
+                try:
+                    artifact.unlink(missing_ok=True)
+                except OSError:
+                    # Registry deletion has already completed; a stale
+                    # provider file must not make the website undeletable.
+                    continue
+            provider_directory = self.service_root / "openlitespeed" / "conf" / "vhosts" / config_id
+            try:
+                provider_directory.rmdir()
+            except OSError:
+                pass
 
     def _read(self):
         if not self.path.exists(): return []
@@ -350,20 +829,23 @@ class WebsiteService:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.service_root.joinpath("websites").mkdir(parents=True, exist_ok=True)
         values = [item.model_dump(mode="json") for item in sites]
-        generated = self.configuration(site) if site is not None else None
+        generated_configs = self.provider_configurations(site) if site is not None else []
         target = Path(site.config_path) if site is not None else None
-        provider_path = Path(generated["config_path"]) if generated else None
+        provider_paths = {Path(item["config_path"]): item["content"] for item in generated_configs}
         previous_registry = self.path.read_bytes() if self.path.exists() else None
         previous_target = target.read_bytes() if target and target.exists() else None
-        previous_provider = provider_path.read_bytes() if provider_path and provider_path.exists() else None
+        previous_providers = {path: path.read_bytes() for path in provider_paths if path.exists()}
         fd, tmp = tempfile.mkstemp(prefix="websites.", suffix=".tmp", dir=self.path.parent)
         try:
             if target:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(json.dumps(site.model_dump(mode="json"), indent=2) + "\n")
-            if provider_path:
+            for provider_path, content in provider_paths.items():
+                provider = next((item["server_type"] for item in generated_configs if Path(item["config_path"]) == provider_path), None)
+                if provider and self._custom_marker(site, provider).exists():
+                    continue
                 provider_path.parent.mkdir(parents=True, exist_ok=True)
-                provider_path.write_text(generated["content"])
+                provider_path.write_text(content)
             with os.fdopen(fd, "w") as stream:
                 json.dump(values, stream, indent=2); stream.write("\n"); stream.flush(); os.fsync(stream.fileno())
             os.replace(tmp, self.path)
@@ -377,7 +859,8 @@ class WebsiteService:
                     target.unlink(missing_ok=True)
                 else:
                     target.write_bytes(previous_target)
-            if provider_path:
+            for provider_path in provider_paths:
+                previous_provider = previous_providers.get(provider_path)
                 if previous_provider is None:
                     provider_path.unlink(missing_ok=True)
                 else:

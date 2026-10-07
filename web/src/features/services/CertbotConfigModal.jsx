@@ -14,11 +14,11 @@ import { apiRequest, readApiError } from "../../lib/api";
 import ConfigEditor from "./ConfigEditor";
 
 const tabs = [
+  ["runtime", "Runtime", Activity],
   ["certificates", "Certificates", FileKey2],
   ["account", "ACME account", ShieldCheck],
   ["issuance", "Issuance", FileText],
   ["renewal", "Renewal", History],
-  ["runtime", "Runtime", Activity],
   ["logs", "Logs", RefreshCw],
   ["configuration", "cli.ini", FileCog],
 ];
@@ -149,7 +149,7 @@ function SaveButton({ busy, onClick, children }) {
 
 export default function CertbotConfigModal({ installed, onClose }) {
   const current = Array.isArray(installed) ? installed[0] : installed;
-  const [tab, setTab] = React.useState("certificates");
+  const [tab, setTab] = React.useState("runtime");
   const [config, setConfig] = React.useState(null);
   const [text, setText] = React.useState("");
   const [values, setValues] = React.useState(defaults);

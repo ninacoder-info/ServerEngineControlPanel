@@ -9,8 +9,9 @@ import uuid
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import RLock
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from fastapi.responses import HTMLResponse
 
 from app.api.dependencies import require_user
@@ -18,11 +19,24 @@ from app.models.service import ConfigurationSaveRequest, ExtensionInstallRequest
 from app.services.service_catalog import CATALOG, PHP_EXTENSIONS, get_service, refresh_service_versions
 from app.services.job_service import job_store
 from app.services.website_service import website_service
-from app.services.service_runtime import PHP_BASELINE_MODULES, SERVICE_PACKAGES, binary_path, composer_path, composer_php_version, default_startup_enabled, enable_php_baseline_extensions, ensure_composer_launcher, ensure_nginx_layout, ensure_node_runtime, ensure_php_fpm_layout, ensure_php_runtime_launcher, ensure_php_terminal_launcher, normalize_php_runtime_layout, nginx_default_configuration, nginx_paths, php_cli_path, php_runtime_library_path, service_root, set_startup_enabled, startup_enabled, version_sort_key
+from app.services.service_runtime import PHP_BASELINE_MODULES, SERVICE_PACKAGES, binary_path, composer_path, composer_php_version, default_startup_enabled, enable_php_baseline_extensions, ensure_composer_launcher, ensure_nginx_layout, ensure_node_runtime, ensure_php_fpm_layout, ensure_php_runtime_launcher, ensure_php_terminal_launcher, managed_library_environment, normalize_php_runtime_layout, nginx_default_configuration, nginx_paths, php_cli_path, php_runtime_library_path, service_root, set_startup_enabled, startup_enabled, version_sort_key
 
 router = APIRouter(prefix="/api/v1/services", tags=["services"])
 
 NON_DAEMON_SERVICES = {"certbot", "git", "imagemagick", "ffmpeg", "ruby", "lynis"}
+_inventory_cache_lock = RLock()
+_installed_services_cache = None
+_php_runtimes_cache = None
+_php_runtime_options_cache = None
+
+
+def invalidate_service_inventory_cache() -> None:
+    """Invalidate expensive service inventories after a service job changes state."""
+    global _installed_services_cache, _php_runtimes_cache, _php_runtime_options_cache
+    with _inventory_cache_lock:
+        _installed_services_cache = None
+        _php_runtimes_cache = None
+        _php_runtime_options_cache = None
 
 
 @router.put("/stalwart/storage")
@@ -273,14 +287,52 @@ def _php_install_method(version: str) -> str | None:
     return value if value in {"prebuilt", "source"} else None
 
 
+@router.get("/php/runtime-options")
+def php_runtime_options(user=Depends(require_user)):
+    """Return only the fields needed by website PHP-FPM selectors.
+
+    The full runtime endpoint inspects every extension and is intentionally
+    reserved for the PHP runtimes page. Website forms should not trigger that
+    expensive inspection just to render a version dropdown.
+    """
+    global _php_runtime_options_cache
+    with _inventory_cache_lock:
+        if _php_runtime_options_cache is not None:
+            return _php_runtime_options_cache
+    versions_root = service_root("php") / "versions"
+    if not versions_root.is_dir():
+        return []
+    result = []
+    for root in sorted((item for item in versions_root.iterdir() if item.is_dir()), key=lambda item: version_sort_key(item.name), reverse=True):
+        cli = next((candidate for candidate in (root / "usr/bin/php", root / "bin/php") if candidate.is_file()), None)
+        fpm = next((candidate for directory in (root / "usr/sbin", root / "sbin") for candidate in directory.glob("php-fpm*") if candidate.is_file()), None)
+        if cli is None and fpm is None:
+            continue
+        marker = root / ".serverengine-version"
+        version = marker.read_text(errors="replace").strip() if marker.exists() else root.name
+        result.append({
+            "version": version,
+            "installed": True,
+            "status": "running" if _process_running("php", root.name) else "stopped",
+            "socket_path": str(root / "run/php-fpm.sock"),
+        })
+    with _inventory_cache_lock:
+        _php_runtime_options_cache = result
+    return result
+
+
 @router.get("/php/runtimes")
 def php_runtimes(user=Depends(require_user)):
+    global _php_runtimes_cache
+    with _inventory_cache_lock:
+        if _php_runtimes_cache is not None:
+            return _php_runtimes_cache
     detected = {item.version: item for item in installed(user) if item.id.startswith("php@") and item.version}
     for installed_version in detected:
         ensure_php_fpm_layout(installed_version)
         enable_php_baseline_extensions(installed_version)
         ensure_php_runtime_launcher(installed_version)
-    return [
+    result = [
         {
             "version": version,
             "channel": "installed",
@@ -297,6 +349,9 @@ def php_runtimes(user=Depends(require_user)):
         }
         for version, item in sorted(detected.items(), key=lambda entry: version_sort_key(entry[0]), reverse=True)
     ]
+    with _inventory_cache_lock:
+        _php_runtimes_cache = result
+    return result
 
 
 def render_php_runtime_info(version: str, user) -> HTMLResponse:
@@ -635,6 +690,10 @@ def set_caddy_default(payload: dict, user=Depends(require_user)):
 
 @router.get("/installed", response_model=list[InstalledService])
 def installed(user=Depends(require_user)):
+    global _installed_services_cache
+    with _inventory_cache_lock:
+        if _installed_services_cache is not None:
+            return _installed_services_cache
     detected = [InstalledService(id="server-engine", name="Server Engine", version="0.1.0", status="running", managed=True)]
     sqlserver_root = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / "sqlserver"
     sqlserver_marker = sqlserver_root / ".serverengine-version"
@@ -806,6 +865,8 @@ def installed(user=Depends(require_user)):
                 continue
             version = marker.read_text(errors="replace").strip() if marker.exists() else version_root.name
             detected.append(InstalledService(id="wp-cli", name=definition.name if definition else "WP-CLI", version=version, status="installed", managed=False))
+    with _inventory_cache_lock:
+        _installed_services_cache = detected
     return detected
 
 
@@ -1418,6 +1479,8 @@ def configuration(service_id: str, version: str | None = None, file: str = "fpm"
     config_path = _configuration_path(service_id, version, file)
     path = Path(config_path)
     content = path.read_text(errors="replace") if path.exists() else _default_configuration(service_id, file)
+    backup_dir = path.parent.parent / "backups"
+    backups = sorted(backup_dir.glob(f"{path.name}.*.bak")) if backup_dir.exists() else []
     if service_id == "apache":
         sanitized = _sanitize_apache_configuration(content)
         if sanitized != content and path.exists():
@@ -1437,6 +1500,7 @@ def configuration(service_id: str, version: str | None = None, file: str = "fpm"
         "http_port": website_service.nginx_http_port() if service_id == "nginx" else None,
         "web_root": os.getenv("SE_WEB_ROOT", "/server-engine/www") if service_id == "nginx" else None,
         "safe_defaults": True,
+        "has_previous": bool(backups),
         "notes": "Configuration is isolated inside the Server Engine service root.",
     }
 
@@ -1808,7 +1872,12 @@ def save_configuration(service_id: str, payload: ConfigurationSaveRequest, versi
     path.write_text(content)
     if service_id == "nginx":
         nginx = nginx_paths()
-        check = subprocess.run([str(nginx["binary"]), "-p", str(nginx["root"]), "-c", str(path), "-t"], capture_output=True, text=True, check=False)
+        # Nginx may load the isolated ModSecurity connector. Its dependent
+        # libraries are deliberately kept out of the host linker paths, so
+        # configuration validation must use the same managed environment as
+        # Nginx start/reload and Application Shield attach.
+        runtime_env = managed_library_environment(nginx["root"], service_root("modsecurity"))
+        check = subprocess.run([str(nginx["binary"]), "-p", str(nginx["root"]), "-c", str(path), "-t"], capture_output=True, text=True, check=False, env=runtime_env)
         if check.returncode != 0:
             if backup.exists(): shutil.copy2(backup, path)
             raise HTTPException(status_code=400, detail=(check.stderr or check.stdout).strip() or "Configuration validation failed")
@@ -1816,7 +1885,7 @@ def save_configuration(service_id: str, payload: ConfigurationSaveRequest, versi
 
 
 @router.post("/{service_id}/configuration/restore")
-def restore_configuration(service_id: str, version: str | None = None, file: str = "fpm", user=Depends(require_user)):
+def restore_configuration(service_id: str, version: str | None = None, file: str = "fpm", payload: dict | None = Body(default=None), user=Depends(require_user)):
     if get_service(service_id) is None:
         raise HTTPException(status_code=404, detail="Service is not in the provider catalog")
     path = _configuration_path(service_id, version, file)
@@ -1824,7 +1893,10 @@ def restore_configuration(service_id: str, version: str | None = None, file: str
     backups = sorted(backup_dir.glob(f"{path.name}.*.bak")) if backup_dir.exists() else []
     if not backups:
         raise HTTPException(status_code=404, detail="No configuration backup exists")
-    backup = backups[-1]
+    target = str((payload or {}).get("restore") or "previous").lower()
+    if target not in {"previous", "original"}:
+        raise HTTPException(status_code=400, detail="Restore target must be previous or original")
+    backup = backups[-1] if target == "previous" else backups[0]
     shutil.copy2(backup, path)
     return {"restored": True, "backup": str(backup), "content": path.read_text(errors="replace")}
 

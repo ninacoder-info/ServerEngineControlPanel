@@ -16,12 +16,12 @@ import Toast from "../../components/Toast";
 import useServiceSocketStatus from "../../hooks/useServiceSocketStatus";
 
 const tabs = [
+  ["runtime", "Runtime", Activity],
   ["listeners", "Listeners", Globe2],
   ["backends", "Backend pools", Activity],
   ["health", "Health checks", ShieldCheck],
   ["performance", "Performance", Gauge],
   ["stats", "Stats", BarChart3],
-  ["runtime", "Runtime", Activity],
   ["logs", "Logs", RefreshCw],
   ["configuration", "haproxy.cfg", FileCog],
 ];
@@ -182,7 +182,7 @@ export default function HaProxyConfigModal({ installed, onClose }) {
   const current = Array.isArray(installed)
     ? installed.find((item) => item.status === "running") || installed[0]
     : installed;
-  const [tab, setTab] = React.useState("listeners");
+  const [tab, setTab] = React.useState("runtime");
   const [config, setConfig] = React.useState(null);
   const [text, setText] = React.useState("");
   const [values, setValues] = React.useState(defaults);

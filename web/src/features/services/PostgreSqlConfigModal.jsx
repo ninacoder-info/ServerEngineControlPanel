@@ -15,11 +15,11 @@ import ConfigEditor from "./ConfigEditor";
 import StartupPolicyToggle from "./StartupPolicyToggle";
 
 const tabs = [
+  ["runtime", "Runtime", Activity],
   ["settings", "Server settings", Database],
   ["performance", "Performance", Gauge],
   ["security", "Security", ShieldCheck],
   ["replication", "WAL & replication", Workflow],
-  ["runtime", "Runtime", Activity],
   ["logs", "Error log", RefreshCw],
   ["configuration", "postgresql.conf", FileCog],
   ["hba", "pg_hba.conf", ShieldCheck],
@@ -480,7 +480,7 @@ export default function PostgreSqlConfigModal({ installed, onClose }) {
     ? installed.find((item) => item.status === "running") || installed[0]
     : installed;
   const [runtimeStatus, setRuntimeStatus] = React.useState(current?.status || "stopped");
-  const [tab, setTab] = React.useState("settings");
+  const [tab, setTab] = React.useState("runtime");
   const [config, setConfig] = React.useState(null);
   const [text, setText] = React.useState("");
   const [hbaText, setHbaText] = React.useState("");

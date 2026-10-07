@@ -17,12 +17,12 @@ import InstallServiceModal from "./InstallServiceModal";
 import useServiceSocketStatus from "../../hooks/useServiceSocketStatus";
 
 const tabs = [
+  ["runtime", "Runtime", TerminalSquare],
   ["sites", "Sites", Globe2],
   ["versions", "Versions", PackageOpen],
   ["https", "Automatic HTTPS", ShieldCheck],
   ["proxy", "Reverse proxy", Activity],
   ["performance", "Performance", Gauge],
-  ["runtime", "Runtime", TerminalSquare],
   ["logs", "Logs", RefreshCw],
   ["configuration", "Caddyfile", FileCog],
 ];
@@ -156,7 +156,7 @@ export default function CaddyConfigModal({ service, installed, onClose }) {
   const current = Array.isArray(installed)
     ? installed.find((item) => item.status === "running") || installed[0]
     : installed;
-  const [tab, setTab] = React.useState("sites");
+  const [tab, setTab] = React.useState("runtime");
   const [config, setConfig] = React.useState(null);
   const [text, setText] = React.useState("");
   const [values, setValues] = React.useState(defaults);

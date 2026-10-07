@@ -20,8 +20,6 @@ import { useLocation, useNavigate } from "react-router-dom";
 import ActionDialog from "../../components/ActionDialog";
 import Button from "../../components/Button";
 import Toast from "../../components/Toast";
-import ServiceNotInstalledState from "../../components/ServiceNotInstalledState";
-import { useServiceInstallationState } from "../../hooks/useServiceInstallationState";
 import { apiRequest, readApiError } from "../../lib/api";
 import WebsiteFormModal from "./WebsiteFormModal";
 import ApplicationTemplatesModal from "./ApplicationTemplatesModal";
@@ -44,11 +42,11 @@ function DetailRow({ label, children }) {
 export default function WebsitesPage({ onOpenTerminal }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const webServerState = useServiceInstallationState(WEB_SERVER_IDS);
   const selectedId = location.pathname.split("/")[2];
   const [sites, setSites] = React.useState([]);
   const [root, setRoot] = React.useState("/server-engine/www");
   const [php, setPhp] = React.useState([]);
+  const [phpLoaded, setPhpLoaded] = React.useState(false);
   const [databaseEngines, setDatabaseEngines] = React.useState([]);
   const [webServerOptions, setWebServerOptions] = React.useState([]);
   const [serverType, setServerType] = React.useState("nginx");
@@ -68,66 +66,68 @@ export default function WebsitesPage({ onOpenTerminal }) {
   const load = React.useCallback(
     () => {
       setLoading(true);
-      return Promise.all([
-        apiRequest("/api/v1/websites"),
-        apiRequest("/api/v1/settings"),
-        apiRequest("/api/v1/services/php/runtimes"),
-        apiRequest("/api/v1/services/installed"),
-        apiRequest("/api/v1/databases/engines"),
-        apiRequest("/api/v1/projects/node"),
-        apiRequest("/api/v1/projects/proxy"),
-      ])
-        .then(
-          async ([
-            websites,
-            settingsResponse,
-            phpResponse,
-            servicesResponse,
-            databaseResponse,
-            nodeResponse,
-            proxyResponse,
-          ]) => {
-            if (!websites.ok) throw new Error(await readApiError(websites));
-            const settings = settingsResponse.ok
-              ? await settingsResponse.json()
-              : {};
-            const runtimes = phpResponse.ok ? await phpResponse.json() : [];
-            const services = servicesResponse.ok
-              ? await servicesResponse.json()
-              : [];
-            setDatabaseEngines(databaseResponse.ok ? await databaseResponse.json() : []);
-            setNodeProjects(nodeResponse.ok ? await nodeResponse.json() : []);
-            setProxyRoutes(proxyResponse.ok ? await proxyResponse.json() : []);
-            setNodeVersions(services.filter((item) => item.id === "nodejs" || item.id?.startsWith("nodejs@")).map((item) => item.version).filter(Boolean));
-            const installedWebServers = services.filter(
-              (item) => WEB_SERVER_IDS.includes(item.id) && item.status !== "not-installed",
-            );
-            setWebServerOptions(installedWebServers);
-            setSites(await websites.json());
-            setRoot(settings.values?.default_site_root || "/server-engine/www");
-            setPhp(
-              runtimes
-                .filter((item) => item.installed)
-                .map((item) => item.version),
-            );
-            const running = installedWebServers.find((item) => item.status === "running");
-            if (running) setServerType(running.id);
-            else if (installedWebServers[0]) setServerType(installedWebServers[0].id);
-          },
-        )
-        .catch((reason) =>
-          setError(reason.message || "Unable to load websites"),
-        )
+      return apiRequest("/api/v1/websites")
+        .then(async (websites) => {
+          if (!websites.ok) throw new Error(await readApiError(websites));
+          setSites(await websites.json());
+        })
+        .catch((reason) => setError(reason.message || "Unable to load websites"))
         .finally(() => setLoading(false));
     },
     [],
   );
+  const loadSupportingData = React.useCallback(() => {
+    Promise.all([
+      apiRequest("/api/v1/settings"),
+      apiRequest("/api/v1/databases/engines"),
+      apiRequest("/api/v1/projects/node"),
+      apiRequest("/api/v1/projects/proxy"),
+    ]).then(async ([settingsResponse, databaseResponse, nodeResponse, proxyResponse]) => {
+      const settings = settingsResponse.ok ? await settingsResponse.json() : {};
+      setDatabaseEngines(databaseResponse.ok ? await databaseResponse.json() : []);
+      setNodeProjects(nodeResponse.ok ? await nodeResponse.json() : []);
+      setProxyRoutes(proxyResponse.ok ? await proxyResponse.json() : []);
+      setRoot(settings.values?.default_site_root || "/server-engine/www");
+    }).catch(() => {});
+  }, []);
   React.useEffect(() => {
     load();
     const refresh = () => load();
-    window.addEventListener("serverengine:jobs-updated", refresh);
-    return () => window.removeEventListener("serverengine:jobs-updated", refresh);
-  }, [load]);
+    window.addEventListener("serverengine:websites-updated", refresh);
+    return () => {
+      window.removeEventListener("serverengine:websites-updated", refresh);
+    };
+  }, [load, loadSupportingData]);
+  React.useEffect(() => {
+    if (templateModal || modal || projectModal) loadSupportingData();
+  }, [templateModal, modal, projectModal, loadSupportingData]);
+  React.useEffect(() => {
+    if (!projectModal) return undefined;
+    let active = true;
+    apiRequest("/api/v1/services/installed")
+      .then(async (response) => {
+        if (!active || !response.ok) return;
+        const services = await response.json();
+        setNodeVersions(services.filter((item) => item.id === "nodejs" || item.id?.startsWith("nodejs@")).map((item) => item.version).filter(Boolean));
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [projectModal]);
+  React.useEffect(() => {
+    if (!modal || phpLoaded) return undefined;
+    let active = true;
+    apiRequest("/api/v1/services/php/runtime-options")
+      .then(async (response) => {
+        if (!active) return;
+        const runtimes = response.ok ? await response.json() : [];
+        setPhp(Array.isArray(runtimes) ? runtimes.filter((item) => item.installed).map((item) => item.version) : []);
+        setPhpLoaded(true);
+      })
+      .catch(() => {
+        if (active) setPhpLoaded(true);
+      });
+    return () => { active = false; };
+  }, [modal, phpLoaded]);
   const selected = sites.find((site) => site.id === selectedId);
   const normalizedQuery = query.trim().toLowerCase();
   const visible = sites.filter((site) =>
@@ -181,7 +181,11 @@ export default function WebsitesPage({ onOpenTerminal }) {
         if (response.ok) {
           setSites((current) => current.filter((item) => item.id !== site.id));
           setDialog(null);
-          if (selectedId) navigate("/websites");
+          setToast({
+            type: "success",
+            message: `${site.domain} was removed from Server Engine. Website files were kept on disk.`,
+          });
+          if (selectedId === site.id) navigate("/websites");
         } else setError(await readApiError(response));
       },
     });
@@ -194,10 +198,10 @@ export default function WebsitesPage({ onOpenTerminal }) {
     serverType,
     webServerOptions,
     onClose: () => setModal(null),
-          onSaved: (site, job) => {
+          onSaved: (site, job, options = {}) => {
             const editing = Boolean(modal?.id);
             save(site);
-            setModal(null);
+            if (!options.keepOpen) setModal(null);
             if (job) {
               setOperation({ job, title: job.type || (editing ? `Update ${site.domain}` : `Create ${site.domain}`), projectPath: site.project_path });
             } else {
@@ -208,19 +212,6 @@ export default function WebsitesPage({ onOpenTerminal }) {
             }
     },
   };
-
-  if (!loading && !webServerState.loading && !webServerState.installed) {
-    return (
-      <ServiceNotInstalledState
-        state={webServerState}
-        icon={Server}
-        eyebrow="Web hosting"
-        title="No web server is installed"
-        description="Install Nginx, Apache HTTP Server, OpenLiteSpeed, or Caddy before creating a website. Once installed, Server Engine will generate the matching website profile and configuration under the shared web root."
-        installLabel="Install Nginx"
-      />
-    );
-  }
 
   if (selectedId && selected)
     return (
@@ -514,6 +505,16 @@ export default function WebsitesPage({ onOpenTerminal }) {
                     onClick={() => setModal(site)}
                   >
                     <Edit3 size={15} />
+                  </Button>
+                  <Button
+                    iconOnly
+                    variant="ghost"
+                    className="text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:text-rose-400 dark:hover:bg-rose-950/30 dark:hover:text-rose-300"
+                    aria-label="Remove website"
+                    title="Remove website from Server Engine"
+                    onClick={() => remove(site)}
+                  >
+                    <Trash2 size={15} />
                   </Button>
                 </div>
               </div>

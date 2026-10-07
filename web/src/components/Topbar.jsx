@@ -161,7 +161,7 @@ export default function Topbar({
               detail: {
                 serviceId,
                 action,
-                version: action === "install" ? actionMatch[3] || null : null,
+                version: actionMatch[3] || null,
                 status: job.status,
                 running: job.status === "succeeded" && ["start", "restart"].includes(action),
                 installed: job.status === "succeeded" && action === "install",
@@ -197,6 +197,13 @@ export default function Topbar({
           if (message.type === "domains-updated") {
             window.dispatchEvent(
               new CustomEvent("serverengine:domains-updated", {
+                detail: message,
+              }),
+            );
+          }
+          if (message.type === "websites-updated") {
+            window.dispatchEvent(
+              new CustomEvent("serverengine:websites-updated", {
                 detail: message,
               }),
             );

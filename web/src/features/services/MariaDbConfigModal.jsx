@@ -16,11 +16,11 @@ import StartupPolicyToggle from "./StartupPolicyToggle";
 import useServiceSocketStatus from "../../hooks/useServiceSocketStatus";
 
 const tabs = [
+  ["runtime", "Runtime", Activity],
   ["settings", "Server settings", Server],
   ["performance", "Performance", Gauge],
   ["security", "Security", ShieldCheck],
   ["replication", "Replication", Workflow],
-  ["runtime", "Runtime", Activity],
   ["logs", "Error log", RefreshCw],
   ["configuration", "my.cnf", FileCog],
 ];
@@ -499,7 +499,7 @@ export default function MariaDbConfigModal({ service, installed, onClose }) {
   const current = Array.isArray(installed)
     ? installed.find((item) => item.status === "running") || installed[0]
     : installed;
-  const [tab, setTab] = React.useState("settings");
+  const [tab, setTab] = React.useState("runtime");
   const [config, setConfig] = React.useState(null);
   const [text, setText] = React.useState("");
   const [values, setValues] = React.useState(defaults);

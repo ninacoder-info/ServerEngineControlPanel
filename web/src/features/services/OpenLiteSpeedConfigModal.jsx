@@ -16,12 +16,12 @@ import StartupPolicyToggle from "./StartupPolicyToggle";
 import useServiceSocketStatus from "../../hooks/useServiceSocketStatus";
 
 const tabs = [
+  ["runtime", "Runtime", TerminalSquare],
   ["settings", "General", Globe2],
   ["listeners", "Listeners", Activity],
   ["vhost", "Virtual hosts", PanelTop],
   ["performance", "Performance", Gauge],
   ["security", "Security", ShieldCheck],
-  ["runtime", "Runtime", TerminalSquare],
   ["logs", "Logs", RefreshCw],
   ["configuration", "httpd_config.conf", FileCog],
 ];
@@ -172,7 +172,7 @@ export default function OpenLiteSpeedConfigModal({ installed, onClose }) {
   const current = Array.isArray(installed)
     ? installed.find((item) => item.status === "running") || installed[0]
     : installed;
-  const [tab, setTab] = React.useState("settings");
+  const [tab, setTab] = React.useState("runtime");
   const [config, setConfig] = React.useState(null);
   const [text, setText] = React.useState("");
   const [vhostConfig, setVhostConfig] = React.useState(null);

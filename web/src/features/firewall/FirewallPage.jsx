@@ -19,6 +19,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { apiRequest, readApiError } from "../../lib/api";
 
 const tabs = [
@@ -86,6 +87,17 @@ const input =
   "mt-2 block min-h-11 w-full rounded-md border border-neutral-300 bg-white px-3 py-2.5 text-sm text-neutral-900 outline-none placeholder:text-neutral-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100";
 const panel =
   "rounded-xl border border-neutral-200 bg-white p-5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900";
+
+function DismissibleNotice({ children, onDismiss, className = "" }) {
+  return (
+    <div className={`relative pr-12 ${className}`}>
+      <button type="button" aria-label="Dismiss notice" title="Dismiss notice" onClick={onDismiss} className="absolute right-2 top-2 inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-current opacity-70 hover:bg-black/5 hover:opacity-100 dark:hover:bg-white/10">
+        <X size={15} />
+      </button>
+      {children}
+    </div>
+  );
+}
 
 function PortTagsField({ value, onChange }) {
   const [draft, setDraft] = React.useState("");
@@ -372,10 +384,11 @@ function ForwardingModal({ forwarding, onClose, onSave }) {
 }
 
 function ForwardingTab({ forwardings, backend, onCreate, onEdit, onToggle, onDelete }) {
+  const [showForwardingWarning, setShowForwardingWarning] = React.useState(true);
   return (
     <div className="p-5">
       <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center"><div><h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Port forwarding</h3><p className="mt-1 max-w-3xl text-sm leading-6 text-neutral-500 dark:text-neutral-400">Publish a service behind this server by translating an incoming port to an internal IPv4 host and port.</p></div><button type="button" onClick={onCreate} className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"><CirclePlus size={15} />Add forwarding</button></div>
-      {backend && !backend.forwarding_enabled && <div className="mt-5 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-200"><AlertTriangle size={17} className="mt-0.5 shrink-0" /><span>IP forwarding is disabled on this server. The rule can be saved, but traffic will not reach the target until IPv4 forwarding is enabled.</span></div>}
+      {backend && !backend.forwarding_enabled && showForwardingWarning && <DismissibleNotice onDismiss={() => setShowForwardingWarning(false)} className="mt-5 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-200"><AlertTriangle size={17} className="mt-0.5 shrink-0" /><span>IP forwarding is disabled on this server. The rule can be saved, but traffic will not reach the target until IPv4 forwarding is enabled.</span></DismissibleNotice>}
       <div className="mt-5 overflow-x-auto"><table className="w-full min-w-[980px] text-left"><thead><tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400"><th className="px-3 py-3">Status</th><th className="px-3 py-3">Public listener</th><th className="px-3 py-3">Target</th><th className="px-3 py-3">Protocol</th><th className="px-3 py-3">Packets</th><th className="px-3 py-3">Note</th><th className="px-3 py-3" /></tr></thead><tbody>{forwardings.map((forwarding) => <tr key={forwarding.id} className={`border-b border-neutral-100 dark:border-neutral-800 ${!forwarding.enabled ? "opacity-50" : ""}`}><td className="px-3 py-4"><span className={`inline-flex items-center gap-2 text-xs font-semibold ${forwarding.enabled ? "text-emerald-600 dark:text-emerald-400" : "text-neutral-500"}`}><span className="h-2 w-2 rounded-full bg-current" />{forwarding.enabled ? "Enabled" : "Disabled"}</span></td><td className="px-3 py-4"><p className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">{forwarding.listen_address}:{forwarding.listen_port}</p><p className="mt-1 text-xs text-neutral-500">{forwarding.interface} · {forwarding.source}</p></td><td className="px-3 py-4 text-sm text-neutral-700 dark:text-neutral-300">{forwarding.target_address}:{forwarding.target_port}</td><td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">{forwarding.protocol}</td><td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">{Number(forwarding.states || 0).toLocaleString()}</td><td className="max-w-xs px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">{forwarding.note || "—"}</td><td className="px-3 py-4 text-right"><div className="flex justify-end gap-2"><button type="button" onClick={() => onEdit(forwarding)} className="cursor-pointer text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400">Edit</button><button type="button" onClick={() => onToggle(forwarding)} className="cursor-pointer text-sm font-semibold text-neutral-600 hover:text-neutral-900 dark:text-neutral-300">{forwarding.enabled ? "Disable" : "Enable"}</button><button type="button" onClick={() => onDelete(forwarding)} className="cursor-pointer text-sm font-semibold text-rose-600 hover:text-rose-700 dark:text-rose-400">Delete</button></div></td></tr>)}</tbody></table>{forwardings.length === 0 && <div className="grid place-items-center py-16 text-center"><ArrowDownToLine size={30} className="text-neutral-400" /><h4 className="mt-4 text-base font-semibold text-neutral-900 dark:text-neutral-100">No port forwarding rules</h4><p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">Add a rule to publish a service behind this server.</p></div>}</div>
     </div>
   );
@@ -437,6 +450,8 @@ function DdosConfigModal({ value, onChange, onSave, onClose }) {
 }
 
 function TrafficActivityTab({ data, loading, onRefresh, rules, forwardings, blockedAddresses }) {
+  const [showBackendWarning, setShowBackendWarning] = React.useState(true);
+  const [showEmptyWarning, setShowEmptyWarning] = React.useState(true);
   const summary = data?.summary || {};
   const configuredEntries = [
     ...rules.map((rule) => ({
@@ -501,15 +516,15 @@ function TrafficActivityTab({ data, loading, onRefresh, rules, forwardings, bloc
         <ActivityStat icon={ArrowUpFromLine} label="Forwarded packets" value={data ? Number(summary.forwarded_packets || 0).toLocaleString() : "—"} detail="Port forwarding counters" />
         <ActivityStat icon={Activity} label="Active counters" value={data ? Number(summary.active_sources || 0).toLocaleString() : "—"} detail="Rules with traffic" />
       </div>
-      {data?.backend && !data.backend.available && (
-        <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-200">
+      {data?.backend && !data.backend.available && showBackendWarning && (
+        <DismissibleNotice onDismiss={() => setShowBackendWarning(false)} className="mt-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-200">
           {data.backend.message}
-        </div>
+        </DismissibleNotice>
       )}
-      {data && Number(summary.packets || 0) === 0 && entries.length > 0 && (
-        <div className="mt-5 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 dark:border-blue-900/60 dark:bg-blue-950/20 dark:text-blue-200">
+      {data && Number(summary.packets || 0) === 0 && entries.length > 0 && showEmptyWarning && (
+        <DismissibleNotice onDismiss={() => setShowEmptyWarning(false)} className="mt-5 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 dark:border-blue-900/60 dark:bg-blue-950/20 dark:text-blue-200">
           The firewall is ready, but no packets have matched these managed rules since the last policy apply. Generate traffic to a configured port, then refresh counters.
-        </div>
+        </DismissibleNotice>
       )}
       {loading && !data ? (
         <div className="mt-5 space-y-3">
@@ -553,6 +568,7 @@ function TrafficActivityTab({ data, loading, onRefresh, rules, forwardings, bloc
 }
 
 export default function FirewallPage() {
+  const navigate = useNavigate();
   const [tab, setTab] = React.useState("rules");
   const [rules, setRules] = React.useState(initialRules);
   const [forwardings, setForwardings] = React.useState([]);
@@ -572,6 +588,7 @@ export default function FirewallPage() {
   const [blockedStates, setBlockedStates] = React.useState(0);
   const [firewallStatus, setFirewallStatus] = React.useState("loading");
   const [backend, setBackend] = React.useState(null);
+  const [showBackendNotice, setShowBackendNotice] = React.useState(true);
   const [applyWarnings, setApplyWarnings] = React.useState([]);
   const [error, setError] = React.useState("");
   const [loading, setLoading] = React.useState(true);
@@ -791,18 +808,27 @@ export default function FirewallPage() {
           </p>
         </div>
         <div className="flex gap-3">
-          <button type="button" className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-4 py-2.5 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800" onClick={() => { window.location.href = "/application-shield"; }}>
-            <ShieldAlert size={16} />
-            Configure WAF
-          </button>
-          <button type="button" className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-4 py-2.5 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800" onClick={() => setDdosModal(true)}>
-            <Shield size={16} />
-            Configure DDoS
-          </button>
-          <button onClick={reloadPolicy} disabled={loading || !backend?.available} className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-4 py-2.5 text-sm font-semibold text-neutral-700 dark:border-neutral-700 dark:text-neutral-300 disabled:cursor-not-allowed disabled:opacity-50">
-            <RefreshCw size={16} />
-            Apply rules
-          </button>
+          <details className="relative">
+            <summary className="inline-flex cursor-pointer list-none items-center gap-2 rounded-md border border-neutral-300 px-4 py-2.5 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800">
+              <Shield size={16} />
+              Security tools
+              <ChevronDown size={15} />
+            </summary>
+            <div className="absolute right-0 z-20 mt-2 w-52 overflow-hidden rounded-lg border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
+              <button type="button" className="flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800" onClick={() => navigate("/application-shield")}>
+                <ShieldAlert size={15} />
+                Configure WAF
+              </button>
+              <button type="button" className="flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800" onClick={() => setDdosModal(true)}>
+                <Shield size={15} />
+                Configure DDoS
+              </button>
+              <button type="button" onClick={reloadPolicy} disabled={loading || !backend?.available} className="flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-neutral-200 dark:hover:bg-neutral-800">
+                <RefreshCw size={15} />
+                Apply firewall rules
+              </button>
+            </div>
+          </details>
           <button
             className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
             onClick={() => setModal({})}
@@ -812,6 +838,19 @@ export default function FirewallPage() {
           </button>
         </div>
       </div>
+      {backend && showBackendNotice && (
+        <DismissibleNotice
+          onDismiss={() => setShowBackendNotice(false)}
+          className={`flex items-start gap-3 rounded-lg border px-4 py-3 text-sm ${backend.available ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/20 dark:text-emerald-200" : "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-200"}`}
+        >
+          {backend.available ? <CheckCircle2 size={17} className="mt-0.5 shrink-0" /> : <AlertTriangle size={17} className="mt-0.5 shrink-0" />}
+          <div>
+            <p className="font-semibold">{backend.available ? "Firewall backend ready" : "Firewall backend unavailable"}</p>
+            <p className="mt-1">{backend.message}</p>
+            {applyWarnings.length > 0 && <p className="mt-1">{applyWarnings.join(" ")}</p>}
+          </div>
+        </DismissibleNotice>
+      )}
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div className={panel}>
           <div className="flex items-center gap-3">
@@ -879,16 +918,6 @@ export default function FirewallPage() {
         </div>
       </section>
       {error && <div className="border-b border-rose-300 pb-3 text-sm text-rose-600 dark:border-rose-900 dark:text-rose-400">{error}</div>}
-      {backend && (
-        <div className={`flex items-start gap-3 rounded-lg border px-4 py-3 text-sm ${backend.available ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/20 dark:text-emerald-200" : "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-200"}`}>
-          {backend.available ? <CheckCircle2 size={17} className="mt-0.5 shrink-0" /> : <AlertTriangle size={17} className="mt-0.5 shrink-0" />}
-          <div>
-            <p className="font-semibold">{backend.available ? "Firewall backend ready" : "Firewall backend unavailable"}</p>
-            <p className="mt-1">{backend.message}</p>
-            {applyWarnings.length > 0 && <p className="mt-1">{applyWarnings.join(" ")}</p>}
-          </div>
-        </div>
-      )}
       <section className="rounded-xl border border-neutral-200 bg-white shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
         <div className="border-b border-neutral-200 px-5 pt-5 dark:border-neutral-800">
           <div className="flex gap-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">

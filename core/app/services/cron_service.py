@@ -283,6 +283,14 @@ class CronService:
     def _loop(self):
         seen = set()
         while not self._stop.wait(20):
+            try:
+                from app.services.website_service import website_service
+                from app.services.job_service import job_store
+                for site in website_service.refresh_scheduled_maintenance():
+                    job_store.enqueue_action(f"provider-maintenance-{site.id}-{uuid.uuid4().hex[:8]}", site.server_type, "restart")
+            except Exception:
+                # A broken maintenance window must not stop unrelated cron jobs.
+                pass
             now = datetime.now()
             stamp = now.strftime("%Y-%m-%d %H:%M")
             for job in self.list():

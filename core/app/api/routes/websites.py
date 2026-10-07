@@ -3,8 +3,10 @@ import re
 import json
 import time
 import urllib.request
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
 
 from app.api.dependencies import require_user
 from app.models.website import WebsiteActionRequest, WebsiteCreateRequest, WebsiteDeployRequest, WebsiteDirectoryRequest, WebsiteUpdateRequest
@@ -15,6 +17,23 @@ from app.services.website_service import website_service
 router = APIRouter(prefix="/api/v1/websites", tags=["websites"])
 _wordpress_versions: tuple[float, list[str]] = (0, [])
 _laravel_versions: tuple[float, list[str]] = (0, [])
+
+
+class WebsiteConfigurationSaveRequest(BaseModel):
+    content: str = Field(max_length=200000)
+
+
+class WebsiteConfigurationRestoreRequest(BaseModel):
+    restore: str
+
+
+class WebsiteCertificateRequest(BaseModel):
+    method: str = Field(pattern="^(acme|upload)$")
+    email: str = Field(default="", max_length=320)
+    staging: bool = False
+    certificate: str = Field(default="", max_length=200000)
+    private_key: str = Field(default="", max_length=200000)
+    chain: str = Field(default="", max_length=200000)
 
 
 @router.get("")
@@ -80,8 +99,40 @@ def laravel_versions(user=Depends(require_user)):
 
 
 @router.get("/{website_id}/configuration")
-def get_website_configuration(website_id: str, user=Depends(require_user)):
-    return website_service.configuration(website_id)
+def get_website_configuration(website_id: str, server_type: str | None = None, user=Depends(require_user)):
+    result = website_service.configuration(website_id, server_type)
+    path = Path(result["config_path"])
+    if path.exists():
+        result["content"] = path.read_text(errors="replace")
+    site = website_service.get(website_id)
+    provider = server_type or (site.server_type if site else "")
+    backup = website_service.config_backup_root / website_service._configuration_id(site) / f"{provider}.previous" if site else None
+    result["has_previous"] = bool(backup and backup.exists())
+    return result
+
+
+@router.put("/{website_id}/configuration")
+def save_website_configuration(website_id: str, payload: WebsiteConfigurationSaveRequest, server_type: str | None = None, user=Depends(require_user)):
+    site = website_service.get(website_id)
+    if site is None:
+        raise HTTPException(404, "Website not found")
+    provider = server_type or site.server_type
+    result = website_service.save_provider_configuration(website_id, provider, payload.content)
+    job_store.enqueue_action(f"provider-reload-site-config-{site.id}-{uuid.uuid4().hex[:8]}", provider, "restart")
+    result["saved"] = True
+    return result
+
+
+@router.post("/{website_id}/configuration/restore")
+def restore_website_configuration(website_id: str, payload: WebsiteConfigurationRestoreRequest, server_type: str | None = None, user=Depends(require_user)):
+    site = website_service.get(website_id)
+    if site is None:
+        raise HTTPException(404, "Website not found")
+    provider = server_type or site.server_type
+    result = website_service.restore_provider_configuration(website_id, provider, payload.restore)
+    job_store.enqueue_action(f"provider-restore-site-config-{site.id}-{uuid.uuid4().hex[:8]}", provider, "restart")
+    result["restored"] = payload.restore
+    return result
 
 
 @router.get("/{website_id}")
@@ -90,12 +141,33 @@ def get_website(website_id: str, user=Depends(require_user)):
     if site is None:
         from fastapi import HTTPException
         raise HTTPException(404, "Website not found")
-    return site
+    return {**site.model_dump(mode="json"), "certificate": website_service.certificate_info(site)}
+
+
+@router.get("/{website_id}/certificate")
+def get_website_certificate(website_id: str, user=Depends(require_user)):
+    site = website_service.get(website_id)
+    if site is None:
+        raise HTTPException(404, "Website not found")
+    return website_service.certificate_info(site)
+
+
+@router.post("/{website_id}/certificate", status_code=status.HTTP_202_ACCEPTED)
+def request_website_certificate(website_id: str, payload: WebsiteCertificateRequest, user=Depends(require_user)):
+    site = website_service.get(website_id)
+    if site is None:
+        raise HTTPException(404, "Website not found")
+    if payload.method == "upload" and (not payload.certificate.strip() or not payload.private_key.strip()):
+        raise HTTPException(400, "Certificate and private key are required for upload.")
+    return {"job": job_store.enqueue_certificate(f"website-certificate-{uuid.uuid4().hex}", website_id, payload.method, payload.email, payload.staging, payload.certificate, payload.private_key, payload.chain).model_dump(mode="json")}
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create_website(payload: WebsiteCreateRequest, user=Depends(require_user)):
-    return website_service.create(payload)
+    site = website_service.create(payload)
+    job_store.enqueue_action(f"provider-reload-site-{site.id}-{uuid.uuid4().hex[:8]}", site.server_type, "restart")
+    job_store.publish({"type": "websites-updated", "action": "created", "website_id": site.id})
+    return site
 
 
 @router.post("/deploy", status_code=status.HTTP_202_ACCEPTED)
@@ -154,7 +226,14 @@ def deploy_website(payload: WebsiteDeployRequest, user=Depends(require_user)):
 
 @router.patch("/{website_id}")
 def update_website(website_id: str, payload: WebsiteUpdateRequest, user=Depends(require_user)):
-    return website_service.update(website_id, payload)
+    site = website_service.update(website_id, payload)
+    # Configuration changes, including maintenance mode, must be loaded by
+    # the active provider immediately. The action is serialized with other
+    # service operations and its result is delivered over the shared jobs
+    # socket; the PATCH response remains the website record for compatibility.
+    job_store.enqueue_action(f"provider-reload-site-{site.id}-{uuid.uuid4().hex[:8]}", site.server_type, "restart")
+    job_store.publish({"type": "websites-updated", "action": "updated", "website_id": site.id})
+    return site
 
 
 @router.post("/{website_id}/actions")
@@ -165,4 +244,5 @@ def website_action(website_id: str, payload: WebsiteActionRequest, user=Depends(
 @router.delete("/{website_id}")
 def delete_website(website_id: str, remove_files: bool = False, user=Depends(require_user)):
     website_service.delete(website_id, remove_files)
+    job_store.publish({"type": "websites-updated", "action": "deleted", "website_id": website_id})
     return {"deleted": True}

@@ -21,10 +21,10 @@ const inputClass =
 const buttonClass =
   "inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60";
 const tabs = [
+  ["runtime", "Runtime", Activity],
   ["overview", "Overview", ShieldCheck],
   ["scanner", "Scanner", FolderSearch],
   ["definitions", "Definitions", Database],
-  ["runtime", "Runtime", Activity],
   ["logs", "Error log", FileText],
 ];
 
@@ -82,7 +82,7 @@ function SaveFooter({ onSave, saving }) {
 
 export default function ClamAvConfigModal({ service, installed, onClose }) {
   const current = Array.isArray(installed) ? installed[0] : installed;
-  const [tab, setTab] = React.useState("overview");
+  const [tab, setTab] = React.useState("runtime");
   const [settings, setSettings] = React.useState(readSettings);
   const [saving, setSaving] = React.useState(false);
   const [toast, setToast] = React.useState(null);

@@ -4,7 +4,31 @@ Release notes for the Server Engine control panel and control-plane runtime.
 
 ## Unreleased
 
-No changes yet.
+- Added a dedicated OpenSSL compatibility-runtime modal with isolated runtime
+  overview, EOL guidance, source-version refresh, build queueing, and installed
+  runtime details.
+- Fixed PHP runtime information pages so the version is read from the URL when
+  the dashboard pathname renderer does not provide a React Router parameter.
+- Fixed Node.js runtime status styling so installed runtimes use the success
+  color instead of the stopped warning color.
+- Added category subjects to log entries, including `Nginx · error.log` and
+  versioned PHP log labels, while removing the duplicate header from the log
+  content pane.
+- Tightened the Logs and Terminal controls in the global status bar.
+- Fixed cancelled package jobs leaving the serialized operation queue blocked by
+  tracking and terminating their full apt/download process groups.
+
+## v0.1.34
+
+- Fixed PHP 5.6 ICU linking through libtool by using absolute isolated ICU
+  libraries, including `libicuio`, and disabling `--as-needed` around the
+  compatibility libraries.
+- Preserve failed PHP source-build workspaces so the generated Makefile and
+  final linker command can be inspected without repeating the full build.
+- Terminate tracked PHP compiler processes immediately when a job is cancelled
+  so the next serialized operation can start instead of remaining queued.
+- Disable the stale Server Engine Sury source on unsupported Ubuntu 23.10
+  hosts before APT metadata refresh, without changing unrelated APT sources.
 
 ## v0.1.33
 

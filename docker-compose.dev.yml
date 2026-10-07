@@ -43,6 +43,11 @@ services:
       test -x /opt/server-engine-venv/bin/python || python3 -m venv /opt/server-engine-venv &&
       /opt/server-engine-venv/bin/pip install -e . &&
       mkdir -p /var/lib/server-engine /opt/server-engine/services /server-engine/www /server-engine/logs /server-engine/backups &&
+      mkdir -p /opt/server-engine/services/certbot &&
+      if ! test -x /opt/server-engine/services/certbot/venv/bin/certbot || ! /opt/server-engine/services/certbot/venv/bin/certbot --version >/dev/null 2>&1; then
+        python3 -m venv /opt/server-engine/services/certbot/venv;
+        /opt/server-engine/services/certbot/venv/bin/pip install --disable-pip-version-check --no-cache-dir --upgrade certbot;
+      fi &&
       chown -R serverengine:serverengine /opt/server-engine/services /server-engine/www /server-engine/logs /server-engine/backups &&
       chmod 0750 /var/lib/server-engine &&
       exec /opt/server-engine-venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"

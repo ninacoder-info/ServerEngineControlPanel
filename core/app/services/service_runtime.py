@@ -766,6 +766,10 @@ session.save_path = "{session_path}"
 sys_temp_dir = "{temp_path}"
 upload_tmp_dir = "{temp_path}"
 
+; Do not consume .user.ini files copied from another control panel.
+user_ini.filename =
+open_basedir =
+
 session.use_strict_mode = 1
 session.cookie_httponly = 1
 session.cookie_samesite = Lax
@@ -810,6 +814,8 @@ def ensure_php_runtime_configuration(version: str) -> None:
         "session.save_path": f'"{session_path}"',
         "sys_temp_dir": f'"{temp_path}"',
         "upload_tmp_dir": f'"{temp_path}"',
+        "user_ini.filename": "",
+        "open_basedir": "",
         "opcache.file_cache": f'"{root / "var/cache/php/opcache"}"',
     }
     lines = content.splitlines()

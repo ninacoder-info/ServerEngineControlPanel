@@ -4,6 +4,7 @@ from pathlib import Path
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
 from app.api.dependencies import require_user
+from app.services.website_service import website_service
 
 router = APIRouter(prefix="/api/v1/logs", tags=["logs"])
 
@@ -14,7 +15,41 @@ def _root() -> Path:
 
 def _category(path: Path, root: Path) -> str:
     value = path.relative_to(root).parts[0] if path.relative_to(root).parts else "general"
-    return value.lower().replace("-", " ").title()
+    labels = {
+        "php": "PHP",
+        "node": "Node",
+        "nodejs": "Node",
+        "postgres": "PostgreSQL",
+        "postgresql": "PostgreSQL",
+    }
+    normalized = value.lower().replace("-", " ")
+    return labels.get(normalized, normalized.title())
+
+
+def _website_log_metadata(path: Path, root: Path, sites=None) -> dict:
+    """Add a human-readable site label to generated website access/error logs."""
+    relative = path.relative_to(root)
+    parts = relative.parts
+    if len(parts) < 3 or parts[-2] != "sites":
+        return {}
+    filename = path.name
+    log_type = ""
+    config_id = ""
+    for suffix, label in ((".access.log", "Access log"), (".error.log", "Error log")):
+        if filename.endswith(suffix):
+            config_id = filename[: -len(suffix)]
+            log_type = label
+            break
+    if not config_id:
+        return {}
+    site = next((item for item in (sites or []) if website_service._configuration_id(item) == config_id), None)
+    website = site.domain if site else f"Website {config_id}"
+    return {
+        "category": "Websites",
+        "website": website,
+        "log_type": log_type,
+        "label": f"{website} · {log_type}",
+    }
 
 
 def _size(root: Path) -> int:
@@ -61,6 +96,7 @@ def sources(user=Depends(require_user)):
     root = _root()
     if not root.is_dir():
         return {"sources": []}
+    sites = website_service.list()
     items = []
     for path in root.rglob("*.log"):
         try:
@@ -69,7 +105,14 @@ def sources(user=Depends(require_user)):
             continue
         if not path.is_file():
             continue
-        items.append({"id": str(path.relative_to(root)), "name": path.name, "category": _category(path, root), "path": str(path), "size": stat.st_size, "modified": stat.st_mtime})
+        category = _category(path, root)
+        item = {"id": str(path.relative_to(root)), "name": path.name, "category": category, "label": f"{category} · {path.name}", "path": str(path), "size": stat.st_size, "modified": stat.st_mtime}
+        item.update(_website_log_metadata(path, root, sites))
+        relative = path.relative_to(root).parts
+        if item["category"] == "PHP" and len(relative) >= 4 and relative[1] == "versions":
+            item["php_version"] = relative[2]
+            item["label"] = f"PHP {relative[2]} · {path.name}"
+        items.append(item)
     items.sort(key=lambda item: (-item["modified"], item["name"].lower()))
     return {"sources": items[:500]}
 

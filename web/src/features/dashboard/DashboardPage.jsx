@@ -9,6 +9,7 @@ import ServerPanel from "./ServerPanel";
 import ServicesPage from "../services/ServicesPage";
 import NodeRuntimesPage from "../services/NodeRuntimesPage";
 import PhpRuntimesPage from "../services/PhpRuntimesPage";
+import PhpRuntimeInfoPage from "../services/PhpRuntimeInfoPage";
 import FileManagerPage from "../file-manager/FileManagerPage";
 import SettingsPage from "../settings/SettingsPage";
 import WebsitesPage from "../websites/WebsitesPage";
@@ -36,6 +37,8 @@ import DockerImageDetailsPage from "../docker/DockerImageDetailsPage";
 import PlansPage from "../plans/PlansPage";
 import GlobalJobStatusBar from "../../components/GlobalJobStatusBar";
 import GlobalTerminalPane from "../../components/GlobalTerminalPane";
+import NginxConfigModal from "../services/NginxConfigModal";
+import ServiceManagerModal from "../services/ServiceManagerModal";
 import { useTranslation } from "../../lib/i18n";
 import { apiRequest } from "../../lib/api";
 import {
@@ -113,6 +116,7 @@ export default function DashboardPage({ user, onLogout }) {
   const [panelPreferences, setPanelPreferences] =
     React.useState(readPanelPreferences);
   const [terminalPane, setTerminalPane] = React.useState({ open: false, height: 46, session: 0, sessionName: "Local Server", panel: "terminal", initialCommand: "" });
+  const [serviceModal, setServiceModal] = React.useState(null);
   const overviewLoading = false;
   const location = useLocation();
   const navigate = useNavigate();
@@ -140,6 +144,15 @@ export default function DashboardPage({ user, onLogout }) {
     }));
   }, []);
   const openLogs = React.useCallback(() => setTerminalPane((current) => ({ ...current, open: true, panel: "logs" })), []);
+  const openServiceConfig = React.useCallback(async (installedService) => {
+    const serviceId = String(installedService?.id || "").split("@", 1)[0];
+    if (!serviceId) return;
+    const response = await apiRequest("/api/v1/services/catalog");
+    if (!response.ok) return;
+    const catalog = await response.json();
+    const service = catalog.find((item) => item.id === serviceId);
+    if (service) setServiceModal({ service, installed: [installedService] });
+  }, []);
   const resizeTerminal = React.useCallback((height) => setTerminalPane((current) => ({ ...current, height })), []);
   const closeTerminal = React.useCallback(() => setTerminalPane((current) => ({ ...current, open: false })), []);
   React.useEffect(() => {
@@ -184,7 +197,7 @@ export default function DashboardPage({ user, onLogout }) {
     ? "Websites"
     : location.pathname === "/services/nodejs"
       ? "Node.js runtimes"
-      : location.pathname === "/services/php"
+      : location.pathname === "/services/php" || location.pathname.startsWith("/services/php/")
         ? "PHP runtimes"
         : location.pathname.startsWith("/services")
           ? "Services"
@@ -260,6 +273,8 @@ export default function DashboardPage({ user, onLogout }) {
     <DockerPage />
   ) : location.pathname === "/services/nodejs" ? (
     <NodeRuntimesPage />
+  ) : /^\/services\/php\/[^/]+\/info$/.test(location.pathname) ? (
+    <PhpRuntimeInfoPage />
   ) : location.pathname === "/services/php" ? (
     <PhpRuntimesPage />
   ) : location.pathname === "/file-manager" ? (
@@ -355,7 +370,9 @@ export default function DashboardPage({ user, onLogout }) {
         </div>
       </main>
       <GlobalTerminalPane open={terminalPane.open} height={terminalPane.height} session={terminalPane.session} sessionName={terminalPane.sessionName} initialCommand={terminalPane.initialCommand} panel={terminalPane.panel} onResize={resizeTerminal} onClose={closeTerminal} />
-      <GlobalJobStatusBar onOpenTerminal={openTerminal} onOpenLogs={openLogs} terminalOpen={terminalPane.open} panel={terminalPane.panel} />
+      <GlobalJobStatusBar onOpenTerminal={openTerminal} onOpenLogs={openLogs} onOpenService={openServiceConfig} terminalOpen={terminalPane.open} panel={terminalPane.panel} />
+      {serviceModal?.service?.id === "nginx" && <NginxConfigModal service={serviceModal.service} installed={serviceModal.installed} onClose={() => setServiceModal(null)} />}
+      {serviceModal?.service && serviceModal.service.id !== "nginx" && <ServiceManagerModal service={serviceModal.service} installed={serviceModal.installed} onClose={() => setServiceModal(null)} />}
     </div>
   );
 }

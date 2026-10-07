@@ -14,8 +14,8 @@ import {
 import { apiRequest, readApiError } from "../../lib/api";
 
 const tabs = [
-  ["configuration", "Configuration", Settings2],
   ["runtime", "Runtime", Activity],
+  ["configuration", "Configuration", Settings2],
   ["logs", "Error log", History],
 ];
 
@@ -25,7 +25,7 @@ export default function SupervisorConfigModal({
   onClose,
 }) {
   const item = installed[0] || service || {};
-  const [tab, setTab] = React.useState("configuration");
+  const [tab, setTab] = React.useState("runtime");
   const [status, setStatus] = React.useState(item.status || "stopped");
   const [busy, setBusy] = React.useState(false);
   const [message, setMessage] = React.useState("");

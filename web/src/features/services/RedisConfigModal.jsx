@@ -17,13 +17,13 @@ import StartupPolicyToggle from "./StartupPolicyToggle";
 import InstallServiceModal from "./InstallServiceModal";
 
 const tabs = [
+  ["runtime", "Runtime", Activity],
   ["settings", "Server settings", Database],
   ["memory", "Memory & eviction", Gauge],
   ["persistence", "Persistence", HardDrive],
   ["security", "Security", ShieldCheck],
   ["replication", "Replication", Workflow],
   ["versions", "Versions", PackageOpen],
-  ["runtime", "Runtime", Activity],
   ["logs", "Log", RefreshCw],
   ["configuration", "redis.conf", FileCog],
 ];
@@ -447,7 +447,7 @@ export default function RedisConfigModal({ service, installed, onClose }) {
   const current = Array.isArray(installed)
     ? installed.find((item) => item.status === "running") || installed[0]
     : installed;
-  const [tab, setTab] = React.useState("settings");
+  const [tab, setTab] = React.useState("runtime");
   const [config, setConfig] = React.useState(null);
   const [text, setText] = React.useState("");
   const [values, setValues] = React.useState(defaults);

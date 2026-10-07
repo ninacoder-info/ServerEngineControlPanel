@@ -15,12 +15,12 @@ import Toast from "../../components/Toast";
 
 const STORAGE_KEY = "serverengine:postfix-modal";
 const tabs = [
+  ["runtime", "Runtime", Activity],
   ["configuration", "Configuration", SlidersHorizontal],
   ["listeners", "Listeners", Network],
   ["security", "Security", ShieldCheck],
   ["delivery", "Delivery", Globe2],
   ["queue", "Queue", Gauge],
-  ["runtime", "Runtime", Activity],
   ["logs", "Error log", FileText],
 ];
 const inputClass =
@@ -106,7 +106,7 @@ function SaveFooter({ onSave, saving }) {
 
 export default function PostfixConfigModal({ service, installed, onClose }) {
   const current = Array.isArray(installed) ? installed[0] : installed;
-  const [tab, setTab] = React.useState("configuration");
+  const [tab, setTab] = React.useState("runtime");
   const [settings, setSettings] = React.useState(readSettings);
   const [saving, setSaving] = React.useState(false);
   const [toast, setToast] = React.useState(null);

@@ -16,10 +16,10 @@ import useServiceSocketStatus from "../../hooks/useServiceSocketStatus";
 import { showToast } from "../../components/Toast";
 
 const tabs = [
+  ["runtime", "Runtime", Activity],
   ["settings", "DNS settings", Globe2],
   ["api", "API access", KeyRound],
   ["dnssec", "DNSSEC", ShieldCheck],
-  ["runtime", "Runtime", Activity],
   ["logs", "Logs", RefreshCw],
   ["configuration", "Configuration", FileCog],
 ];
@@ -413,7 +413,7 @@ function Runtime({ current, runtimeStatus, action, onAction, configPath }) {
 
 export default function PowerDnsConfigModal({ service, installed, onClose }) {
   const current = Array.isArray(installed) ? installed[0] : installed;
-  const [tab, setTab] = React.useState("settings");
+  const [tab, setTab] = React.useState("runtime");
   const [config, setConfig] = React.useState(null);
   const [text, setText] = React.useState("");
   const [values, setValues] = React.useState(defaults);

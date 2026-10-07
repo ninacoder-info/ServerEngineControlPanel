@@ -225,10 +225,8 @@ export default function ActivityPage({ variant = "activity" }) {
       if (!next) return;
       setEvents((current) => [{ ...next, icon: icons[next.category] || FileCog }, ...current.filter((item) => item.id !== next.id)].slice(0, 1000));
     };
-    const onJobs = () => loadActivity();
     window.addEventListener("serverengine:activity", onActivity);
-    window.addEventListener("serverengine:jobs-updated", onJobs);
-    return () => { window.removeEventListener("serverengine:activity", onActivity); window.removeEventListener("serverengine:jobs-updated", onJobs); };
+    return () => { window.removeEventListener("serverengine:activity", onActivity); };
   }, [loadActivity]);
   const visible = events.filter((event) => (activeFilter === "all" || event.category === activeFilter) && (status === "all" || event.status === status) && `${event.type} ${event.actor} ${event.target} ${event.detail}`.toLowerCase().includes(query.toLowerCase()));
   const pageSize = 20;

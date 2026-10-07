@@ -86,6 +86,7 @@ class JobStore:
         self._subscribers: set[tuple[asyncio.AbstractEventLoop, asyncio.Queue]] = set()
         self._lock = Lock()
         self._active_processes: dict[str, subprocess.Popen] = {}
+        self._job_processes: dict[str, set[subprocess.Popen]] = {}
         # Installations, builds, package extraction, and service actions are
         # deliberately serialized. Running multiple privileged jobs at once
         # can corrupt the package database or exhaust the server while source
@@ -142,7 +143,7 @@ class JobStore:
         return job
 
     def cancel(self, job_id: str) -> JobSummary | None:
-        active_process = None
+        active_processes: list[subprocess.Popen] = []
         with self._lock:
             current = self._jobs.get(job_id)
             if current is None:
@@ -152,26 +153,61 @@ class JobStore:
             event = self._cancel_events.get(job_id)
             if event:
                 event.set()
-            active_process = self._active_processes.get(job_id)
+            active_processes = list(self._job_processes.get(job_id, set()))
+            if not active_processes:
+                active_process = self._active_processes.get(job_id)
+                if active_process is not None:
+                    active_processes = [active_process]
             cancelled = current.model_copy(update={
                 "status": "cancelled",
                 "message": "Cancellation requested.",
                 "updated_at": datetime.now(timezone.utc),
             })
             self._jobs[job_id] = cancelled
-        if active_process is not None:
-            self._terminate_process(active_process)
+        for process in active_processes:
+            self._terminate_process(process)
         self._broadcast(cancelled)
         return cancelled
 
     def _track_process(self, job_id: str, process: subprocess.Popen):
         with self._lock:
+            self._job_processes.setdefault(job_id, set()).add(process)
             self._active_processes[job_id] = process
 
     def _untrack_process(self, job_id: str, process: subprocess.Popen):
         with self._lock:
+            processes = self._job_processes.get(job_id)
+            if processes is not None:
+                processes.discard(process)
+                if not processes:
+                    self._job_processes.pop(job_id, None)
             if self._active_processes.get(job_id) is process:
                 self._active_processes.pop(job_id, None)
+
+    def _run_cancellable(self, job_id: str, command, **kwargs) -> subprocess.CompletedProcess:
+        """Run a foreground command that can be stopped by job cancellation.
+
+        A normal ``subprocess.run`` cannot be interrupted by ``cancel()``.
+        Package-manager commands are deliberately started in their own process
+        group so cancellation cannot leave apt/dpkg holding the serialized
+        operation lock indefinitely.
+        """
+        check = kwargs.pop("check", False)
+        kwargs.setdefault("stdout", subprocess.PIPE)
+        kwargs.setdefault("stderr", subprocess.STDOUT)
+        kwargs.setdefault("text", True)
+        kwargs.setdefault("start_new_session", True)
+        process = subprocess.Popen(command, **kwargs)
+        self._track_process(job_id, process)
+        try:
+            output, _ = process.communicate()
+        finally:
+            self._untrack_process(job_id, process)
+        self._raise_if_cancelled(job_id)
+        result = subprocess.CompletedProcess(command, process.returncode, output, None)
+        if check and result.returncode:
+            raise subprocess.CalledProcessError(result.returncode, command, output=output)
+        return result
 
     @staticmethod
     def _terminate_process(process: subprocess.Popen):
@@ -215,6 +251,95 @@ class JobStore:
         job = self.create(job_id, f"{action.title()} {service_id}" + (f" {version}" if version else ""))
         Thread(target=self._run_serialized, args=(self._run_action, job_id, service_id, action, version), daemon=True).start()
         return job
+
+    def enqueue_certificate(self, job_id: str, website_id: str, method: str, email: str = "", staging: bool = False, certificate: str = "", private_key: str = "", chain: str = "") -> JobSummary:
+        label = "Issue ACME certificate" if method == "acme" else "Install uploaded certificate"
+        job = self.create(job_id, f"{label} for website {website_id[:8]}")
+        Thread(target=self._run_serialized, args=(self._run_certificate, job_id, website_id, method, email, staging, certificate, private_key, chain), daemon=True).start()
+        return job
+
+    def _run_certificate(self, job_id: str, website_id: str, method: str, email: str, staging: bool, certificate: str, private_key: str, chain: str):
+        try:
+            site = website_service.get(website_id)
+            if site is None:
+                raise RuntimeError("Website not found.")
+            if method == "upload":
+                self._update(job_id, status="running", progress=20, message="Validating the uploaded certificate…")
+                fullchain = certificate.strip() + ("\n" + chain.strip() if chain.strip() else "")
+                website_service.store_certificate(website_id, fullchain, private_key, "upload")
+                self._update(job_id, progress=80, message="Reloading the active web server…")
+                self.enqueue_action(f"certificate-reload-{website_id}-{uuid.uuid4().hex[:8]}", site.server_type, "restart")
+                self._update(job_id, status="succeeded", progress=100, message="Uploaded certificate installed and the web server reload was queued.")
+                return
+            if method != "acme":
+                raise RuntimeError("Unsupported certificate method.")
+            # Request one certificate containing the primary domain and every
+            # configured alias as SANs. WebsiteService already normalizes
+            # these values, but deduplicate here as a safety measure for older
+            # persisted website records.
+            domains = list(dict.fromkeys(domain.strip().lower() for domain in [site.domain, *site.aliases] if domain.strip()))
+            if not domains:
+                raise RuntimeError("No domains are configured for this website.")
+            certbot_candidates = [
+                service_root("certbot") / "venv/bin/certbot",
+                service_root("certbot") / "usr/bin/certbot",
+                service_root("certbot") / "bin/certbot",
+                Path("/usr/bin/certbot"),
+            ]
+            certbot = None
+            for candidate in certbot_candidates:
+                if not candidate.exists():
+                    continue
+                check = subprocess.run([str(candidate), "--version"], capture_output=True, text=True, check=False, timeout=30)
+                if check.returncode == 0:
+                    certbot = candidate
+                    break
+            if certbot is None:
+                discovered = shutil.which("certbot")
+                if discovered:
+                    check = subprocess.run([discovered, "--version"], capture_output=True, text=True, check=False, timeout=30)
+                    if check.returncode == 0:
+                        certbot = Path(discovered)
+            if certbot is None:
+                raise RuntimeError("No working Certbot runtime was found. Reinstall Certbot so its Python package and launcher are installed together.")
+            cert_root = website_service.certificate_root / "certbot"
+            webroot = Path(site.document_root)
+            webroot.mkdir(parents=True, exist_ok=True)
+            command = [str(certbot), "certonly", "--webroot", "-w", str(webroot), "--config-dir", str(cert_root / "config"), "--work-dir", str(cert_root / "work"), "--logs-dir", str(cert_root / "logs"), "--cert-name", site.domain, "--agree-tos", "--non-interactive", "--keep-until-expiring"]
+            if email.strip():
+                command.extend(["--email", email.strip()])
+            else:
+                command.append("--register-unsafely-without-email")
+            if staging:
+                command.append("--staging")
+            for domain in domains:
+                command.extend(["-d", domain])
+            self._update(job_id, status="running", progress=5, message=f"Requesting an ACME certificate for {', '.join(domains)}…", log=["Domains: " + ", ".join(domains), "$ " + " ".join(shlex.quote(item) for item in command)])
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, start_new_session=True)
+            self._track_process(job_id, process)
+            assert process.stdout is not None
+            for line in process.stdout:
+                line = line.rstrip()
+                if line:
+                    self._update(job_id, progress=50, message="Validating domain ownership…", log=[line])
+            return_code = process.wait()
+            self._untrack_process(job_id, process)
+            if return_code != 0:
+                website_service.mark_certificate_failed(website_id)
+                raise RuntimeError("ACME certificate issuance failed; see the job output for Certbot details.")
+            lineage = cert_root / "config" / "live" / site.domain
+            certificate_path = lineage / "fullchain.pem"
+            key_path = lineage / "privkey.pem"
+            if not certificate_path.is_file() or not key_path.is_file():
+                raise RuntimeError("Certbot completed but did not produce a certificate and private key.")
+            website_service.store_certificate(website_id, certificate_path.read_text(), key_path.read_text(), "acme")
+            self._update(job_id, progress=90, message="Certificate issued; reloading the active web server…")
+            self.enqueue_action(f"certificate-reload-{website_id}-{uuid.uuid4().hex[:8]}", site.server_type, "restart")
+            self._update(job_id, status="succeeded", progress=100, message="ACME certificate issued and the web server reload was queued.")
+        except InstallCancelled:
+            self._update(job_id, status="cancelled", message="Certificate operation cancelled.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
 
     def enqueue_docker_action(self, job_id: str, container_id: str, action: str) -> JobSummary:
         job = self.create(job_id, f"{action.title()} docker container {container_id[:12]}")
@@ -908,14 +1033,32 @@ class JobStore:
         """
         self._update(job_id, message="Waiting for the next available operation…", log=["Queued behind another operation; execution will start automatically."])
         with self._task_lock:
-            if self._is_cancelled(job_id):
-                return
             try:
+                if self._is_cancelled(job_id):
+                    return
                 runner(job_id, *args)
             except InstallCancelled:
                 self._update(job_id, status="cancelled", message="Job cancelled.")
             except Exception as error:
                 self._update(job_id, status="failed", message=str(error))
+            finally:
+                # A runner should normally untrack every process in its own
+                # finally block. Clear any defensive leftovers here so a
+                # completed/cancelled job can never be targeted by a later
+                # cancellation request.
+                with self._lock:
+                    self._job_processes.pop(job_id, None)
+                    self._active_processes.pop(job_id, None)
+                    self._cancel_events.pop(job_id, None)
+                # Service inventories are cached because they perform many
+                # filesystem, process, and package checks. A completed or
+                # cancelled serialized operation is the authoritative point
+                # at which those cached inventories must be refreshed.
+                try:
+                    from app.api.routes.services import invalidate_service_inventory_cache
+                    invalidate_service_inventory_cache()
+                except ImportError:
+                    pass
 
     def _run_extension_install(self, job_id: str, version: str, extension: str):
         minor = ".".join(version.removeprefix("php").split(".")[:2])
@@ -2673,7 +2816,7 @@ class JobStore:
         apt = shutil.which("apt-get")
         if not apt:
             raise RuntimeError("apt-get is required to prepare the PHP package source")
-        subprocess.run([apt, "update"], check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        self._run_cancellable(job_id, [apt, "update"], check=True)
 
     def _ensure_mariadb_package_source(self, requested_version: str):
         """Configure MariaDB's official APT source for the requested release line."""
@@ -3408,6 +3551,7 @@ class JobStore:
             legacy_ssl_root = None
             legacy_icu_root = None
             icu_link_flags = ""
+            openssl_link_flags = ""
             # PHP 7.x can use OpenSSL 1.1.1, but PHP 5.x directly accesses
             # EVP_PKEY internals that became opaque in OpenSSL 1.1. PHP 5.x
             # therefore requires the older 1.0.2 compatibility headers.
@@ -3505,6 +3649,25 @@ class JobStore:
                 configure_environment["CPPFLAGS"] = f"-I{legacy_ssl_root / 'include'} {configure_environment['CPPFLAGS']}"
                 configure_environment["LDFLAGS"] = f"-L{legacy_ssl_root / 'lib'}"
                 configure_environment["LIBS"] = "-ldl -lpthread"
+                if php_version_tuple >= (7, 0):
+                    # PHP 7.x can configure against the isolated OpenSSL
+                    # headers but its generated final link rules may omit
+                    # the static compatibility libraries. Keep the flags
+                    # after the PHP objects so libssl/libcrypto symbols are
+                    # resolved without changing the host OpenSSL runtime.
+                    openssl_link_flags = " ".join([
+                        f"-L{legacy_ssl_root / 'lib'}",
+                        f"-Wl,-rpath,{legacy_ssl_root / 'lib'}",
+                        "-Wl,--no-as-needed",
+                        "-lssl",
+                        "-lcrypto",
+                        "-ldl",
+                        "-lpthread",
+                        "-Wl,--as-needed",
+                    ])
+                    configure_environment["LDFLAGS"] = openssl_link_flags
+                    configure_environment["LIBS"] = openssl_link_flags
+                    configure_environment["OPENSSL_LIBS"] = openssl_link_flags
             if legacy_icu_root:
                 configure_environment["CPPFLAGS"] = f"-I{legacy_icu_root / 'include'} {configure_environment['CPPFLAGS']}"
                 configure_environment["LDFLAGS"] = " ".join(
@@ -3583,9 +3746,12 @@ class JobStore:
                     icu_link_check.stdout.strip(),
                     f"-L{icu_library}",
                     f"-Wl,-rpath,{icu_library}",
-                    "-licui18n",
-                    "-licuuc",
-                    "-licudata",
+                    "-Wl,--no-as-needed",
+                    str(icu_library / "libicuio.so"),
+                    str(icu_library / "libicui18n.so"),
+                    str(icu_library / "libicuuc.so"),
+                    str(icu_library / "libicudata.so"),
+                    "-Wl,--as-needed",
                 ])
                 configure_environment["ICU_LIBS"] = icu_link_flags
                 configure_environment["LDFLAGS"] = " ".join(
@@ -3664,6 +3830,26 @@ class JobStore:
                         "",
                     ])
                     makefile.write_text(content.rstrip() + "\n" + additions)
+            if openssl_link_flags:
+                # PHP 7.x uses recursive Makefiles for sapi/fpm and phpdbg.
+                # Preserve the isolated OpenSSL libraries in those sub-makes
+                # as well; environment LIBS alone is not sufficient because
+                # the generated rules can replace it.
+                makefile_marker = "# Server Engine isolated OpenSSL linker flags"
+                for makefile in source.rglob("Makefile"):
+                    try:
+                        content = makefile.read_text(errors="replace")
+                    except OSError:
+                        continue
+                    if makefile_marker in content:
+                        continue
+                    additions = "\n".join([
+                        makefile_marker,
+                        f"override EXTRA_LIBS += {openssl_link_flags}",
+                        f"override LIBS += {openssl_link_flags}",
+                        "",
+                    ])
+                    makefile.write_text(content.rstrip() + "\n" + additions)
             jobs = str(max(1, min(os.cpu_count() or 1, 4)))
             make_command = ["make", f"-j{jobs}"]
             self._update(job_id, progress=45, message="Compiling PHP…", log=[f"$ {' '.join(make_command)}"])
@@ -3677,6 +3863,7 @@ class JobStore:
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
+                start_new_session=True,
                 env=configure_environment,
             )
             self._track_process(job_id, build)
@@ -3891,7 +4078,7 @@ class JobStore:
                     self._update(job_id, progress=4, message=f"Official MariaDB repository unavailable; using the operating system repository. {error}")
             else:
                 self._update(job_id, status="running", progress=2, message=f"Preparing {service_id} {requested_version}…", log=[])
-            metadata = subprocess.run([apt, "update"], check=False, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            metadata = self._run_cancellable(job_id, [apt, "update"], check=False)
             metadata_log = [line.strip() for line in metadata.stdout.splitlines() if line.strip()][-20:]
             if metadata.returncode:
                 self._update(
@@ -4027,14 +4214,26 @@ class JobStore:
                                 packages.append(match.group(1))
                                 pending.append(match.group(1))
             self._update(job_id, progress=25, message=f"Downloading {len(packages)} package archives for {service_id}…")
-            process = subprocess.Popen([apt, "download", *packages], cwd=package_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            process = subprocess.Popen(
+                [apt, "download", *packages],
+                cwd=package_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                start_new_session=True,
+            )
+            self._track_process(job_id, process)
             output = []
-            for line in process.stdout or []:
-                if line.strip():
-                    output.append(line.rstrip())
-                    self._update(job_id, progress=min(65, 25 + len(output)), message=f"Downloading {service_id} packages…", log=output[-80:])
-            if process.wait() != 0:
-                raise RuntimeError(f"Unable to download isolated package {package}")
+            try:
+                for line in process.stdout or []:
+                    if line.strip():
+                        output.append(line.rstrip())
+                        self._update(job_id, progress=min(65, 25 + len(output)), message=f"Downloading {service_id} packages…", log=output[-80:])
+                if process.wait() != 0:
+                    self._raise_if_cancelled(job_id)
+                    raise RuntimeError(f"Unable to download isolated package {package}")
+            finally:
+                self._untrack_process(job_id, process)
             debs = sorted(package_dir.glob("*.deb"))
             if not debs:
                 raise RuntimeError(f"Package archive {package} was not downloaded")

@@ -22,11 +22,11 @@ const buttonClass =
   "inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60";
 
 const tabs = [
+  ["runtime", "Runtime", Activity],
   ["overview", "Overview", FileCode2],
   ["php", "PHP runtime", Settings2],
   ["wordpress", "WordPress", Package],
   ["packages", "Packages", Package],
-  ["runtime", "Runtime", Activity],
   ["logs", "Output", FileText],
 ];
 
@@ -103,7 +103,7 @@ function SaveFooter({ onSave, saving }) {
 
 export default function WpCliConfigModal({ service, installed, onClose }) {
   const current = Array.isArray(installed) ? installed[0] : installed;
-  const [tab, setTab] = React.useState("overview");
+  const [tab, setTab] = React.useState("runtime");
   const [settings, setSettings] = React.useState(readSettings);
   const [phpVersions, setPhpVersions] = React.useState([]);
   const [saving, setSaving] = React.useState(false);

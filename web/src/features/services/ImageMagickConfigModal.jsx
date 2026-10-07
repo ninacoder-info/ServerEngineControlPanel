@@ -16,12 +16,12 @@ import Toast from "../../components/Toast";
 const STORAGE_KEY = "serverengine:imagemagick";
 
 const tabs = [
+  ["runtime", "Runtime", Activity],
   ["configuration", "Configuration", SlidersHorizontal],
   ["security", "Security", ShieldCheck],
   ["resources", "Resources", Gauge],
   ["formats", "Formats", Layers3],
   ["delegates", "Delegates", FileCode2],
-  ["runtime", "Runtime", Activity],
   ["logs", "Error log", FileText],
 ];
 
@@ -149,7 +149,7 @@ function SaveFooter({ onSave, saving }) {
 
 export default function ImageMagickConfigModal({ service, installed, onClose }) {
   const current = Array.isArray(installed) ? installed[0] : installed;
-  const [tab, setTab] = React.useState("configuration");
+  const [tab, setTab] = React.useState("runtime");
   const [settings, setSettings] = React.useState(readSettings);
   const [saving, setSaving] = React.useState(false);
   const [toast, setToast] = React.useState(null);

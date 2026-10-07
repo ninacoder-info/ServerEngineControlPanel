@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowUpCircle, X } from "lucide-react";
+import { ArrowUpCircle, RefreshCw, X } from "lucide-react";
 import { apiRequest, readApiError } from "../lib/api";
 
 function renderMarkdownInline(value) {
@@ -74,6 +74,7 @@ export default function Brand() {
   const [update, setUpdate] = useState(null);
   const [updateOpen, setUpdateOpen] = useState(false);
   const [updateBusy, setUpdateBusy] = useState(false);
+  const [updateCheckBusy, setUpdateCheckBusy] = useState(false);
   const [updateError, setUpdateError] = useState("");
   const [name, setName] = useState(
     () => localStorage.getItem("server-engine-panel-name") || "Server Engine",
@@ -97,6 +98,19 @@ export default function Brand() {
       active = false;
     };
   }, []);
+
+  const recheckUpdate = async () => {
+    setUpdateCheckBusy(true);
+    try {
+      const response = await apiRequest("/api/v1/system/update?refresh=true");
+      if (!response.ok) throw new Error(await readApiError(response, "Unable to check for updates."));
+      setUpdate(await response.json());
+    } catch (error) {
+      setUpdate((current) => ({ ...(current || {}), checked: false, available: false, message: error.message }));
+    } finally {
+      setUpdateCheckBusy(false);
+    }
+  };
 
   const startUpdate = async () => {
     setUpdateBusy(true);
@@ -147,6 +161,18 @@ export default function Brand() {
             >
               <ArrowUpCircle size={13} />
               Update
+            </button>
+          )}
+          {update?.checked && !update.available && (
+            <button
+              type="button"
+              title="Check for updates again"
+              aria-label="Check for updates again"
+              disabled={updateCheckBusy}
+              onClick={recheckUpdate}
+              className="inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 disabled:cursor-wait disabled:opacity-50 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+            >
+              <RefreshCw size={12} className={updateCheckBusy ? "animate-spin" : ""} />
             </button>
           )}
         </div>

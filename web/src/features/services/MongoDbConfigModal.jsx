@@ -18,11 +18,11 @@ import StartupPolicyToggle from "./StartupPolicyToggle";
 import useServiceSocketStatus from "../../hooks/useServiceSocketStatus";
 
 const tabs = [
+  ["runtime", "Runtime", Activity],
   ["configuration", "Configuration", SlidersHorizontal],
   ["storage", "Storage", Database],
   ["security", "Security", ShieldCheck],
   ["performance", "Performance", Gauge],
-  ["runtime", "Runtime", Activity],
   ["logs", "Logs", RefreshCw],
   ["file", "mongod.conf", FileCog],
 ];
@@ -154,7 +154,7 @@ processManagement:
 
 export default function MongoDbConfigModal({ service, installed, onClose }) {
   const current = Array.isArray(installed) ? installed[0] : installed;
-  const [tab, setTab] = React.useState("configuration");
+  const [tab, setTab] = React.useState("runtime");
   const [values, setValues] = React.useState(defaults);
   const [text, setText] = React.useState("");
   const [config, setConfig] = React.useState(null);

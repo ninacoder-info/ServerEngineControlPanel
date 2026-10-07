@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 WebsiteStatus = Literal["ready", "disabled", "error"]
 ServerType = Literal["nginx", "apache", "openlitespeed", "caddy"]
+MaintenanceResponseCode = Literal["503", "200"]
 FrameworkType = Literal["generic_php", "laravel", "wordpress", "symfony", "codeigniter", "custom"]
 ApplicationTemplate = Literal["wordpress", "laravel", "drupal", "symfony", "cakephp", "codeigniter4", "yii", "slim", "laminas"]
 
@@ -23,6 +24,24 @@ class Website(BaseModel):
     ssl_enabled: bool = False
     ssl_enforce_tls: bool = False
     ssl_allow_http: bool = True
+    certificate_status: str = "not-issued"
+    certificate_source: str = ""
+    certificate_path: str = ""
+    private_key_path: str = ""
+    certificate_expires_at: str = ""
+    access_allowed_ips: list[str] = Field(default_factory=list)
+    access_auth_enabled: bool = False
+    access_auth_username: str = ""
+    rewrite_rules: str = "try_files $uri $uri/ /index.php?$query_string;"
+    redirects: list[dict] = Field(default_factory=list)
+    proxies: list[dict] = Field(default_factory=list)
+    hotlink: dict = Field(default_factory=dict)
+    maintenance_enabled: bool = False
+    maintenance_response_code: MaintenanceResponseCode = "503"
+    maintenance_message: str = "We’ll be back shortly."
+    maintenance_bypass: list[str] = Field(default_factory=list)
+    maintenance_start: str = ""
+    maintenance_end: str = ""
     database_enabled: bool = False
     database_name: str = ""
     database_user: str = ""
@@ -47,6 +66,20 @@ class WebsiteCreateRequest(BaseModel):
     ssl_enabled: bool = False
     ssl_enforce_tls: bool = False
     ssl_allow_http: bool = True
+    access_allowed_ips: list[str] = Field(default_factory=list, max_length=100)
+    access_auth_enabled: bool = False
+    access_auth_username: str = Field(default="", max_length=128)
+    access_auth_password: str = Field(default="", max_length=256)
+    rewrite_rules: str = Field(default="try_files $uri $uri/ /index.php?$query_string;", max_length=12000)
+    redirects: list[dict] = Field(default_factory=list)
+    proxies: list[dict] = Field(default_factory=list)
+    hotlink: dict = Field(default_factory=dict)
+    maintenance_enabled: bool = False
+    maintenance_response_code: MaintenanceResponseCode = "503"
+    maintenance_message: str = Field(default="We’ll be back shortly.", max_length=2000)
+    maintenance_bypass: list[str] = Field(default_factory=list, max_length=100)
+    maintenance_start: str = Field(default="", max_length=64)
+    maintenance_end: str = Field(default="", max_length=64)
     database_enabled: bool = False
     database_name: str = Field(default="", max_length=128)
     database_user: str = Field(default="", max_length=128)
@@ -80,6 +113,20 @@ class WebsiteUpdateRequest(BaseModel):
     ssl_enabled: bool | None = None
     ssl_enforce_tls: bool | None = None
     ssl_allow_http: bool | None = None
+    access_allowed_ips: list[str] | None = Field(default=None, max_length=100)
+    access_auth_enabled: bool | None = None
+    access_auth_username: str | None = Field(default=None, max_length=128)
+    access_auth_password: str | None = Field(default=None, max_length=256)
+    rewrite_rules: str | None = Field(default=None, max_length=12000)
+    redirects: list[dict] | None = Field(default=None, max_length=100)
+    proxies: list[dict] | None = Field(default=None, max_length=100)
+    hotlink: dict | None = None
+    maintenance_enabled: bool | None = None
+    maintenance_response_code: MaintenanceResponseCode | None = None
+    maintenance_message: str | None = Field(default=None, max_length=2000)
+    maintenance_bypass: list[str] | None = Field(default=None, max_length=100)
+    maintenance_start: str | None = Field(default=None, max_length=64)
+    maintenance_end: str | None = Field(default=None, max_length=64)
     database_enabled: bool | None = None
     database_name: str | None = Field(default=None, max_length=128)
     database_user: str | None = Field(default=None, max_length=128)

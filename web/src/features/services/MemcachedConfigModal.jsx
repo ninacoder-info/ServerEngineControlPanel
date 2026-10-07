@@ -15,11 +15,11 @@ import StartupPolicyToggle from "./StartupPolicyToggle";
 import useServiceSocketStatus from "../../hooks/useServiceSocketStatus";
 
 const tabs = [
+  ["runtime", "Runtime", Activity],
   ["settings", "Server settings", Database],
   ["memory", "Memory & threads", Gauge],
   ["security", "Security", ShieldCheck],
   ["network", "Network", Network],
-  ["runtime", "Runtime", Activity],
   ["logs", "Log", RefreshCw],
   ["configuration", "memcached.conf", FileCog],
 ];
@@ -341,7 +341,7 @@ export default function MemcachedConfigModal({ installed, onClose }) {
   const current = Array.isArray(installed)
     ? installed.find((item) => item.status === "running") || installed[0]
     : installed;
-  const [tab, setTab] = React.useState("settings");
+  const [tab, setTab] = React.useState("runtime");
   const [config, setConfig] = React.useState(null);
   const [text, setText] = React.useState("");
   const [values, setValues] = React.useState(defaults);

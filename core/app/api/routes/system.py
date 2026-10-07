@@ -11,7 +11,7 @@ from pathlib import Path
 from threading import Event, Lock, Thread
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.dependencies import require_user
 from app.services.job_service import job_store
@@ -35,6 +35,9 @@ HEALTH_THRESHOLD_DEFAULTS = {
 }
 
 UPDATE_REPOSITORY = os.getenv("SE_GITHUB_REPO", "ninacoder-info/ServerEngineControlPanel")
+_UPDATE_CACHE_TTL = 24 * 60 * 60
+_update_cache = None
+_update_cache_lock = Lock()
 
 
 def _github_release() -> dict:
@@ -89,8 +92,12 @@ def _version_tuple(value: str) -> tuple[int, int, int]:
 
 
 @router.get("/system/update")
-def check_for_panel_update(user=Depends(require_user)):
+def check_for_panel_update(refresh: bool = Query(default=False), user=Depends(require_user)):
+    global _update_cache
     current = APP_VERSION
+    with _update_cache_lock:
+        if not refresh and _update_cache and time.time() - _update_cache["checked_at"] < _UPDATE_CACHE_TTL:
+            return _update_cache["data"]
     try:
         release = _github_release()
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
@@ -98,7 +105,10 @@ def check_for_panel_update(user=Depends(require_user)):
         detail = "GitHub release check failed"
         if status == 404:
             detail = "The configured GitHub release is unavailable or requires a server-side token."
-        return {"current_version": current, "available": False, "checked": False, "message": detail}
+        result = {"current_version": current, "available": False, "checked": False, "message": detail}
+        with _update_cache_lock:
+            _update_cache = {"checked_at": time.time(), "data": result}
+        return result
     latest = str(release.get("tag_name", "")).lstrip("v")
     # The release body is the authoritative content shown on the GitHub
     # release page.  Do not replace it with CHANGELOG.md: the changelog may
@@ -111,7 +121,7 @@ def check_for_panel_update(user=Depends(require_user)):
         except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, UnicodeDecodeError):
             notes = ""
     notes = notes or "No release notes were published for this version."
-    return {
+    result = {
         "current_version": current,
         "latest_version": latest,
         "available": bool(latest and _version_tuple(latest) > _version_tuple(current)),
@@ -122,6 +132,9 @@ def check_for_panel_update(user=Depends(require_user)):
         "name": release.get("name") or f"Server Engine v{latest}",
         "notes": notes,
     }
+    with _update_cache_lock:
+        _update_cache = {"checked_at": time.time(), "data": result}
+    return result
 
 
 @router.post("/system/update")

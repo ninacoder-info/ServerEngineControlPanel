@@ -58,10 +58,36 @@ export default function PhpRuntimesPage({ modal = false, onClose }) {
       // the PHP operation reaches a terminal state.
       load();
     };
+    const refreshAfterServiceStatus = (event) => {
+      const detail = event.detail;
+      if (!detail || detail.serviceId !== "php") return;
+      if (["start", "stop", "restart"].includes(detail.action)) {
+        if (!["succeeded", "failed", "cancelled"].includes(detail.status)) return;
+        const version = detail.version || detail.job?.version;
+        if (!version) return;
+        const nextStatus = detail.status === "succeeded" && ["start", "restart"].includes(detail.action)
+          ? "running"
+          : detail.status === "succeeded" && detail.action === "stop"
+            ? "stopped"
+            : null;
+        if (!nextStatus) return;
+        setInstalled((current) => current.map((item) => item.version === version ? { ...item, status: nextStatus } : item));
+        setRuntimes((current) => current.map((item) => item.version === version ? { ...item, status: nextStatus } : item));
+        return;
+      }
+      if (!["install", "uninstall", "switch"].includes(detail.action)) return;
+      if (!["succeeded", "failed", "cancelled"].includes(detail.status)) return;
+      // The service-status event is emitted directly by the shared jobs socket.
+      // Use it as the authoritative completion signal so a newly installed
+      // PHP-FPM version appears without a reload or background polling.
+      load();
+    };
     window.addEventListener("serverengine:jobs-updated", refreshAfterJob);
+    window.addEventListener("serverengine:service-status", refreshAfterServiceStatus);
     return () => {
       alive = false;
       window.removeEventListener("serverengine:jobs-updated", refreshAfterJob);
+      window.removeEventListener("serverengine:service-status", refreshAfterServiceStatus);
     };
   }, []);
   if (!loading && !phpState.loading && !phpState.installed) {
@@ -131,7 +157,7 @@ export default function PhpRuntimesPage({ modal = false, onClose }) {
         <>
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-sm text-cyan-300">Application runtimes</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Application runtimes</p>
               <h2 className="mt-1 flex items-center gap-2 text-3xl font-semibold tracking-tight">
                 <Server size={25} />
                 PHP-FPM runtimes

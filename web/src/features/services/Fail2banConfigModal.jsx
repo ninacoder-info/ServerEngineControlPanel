@@ -15,11 +15,11 @@ import StartupPolicyToggle from "./StartupPolicyToggle";
 import useServiceSocketStatus from "../../hooks/useServiceSocketStatus";
 
 const tabs = [
+  ["runtime", "Runtime", TerminalSquare],
   ["jails", "Jails", ListChecks],
   ["policy", "Ban policy", Gauge],
   ["trusted", "Trusted IPs", ShieldCheck],
   ["actions", "Actions", Activity],
-  ["runtime", "Runtime", TerminalSquare],
   ["logs", "Logs", RefreshCw],
   ["configuration", "jail.local", FileCog],
 ];
@@ -151,7 +151,7 @@ export default function Fail2banConfigModal({ installed, onClose }) {
   const current = Array.isArray(installed)
     ? installed.find((item) => item.status === "running") || installed[0]
     : installed;
-  const [tab, setTab] = React.useState("jails");
+  const [tab, setTab] = React.useState("runtime");
   const [config, setConfig] = React.useState(null);
   const [text, setText] = React.useState("");
   const [values, setValues] = React.useState(defaults);

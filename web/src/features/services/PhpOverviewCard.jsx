@@ -90,10 +90,15 @@ export default function PhpOverviewCard({
             className="inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
             type="button"
             disabled={installing}
-            onClick={() => onInstall(service)}
+            onClick={() => installed.length > 0 ? navigate("/services/php") : onInstall(service)}
           >
-            <Download size={14} />
-            {installing ? "Installing…" : "Install"}
+            {installing ? (
+              "Installing…"
+            ) : installed.length > 0 ? (
+              "Configure service"
+            ) : (
+              <><Download size={14} />Install</>
+            )}
           </button>
           {installed.length > 0 && (
             <button

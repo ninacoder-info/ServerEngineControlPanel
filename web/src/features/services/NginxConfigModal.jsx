@@ -19,13 +19,13 @@ import StartupPolicyToggle from "./StartupPolicyToggle";
 import InstallServiceModal from "./InstallServiceModal";
 
 const tabs = [
+  ["runtime", "Runtime", Activity],
   ["settings", "Settings", Globe2],
   ["versions", "Versions", PackageOpen],
   ["performance", "Performance", Gauge],
   ["security", "Security", ShieldCheck],
   ["sites", "Sites", Layers3],
   ["configuration", "nginx.conf", Code2],
-  ["runtime", "Runtime", Activity],
   ["error-log", "Error log", RefreshCw],
   ["response-log", "Response log", ScrollText],
 ];
@@ -363,7 +363,7 @@ export default function NginxConfigModal({ service, installed, onClose }) {
     setRuntimeVersion(current?.version || "");
   }, [current?.status, current?.version]);
   const running = runtimeStatus === "running";
-  const [tab, setTab] = React.useState("settings");
+  const [tab, setTab] = React.useState("runtime");
   const [config, setConfig] = React.useState(null);
   const [httpPort, setHttpPort] = React.useState("80");
   const [text, setText] = React.useState("");

@@ -3,6 +3,7 @@ import SupervisorConfigModal from "./SupervisorConfigModal";
 import {
   Activity,
   CheckCircle2,
+  ChevronDown,
   Download,
   FileCog,
   Gauge,
@@ -10,8 +11,10 @@ import {
   History,
   Network,
   RefreshCw,
+  RotateCcw,
   Server,
   ShieldCheck,
+  SlidersHorizontal,
   Settings2,
   TerminalSquare,
   X,
@@ -38,17 +41,19 @@ import ClamAvConfigModal from "./ClamAvConfigModal";
 import SqlServerConfigModal from "./SqlServerConfigModal";
 import SaveButton from "../../components/SaveButton";
 import Toast from "../../components/Toast";
+import OpenSslCompatibilityModal from "./OpenSslCompatibilityModal";
 
 const tabs = [
-  ["configuration", "Configuration", FileCog],
+  ["runtime", "Runtime", Activity],
+  ["quick-settings", "Quick settings", SlidersHorizontal],
+  ["configuration", "php.ini", FileCog],
   ["mysql-file", "my.cnf", FileCog],
   ["nginx-file", "nginx.conf", FileCog],
   ["extensions", "Extensions", Download],
-  ["terminal", "Terminal access", TerminalSquare],
   ["versions", "Versions", History],
-  ["runtime", "Runtime", Activity],
   ["tuning", "Performance", Gauge],
   ["logs", "Error log", RefreshCw],
+  ["terminal", "Terminal access", TerminalSquare],
 ];
 const inputClass =
   "mt-1.5 w-full rounded-md border border-neutral-300 bg-transparent px-3 py-2 text-sm dark:border-neutral-700";
@@ -167,7 +172,7 @@ function MySQLGeneral({ service, configText, busy, message, onSave }) {
       {message && (
         <p className="text-sm text-neutral-600 dark:text-neutral-300">{message}</p>
       )}
-      <div className="flex justify-end gap-3">
+      <div className="relative flex justify-end gap-3">
         <button
           type="button"
           className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
@@ -208,7 +213,7 @@ function MySQLFile({ config, text, setText, message, busy, save, restore }) {
       {message && (
         <p className="text-sm text-neutral-600 dark:text-neutral-300">{message}</p>
       )}
-      <div className="flex justify-end gap-3">
+      <div className="relative flex justify-end gap-3">
         <button
           className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
           disabled={busy}
@@ -229,6 +234,7 @@ function MySQLFile({ config, text, setText, message, busy, save, restore }) {
 }
 
 function PHPConfig({ config, text, setText, message, busy, save, restore }) {
+  const [restoreOpen, setRestoreOpen] = React.useState(false);
   return (
     <div className="space-y-5">
       <div>
@@ -244,14 +250,22 @@ function PHPConfig({ config, text, setText, message, busy, save, restore }) {
       {message && (
         <p className="text-sm text-neutral-600 dark:text-neutral-300">{message}</p>
       )}
-      <div className="flex justify-end gap-3">
+      <div className="relative flex justify-end gap-3">
         <button
           className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
           disabled={busy}
-          onClick={restore}
+          onClick={() => setRestoreOpen((value) => !value)}
         >
-          Restore original
+          <RotateCcw size={15} />
+          Restore
+          <ChevronDown size={14} />
         </button>
+        {restoreOpen && (
+          <div className="absolute bottom-11 right-0 z-10 min-w-48 rounded-md border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
+            <button type="button" disabled={busy || !config?.has_previous} className="flex w-full cursor-pointer rounded px-3 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-neutral-200 dark:hover:bg-neutral-800" onClick={() => { setRestoreOpen(false); restore("previous"); }}>Previous edit</button>
+            <button type="button" disabled={busy} className="flex w-full cursor-pointer rounded px-3 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-neutral-200 dark:hover:bg-neutral-800" onClick={() => { setRestoreOpen(false); restore("original"); }}>Original configuration</button>
+          </div>
+        )}
         <button
           className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
           disabled={busy}
@@ -260,6 +274,93 @@ function PHPConfig({ config, text, setText, message, busy, save, restore }) {
           {busy ? "Saving…" : "Save php.ini"}
         </button>
       </div>
+    </div>
+  );
+}
+
+function PHPQuickSettings({ text, save, busy, message }) {
+  const read = (key, fallback) => text.match(new RegExp(`^\\s*${key}\\s*=\\s*(.*?)\\s*$`, "mi"))?.[1]?.trim() || fallback;
+  const [values, setValues] = React.useState(() => ({
+    displayErrors: read("display_errors", "Off"),
+    logErrors: read("log_errors", "On"),
+    errorReporting: read("error_reporting", "E_ALL & ~E_DEPRECATED & ~E_STRICT"),
+    memoryLimit: read("memory_limit", "256M"),
+    maxExecutionTime: read("max_execution_time", "120"),
+    maxInputTime: read("max_input_time", "120"),
+    maxInputVars: read("max_input_vars", "3000"),
+    uploadMaxFilesize: read("upload_max_filesize", "64M"),
+    postMaxSize: read("post_max_size", "64M"),
+    maxFileUploads: read("max_file_uploads", "20"),
+  }));
+  React.useEffect(() => {
+    setValues({
+      displayErrors: read("display_errors", "Off"),
+      logErrors: read("log_errors", "On"),
+      errorReporting: read("error_reporting", "E_ALL & ~E_DEPRECATED & ~E_STRICT"),
+      memoryLimit: read("memory_limit", "256M"),
+      maxExecutionTime: read("max_execution_time", "120"),
+      maxInputTime: read("max_input_time", "120"),
+      maxInputVars: read("max_input_vars", "3000"),
+      uploadMaxFilesize: read("upload_max_filesize", "64M"),
+      postMaxSize: read("post_max_size", "64M"),
+      maxFileUploads: read("max_file_uploads", "20"),
+    });
+  }, [text]);
+  const set = (key, value) => setValues((current) => ({ ...current, [key]: value }));
+  const saveQuickSettings = () => {
+    const replacements = {
+      display_errors: values.displayErrors,
+      log_errors: values.logErrors,
+      error_reporting: values.errorReporting,
+      memory_limit: values.memoryLimit,
+      max_execution_time: values.maxExecutionTime,
+      max_input_time: values.maxInputTime,
+      max_input_vars: values.maxInputVars,
+      upload_max_filesize: values.uploadMaxFilesize,
+      post_max_size: values.postMaxSize,
+      max_file_uploads: values.maxFileUploads,
+    };
+    let next = text || "[PHP]\n";
+    Object.entries(replacements).forEach(([key, value]) => {
+      const pattern = new RegExp(`^\\s*${key}\\s*=.*$`, "mi");
+      const line = `${key} = ${value}`;
+      next = pattern.test(next) ? next.replace(pattern, line) : `${next.trimEnd()}\n${line}\n`;
+    });
+    save(next);
+  };
+  return (
+    <div className="space-y-6 pt-5">
+      <div>
+        <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">PHP quick settings</h3>
+        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">Common PHP limits and error behavior applied directly to this runtime’s php.ini.</p>
+      </div>
+      <section className="space-y-4">
+        <div><h4 className="font-semibold text-neutral-900 dark:text-neutral-100">Errors and diagnostics</h4><p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">Show errors only for development; keep logging enabled for production troubleshooting.</p></div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Display errors"><select className={`${inputClass} bg-white dark:bg-neutral-900`} value={values.displayErrors} onChange={(event) => set("displayErrors", event.target.value)}><option>Off</option><option>On</option></select></Field>
+          <Field label="Log errors"><select className={`${inputClass} bg-white dark:bg-neutral-900`} value={values.logErrors} onChange={(event) => set("logErrors", event.target.value)}><option>On</option><option>Off</option></select></Field>
+          <Field label="Error reporting"><select className={`${inputClass} bg-white dark:bg-neutral-900`} value={values.errorReporting} onChange={(event) => set("errorReporting", event.target.value)}><option value="E_ALL">All errors</option><option value="E_ALL & ~E_DEPRECATED & ~E_STRICT">All except deprecated</option><option value="E_ERROR | E_PARSE">Fatal errors only</option></select></Field>
+        </div>
+      </section>
+      <section className="space-y-4">
+        <div><h4 className="font-semibold text-neutral-900 dark:text-neutral-100">Memory and execution</h4><p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">Set the per-script memory budget and request time limits.</p></div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Memory limit"><select className={`${inputClass} bg-white dark:bg-neutral-900`} value={values.memoryLimit} onChange={(event) => set("memoryLimit", event.target.value)}><option>128M</option><option>256M</option><option>512M</option><option>1G</option><option>-1</option></select></Field>
+          <Field label="Maximum execution time (seconds)"><input className={inputClass} type="number" min="0" value={values.maxExecutionTime} onChange={(event) => set("maxExecutionTime", event.target.value)} /></Field>
+          <Field label="Maximum input time (seconds)"><input className={inputClass} type="number" min="-1" value={values.maxInputTime} onChange={(event) => set("maxInputTime", event.target.value)} /></Field>
+        </div>
+      </section>
+      <section className="space-y-4">
+        <div><h4 className="font-semibold text-neutral-900 dark:text-neutral-100">Uploads and request input</h4><p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">The POST limit should normally be at least as large as the upload limit.</p></div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Upload max filesize"><select className={`${inputClass} bg-white dark:bg-neutral-900`} value={values.uploadMaxFilesize} onChange={(event) => set("uploadMaxFilesize", event.target.value)}><option>8M</option><option>32M</option><option>64M</option><option>128M</option><option>256M</option><option>512M</option><option>1G</option><option>2G</option><option>5G</option><option>20G</option><option>50G</option></select></Field>
+          <Field label="POST max size"><select className={`${inputClass} bg-white dark:bg-neutral-900`} value={values.postMaxSize} onChange={(event) => set("postMaxSize", event.target.value)}><option>8M</option><option>32M</option><option>64M</option><option>128M</option><option>256M</option><option>512M</option><option>1G</option><option>2G</option><option>5G</option><option>20G</option><option>50G</option></select></Field>
+          <Field label="Maximum file uploads"><input className={inputClass} type="number" min="0" value={values.maxFileUploads} onChange={(event) => set("maxFileUploads", event.target.value)} /></Field>
+          <Field label="Maximum input variables"><input className={inputClass} type="number" min="100" value={values.maxInputVars} onChange={(event) => set("maxInputVars", event.target.value)} /></Field>
+        </div>
+      </section>
+      {message && <p className="text-sm text-neutral-600 dark:text-neutral-300">{message}</p>}
+      <div className="flex justify-end"><button type="button" disabled={busy} onClick={saveQuickSettings} className="inline-flex items-center justify-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60">{busy ? "Saving…" : "Save quick settings"}</button></div>
     </div>
   );
 }
@@ -827,6 +928,24 @@ function PHPPerformance({ version }) {
   const [minSpare, setMinSpare] = React.useState("1");
   const [maxSpare, setMaxSpare] = React.useState("5");
   const [maxRequests, setMaxRequests] = React.useState("500");
+  const [message, setMessage] = React.useState("");
+  const applyProfile = (value) => {
+    setProfile(value);
+    if (value === "small") { setMaxChildren("8"); setStartServers("1"); setMinSpare("1"); setMaxSpare("3"); setMaxRequests("300"); }
+    if (value === "balanced") { setMaxChildren("20"); setStartServers("2"); setMinSpare("1"); setMaxSpare("5"); setMaxRequests("500"); }
+    if (value === "high-traffic") { setMaxChildren("50"); setStartServers("4"); setMinSpare("4"); setMaxSpare("12"); setMaxRequests("1000"); }
+  };
+  return <div className="space-y-6 pt-5"><div><h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">FPM process pool · PHP {version}</h3><p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">Choose how PHP-FPM creates, keeps, and recycles worker processes.</p></div><section className="space-y-4"><div className="flex flex-wrap gap-2">{[["small", "Small site"], ["balanced", "Balanced"], ["high-traffic", "High traffic"]].map(([value, label]) => <button key={value} type="button" onClick={() => applyProfile(value)} className={`rounded-md border px-3 py-2 text-sm font-medium ${profile === value ? "border-blue-600 bg-blue-600 text-white" : "border-neutral-300 text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"}`}>{label}</button>)}</div><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"><Field label="Process manager"><select className={`${inputClass} bg-white dark:bg-neutral-900`} value={pm} onChange={(event) => setPm(event.target.value)}><option value="dynamic">Dynamic</option><option value="ondemand">On demand</option><option value="static">Static</option></select></Field><Field label="Maximum children"><input className={inputClass} type="number" min="1" value={maxChildren} onChange={(event) => setMaxChildren(event.target.value)} /></Field><Field label="Start servers"><input className={inputClass} type="number" min="1" value={startServers} onChange={(event) => setStartServers(event.target.value)} /></Field><Field label="Minimum spare servers"><input className={inputClass} type="number" min="0" value={minSpare} onChange={(event) => setMinSpare(event.target.value)} /></Field><Field label="Maximum spare servers"><input className={inputClass} type="number" min="1" value={maxSpare} onChange={(event) => setMaxSpare(event.target.value)} /></Field><Field label="Requests per worker"><input className={inputClass} type="number" min="0" value={maxRequests} onChange={(event) => setMaxRequests(event.target.value)} /></Field></div></section>{message && <p className="text-sm text-neutral-600 dark:text-neutral-300">{message}</p>}<div className="flex justify-end"><button type="button" onClick={() => setMessage("FPM process-pool settings are ready. Save php.ini to apply configuration changes.")} className="inline-flex items-center justify-center rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700">Save process-pool settings</button></div></div>;
+}
+
+function LegacyPHPPerformance({ version }) {
+  const [profile, setProfile] = React.useState("balanced");
+  const [pm, setPm] = React.useState("dynamic");
+  const [maxChildren, setMaxChildren] = React.useState("20");
+  const [startServers, setStartServers] = React.useState("2");
+  const [minSpare, setMinSpare] = React.useState("1");
+  const [maxSpare, setMaxSpare] = React.useState("5");
+  const [maxRequests, setMaxRequests] = React.useState("500");
   const [memory, setMemory] = React.useState("256M");
   const [execution, setExecution] = React.useState("120");
   const [inputTime, setInputTime] = React.useState("120");
@@ -1211,6 +1330,9 @@ export default function ServiceManagerModal({
   if (service.id === "sqlserver") {
     return <SqlServerConfigModal service={service} installed={installedProp} onClose={onClose} />;
   }
+  if (service.id === "openssl") {
+    return <OpenSslCompatibilityModal service={service} installed={installedProp} onClose={onClose} />;
+  }
   const initialInstalledItems = Array.isArray(installedProp)
     ? installedProp
     : installedProp
@@ -1237,7 +1359,7 @@ export default function ServiceManagerModal({
   const serviceLabel = isPhp
     ? `PHP-FPM ${installed?.version || service.versions[0]?.version || ""}`
     : service.name;
-  const [tab, setTab] = React.useState("configuration");
+  const [tab, setTab] = React.useState("runtime");
   const [version, setVersion] = React.useState(
     installed?.version || service.versions[0]?.version || "",
   );
@@ -1248,6 +1370,7 @@ export default function ServiceManagerModal({
   const [text, setText] = React.useState("");
   const [logs, setLogs] = React.useState(null);
   const [extensions, setExtensions] = React.useState([]);
+  const [extensionsLoading, setExtensionsLoading] = React.useState(false);
   const [pendingExtensions, setPendingExtensions] = React.useState(() => new Set());
   const [message, setMessage] = React.useState("");
   const [busy, setBusy] = React.useState(false);
@@ -1369,6 +1492,7 @@ export default function ServiceManagerModal({
   }, [tab, loadLogs]);
   React.useEffect(() => {
     if (!isPhp || tab !== "extensions" || !version) return undefined;
+    setExtensionsLoading(true);
     setExtensions([]);
     setPendingExtensions(new Set());
     const load = () =>
@@ -1387,10 +1511,16 @@ export default function ServiceManagerModal({
             return next;
           });
         })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => setExtensionsLoading(false));
     load();
-    const timer = setInterval(load, 3000);
-    return () => clearInterval(timer);
+    const onJobUpdate = (event) => {
+      const job = event.detail?.job;
+      if (!job || !["succeeded", "failed", "cancelled"].includes(job.status)) return;
+      if (/php.*extension|extension.*php/i.test(String(job.type || ""))) load();
+    };
+    window.addEventListener("serverengine:jobs-updated", onJobUpdate);
+    return () => window.removeEventListener("serverengine:jobs-updated", onJobUpdate);
   }, [isPhp, tab, version]);
   function buildMySQLConfig(values) {
     const sqlMode =
@@ -1426,16 +1556,20 @@ export default function ServiceManagerModal({
     setMessage(
       body.saved ? `Saved. Backup created at ${body.backup}` : body.message,
     );
+    if (r.ok && isPhp && liveStatus === "running") {
+      setMessage("Saved php.ini. Restarting PHP-FPM to apply the changes…");
+      await serviceAction("restart");
+    }
     setBusy(false);
   }
   async function saveMySQLGeneral(values) {
     await save(buildMySQLConfig(values));
   }
-  async function restore() {
+  async function restore(target = "previous") {
     setBusy(true);
     const r = await apiRequest(
       `/api/v1/services/${service.id}/configuration/restore${query}`,
-      { method: "POST" },
+      { method: "POST", body: JSON.stringify({ restore: target }) },
     );
     const body = r.ok ? await r.json() : { message: await readApiError(r) };
     if (body.content !== undefined) setText(body.content);
@@ -1562,6 +1696,7 @@ export default function ServiceManagerModal({
       ? "Stop"
       : "Start";
   const visibleTabs = tabs.filter(([id]) => {
+    if (id === "quick-settings") return isPhp;
     if (id === "extensions") return isPhp;
     if (id === "terminal") return isPhp;
     if (id === "mysql-file") return isMysql;
@@ -1584,7 +1719,7 @@ export default function ServiceManagerModal({
               <span
                 className={`h-2 w-2 rounded-full ${running ? "bg-emerald-500" : "bg-amber-500"}`}
               />
-              {installed?.status || "not installed"}
+              {liveStatus || installed?.status || "not installed"}
               {installed?.version && ` · v${installed.version}`}
             </p>
           </div>
@@ -1614,6 +1749,9 @@ export default function ServiceManagerModal({
             </button>
           ))}
         </div>
+        {tab === "quick-settings" && isPhp && (
+          <PHPQuickSettings text={text} save={save} busy={busy} message={message} />
+        )}
         {tab === "configuration" && (
           <div className="space-y-5 pt-5">
             {isMysql ? (
@@ -1667,7 +1805,13 @@ export default function ServiceManagerModal({
         )}
         {tab === "extensions" && isPhp && (
           <div className="space-y-1 pt-5">
-            {!extensions.length && (
+            {extensionsLoading && (
+              <div className="flex items-center gap-2 py-6 text-sm text-neutral-500 dark:text-neutral-400" aria-live="polite">
+                <RefreshCw size={15} className="animate-spin" />
+                Loading PHP extensions…
+              </div>
+            )}
+            {!extensionsLoading && !extensions.length && (
               <p className="py-6 text-sm text-neutral-500 dark:text-neutral-400">
                 No extension information is available for PHP {version} yet.
                 Reload the modal after the runtime finishes installing.
