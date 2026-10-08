@@ -321,11 +321,21 @@ class ApplicationShieldService:
             f"SecRuleEngine {mode}",
             f"SecRequestBodyLimit {policy.request_body_limit}",
             f"SecAuditEngine {audit}",
+            # Keep the traffic audit useful on busy public sites. Detection
+            # rules may match harmless allowed requests (for example a GET
+            # carrying Content-Type: text/html); retain only transactions
+            # that are blocked by the WAF or return a server error. Do not
+            # retain ordinary 404 scans as audit transactions.
+            'SecAuditLogRelevantStatus "^(?:403|406|409|429|444|499|5)"',
             f"SecAuditLog {audit_path}",
             # IncludeOptional is Apache-only syntax. This file is consumed
             # by Nginx's ModSecurity rules parser, so use native ModSecurity
             # Include directives and only reference files that exist.
             *crs_lines,
+            # CRS can explicitly request audit logging for a rule that only
+            # detects a harmless request. Remove that request at the end of
+            # the transaction unless the response was blocked or failed.
+            'SecRule RESPONSE_STATUS "!@rx ^(?:403|406|409|429|444|499|5\\d\\d)$" "id:1999998,phase:5,pass,noauditlog,nolog"',
             "",
         ])
         temporary = engine_config.with_suffix(".tmp")
@@ -540,7 +550,14 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
                     request_lines = request_block.splitlines()
                     metadata = request_lines[0] if request_lines else ""
                     source = re.search(r"\]\s+\S+\s+(\S+)", metadata)
-                    events[event_id] = {"id": event_id, "method": "?", "uri": "?", "source_ip": source.group(1) if source else "Unknown", "host": "Unknown", "status": None, "messages": []}
+                    timestamp = ""
+                    timestamp_match = re.search(r"\[([^\]]+)\]", metadata)
+                    if timestamp_match:
+                        try:
+                            timestamp = datetime.strptime(timestamp_match.group(1), "%d/%b/%Y:%H:%M:%S %z").isoformat()
+                        except ValueError:
+                            timestamp = timestamp_match.group(1)
+                    events[event_id] = {"id": event_id, "time": timestamp, "method": "?", "uri": "?", "source_ip": source.group(1) if source else "Unknown", "host": "Unknown", "status": None, "messages": []}
                 for event_id, event in events.items():
                     block_match = re.search(rf"(?ms)^---{re.escape(event_id)}---F--\s*\n(.*?)(?=^---{re.escape(event_id)}---[A-Z]--|\Z)", text)
                     header_match = re.search(rf"(?ms)^---{re.escape(event_id)}---B--\s*\n(.*?)(?=^---{re.escape(event_id)}---[A-Z]--|\Z)", text)
@@ -750,6 +767,14 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
         marker = f"# server-engine-application-shield: {config}"
         lines = content.splitlines()
         lines = [line for line in lines if marker not in line and str(config) not in line]
+        if provider == "nginx":
+            # A new Nginx package can leave the previous version's connector
+            # load behind. Remove every managed ModSecurity module line before
+            # attaching the connector built for the currently selected Nginx.
+            lines = [
+                line for line in lines
+                if not re.match(r"^\s*load_module\s+[^;]*modsecurity[^;]*;", line, re.IGNORECASE)
+            ]
         if provider == "apache":
             # Older attach attempts could leave a differently formatted
             # IncludeOptional for the same managed file. Loading the engine
@@ -767,8 +792,12 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
         if active:
             if provider == "nginx":
                 module = self._connector_module(provider, root)
-                load = f"load_module {module};" if module else ""
-                if load and load not in lines:
+                if module is None:
+                    raise RuntimeError(
+                        "The Nginx Application Shield connector is not installed for this Nginx version."
+                    )
+                load = f"load_module {module};"
+                if load not in lines:
                     lines.insert(0, load)
                 http_index = next((index for index, line in enumerate(lines) if line.strip() == "http {"), None)
                 if http_index is None:
@@ -967,7 +996,8 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
                 (root / ".serverengine-application-shield-ready").exists()
                 or provider in {"nginx", "apache", "openlitespeed", "caddy"}
             )
-            attached = installed and (root / ".serverengine-application-shield-attached").exists() and config.exists()
+            module_available = provider != "nginx" or self._connector_module(provider, root) is not None
+            attached = installed and module_available and (root / ".serverengine-application-shield-attached").exists() and config.exists()
             connectors.append(ShieldConnector(
                 provider=provider,
                 name=name,

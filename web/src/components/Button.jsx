@@ -17,6 +17,7 @@ export default function Button({
   className = "",
   type = "button",
   children,
+  title,
   ...props
 }) {
   const base = iconOnly
@@ -24,7 +25,7 @@ export default function Button({
     : "inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 py-2 text-sm font-semibold";
   const resolvedVariant = iconOnly && variant === "secondary" ? "ghost" : variant;
 
-  return (
+  const button = (
     <button
       type={type}
       className={`${base} ${variants[resolvedVariant] || variants.secondary} ${className}`}
@@ -33,4 +34,6 @@ export default function Button({
       {children}
     </button>
   );
+  if (!iconOnly || !title) return title ? React.cloneElement(button, { title }) : button;
+  return <span className="group/button-tooltip relative inline-flex">{button}<span className="pointer-events-none absolute right-0 top-full z-40 mt-1 whitespace-nowrap rounded bg-neutral-900 px-2 py-1 text-[10px] font-medium text-white opacity-0 shadow-lg transition-opacity group-hover/button-tooltip:opacity-100 dark:bg-white dark:text-neutral-900">{title}</span></span>;
 }

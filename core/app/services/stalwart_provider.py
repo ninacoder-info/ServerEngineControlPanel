@@ -21,19 +21,27 @@ class StalwartProvider:
         self.verify_tls = os.getenv("SE_STALWART_VERIFY_TLS", "true").lower() not in {"0", "false", "no"}
 
     def _headers(self) -> dict[str, str]:
-        token = self.token
-        username = self.username
-        password = self.password
+        # The managed credential file is the canonical credential shared with
+        # the Stalwart process through STALWART_RECOVERY_ADMIN. Read it for
+        # every request so a newly provisioned or repaired installation does
+        # not keep stale credentials captured when the control plane imported
+        # this module.
+        token = os.getenv("SE_STALWART_TOKEN", "").strip()
+        username = ""
+        password = ""
         credentials_path = os.getenv("SE_STALWART_CREDENTIALS_FILE", "/opt/server-engine/services/stalwart/conf/serverengine-credentials.json")
-        if not token and not username and not password:
-            try:
-                credentials = json.loads(Path(credentials_path).read_text())
-                username = str(credentials.get("username", "")).strip()
-                password = str(credentials.get("password", ""))
-            except (OSError, ValueError, TypeError):
-                pass
+        try:
+            credentials = json.loads(Path(credentials_path).read_text())
+            username = str(credentials.get("username", "")).strip()
+            password = str(credentials.get("password", ""))
+        except (OSError, ValueError, TypeError):
+            username = os.getenv("SE_STALWART_USER", "").strip()
+            password = os.getenv("SE_STALWART_PASSWORD", "")
+        if not username or not password:
+            username = os.getenv("SE_STALWART_USER", "").strip()
+            password = os.getenv("SE_STALWART_PASSWORD", "")
         if token:
-            return {"Authorization": f"Bearer {self.token}"}
+            return {"Authorization": f"Bearer {token}"}
         if username and password:
             value = base64.b64encode(f"{username}:{password}".encode()).decode()
             return {"Authorization": f"Basic {value}"}

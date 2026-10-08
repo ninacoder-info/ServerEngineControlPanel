@@ -4,6 +4,73 @@ Release notes for the Server Engine control panel and control-plane runtime.
 
 ## Unreleased
 
+- Removed stale Application Shield Nginx module references when the exact
+  connector is missing, allowing Nginx to start after an incomplete install.
+- Prevented Application Shield from writing an Nginx include without a
+  matching version-compatible connector module.
+- Marked Shield as ready to attach again when Nginx was replaced and its old
+  connector is no longer available; re-attachment now removes the old module
+  load before installing the matching connector.
+- Added normal list actions to Node.js projects and reverse-proxy routes:
+  open, edit, and remove, while keeping PHP and Terminal controls exclusive to
+  PHP websites.
+- Made project and proxy list loading independent so a failed supporting
+  request cannot hide existing proxy routes.
+
+- Allow readable project and reverse-proxy names such as `Server Engine
+  Panel`; names still reject unsafe characters.
+- Added a Server button beside Terminal in the global status bar with an
+  authenticated server-information modal showing the hostname, OS, kernel,
+  architecture, uptime, CPU/load, disk capacity, Python, and Server Engine
+  version. The modal loads on demand and supports explicit refresh.
+- Fixed serialized jobs showing “Queued behind another operation” even when
+  the operation started immediately.
+- Fixed maintenance responses to declare UTF-8 and render sanitized formatted
+  HTML, added a maintenance badge to the website list, and added a full
+  formatted message editor with preview, headings, alignment, lists, links,
+  quotes, code blocks, undo, redo, and clear formatting.
+- Added CSS certificate-expiry tooltips and warning/error colors to the website
+  list for TLS certificates expiring within 30 days or already expired.
+- Corrected website TLS status so an enabled HTTPS setting without an issued
+  certificate is shown as pending instead of healthy.
+- Replaced website access restrictions with validated removable IP tags and
+  support for safe IPv4 wildcard input such as `230.*.*.*`.
+- Added a default Nginx PHP `try_files $uri =404` guard so nonexistent PHP
+  probes are rejected by Nginx before reaching PHP-FPM.
+- Fixed an internal error when saving access-log or error-log settings for a
+  website with a custom Nginx configuration.
+- Applied website access-log and error-log switches to custom Nginx server
+  configurations without replacing the rest of the user-managed file.
+- Prevented OWASP CRS audit directives from retaining ordinary allowed
+  requests; Application Shield now keeps blocked responses and 5xx failures.
+- Added hover-only clear and delete actions for individual log files, plus a
+  compact log toolbar for tailing, refreshing, copying, downloading, and
+  wrapping log output.
+- Added a per-website Logs tab with independent access-log and error-log
+  controls, generated safely for the active web-server configuration.
+- Moved PHP session and OPcache state to `/server-engine/php/<version>` so
+  PHP-FPM writes mutable data outside the extracted runtime tree.
+- Reduced Application Shield audit growth by retaining only blocked WAF and
+  `5xx` transactions instead of logging every allowed rule match or `404` scan.
+- Ensured existing PHP runtimes receive the configured `date.timezone` during
+  configuration repair, preventing timezone warnings in legacy applications.
+
+## v0.1.40
+
+- Fixed the generated HTTPS fallback server to reuse an available website
+  certificate whenever other sites share the `0.0.0.0:443` SSL listener.
+- Keep managed service processes alive while the panel update replaces or
+  restarts the Server Engine core and web services.
+
+## v0.1.39
+
+- Fixed the generated Nginx default HTTPS server so it does not declare an
+  SSL listener without a certificate.
+- Renamed Nginx configuration reload jobs and completion messages from
+  “Restart nginx” to “Reload nginx” to reflect the graceful reload command.
+
+## v0.1.38
+
 - Added a dedicated OpenSSL compatibility-runtime modal with isolated runtime
   overview, EOL guidance, source-version refresh, build queueing, and installed
   runtime details.
@@ -17,6 +84,10 @@ Release notes for the Server Engine control panel and control-plane runtime.
 - Tightened the Logs and Terminal controls in the global status bar.
 - Fixed cancelled package jobs leaving the serialized operation queue blocked by
   tracking and terminating their full apt/download process groups.
+- Fixed URL rewrite persistence so valid rules are no longer mistaken for a
+  legacy default and erased when the website is loaded.
+- Initialized the website rewrite editor with an explicit empty value so rules
+  remain stable while switching between tabs.
 
 ## v0.1.34
 
@@ -26,6 +97,20 @@ Release notes for the Server Engine control panel and control-plane runtime.
 - Preserve failed PHP source-build workspaces so the generated Makefile and
   final linker command can be inspected without repeating the full build.
 - Terminate tracked PHP compiler processes immediately when a job is cancelled
+- Fixed intermittent Nginx stop failures caused by an empty or stale PID file during startup and reload races.
+- Made Stalwart management use the managed credential file dynamically so fresh installs and repaired credentials do not retain stale control-plane authentication.
+
+## v0.1.37
+
+- Matched the MySQL configuration modal Version tab to the Nginx version-management layout.
+- Added managed MySQL version inventory, default-version switching, install-version access, and install-method badges.
+- Made MySQL version roots resolve through the selected active-version marker.
+
+## v0.1.35
+
+- Matched the MySQL configuration modal Version tab to the Nginx version-management layout.
+- Added managed MySQL version inventory, default-version switching, install-version access, and install-method badges.
+- Made MySQL version roots resolve through the selected active-version marker.
   so the next serialized operation can start instead of remaining queued.
 - Disable the stale Server Engine Sury source on unsupported Ubuntu 23.10
   hosts before APT metadata refresh, without changing unrelated APT sources.

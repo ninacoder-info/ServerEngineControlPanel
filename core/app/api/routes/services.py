@@ -39,6 +39,62 @@ def invalidate_service_inventory_cache() -> None:
         _php_runtime_options_cache = None
 
 
+@router.get("/phpmyadmin/status")
+def phpmyadmin_status(user=Depends(require_user)):
+    root = service_root("phpmyadmin")
+    marker = root / ".serverengine-version"
+    installed = marker.exists() and (root / "index.php").exists()
+    running = _process_running("phpmyadmin") if installed else False
+    return {
+        "id": "phpmyadmin",
+        "name": "phpMyAdmin",
+        "installed": installed,
+        "running": running,
+        "status": "running" if running else "stopped" if installed else "not-installed",
+        "version": marker.read_text(errors="replace").strip() if installed else None,
+    }
+
+
+def _phpmyadmin_php8_versions() -> list[str]:
+    versions_root = service_root("php") / "versions"
+    if not versions_root.exists():
+        return []
+    return sorted(
+        (
+            item.name
+            for item in versions_root.iterdir()
+            if item.is_dir() and re.fullmatch(r"8\.\d+(?:\.\d+)?", item.name) and php_cli_path(item.name).exists()
+        ),
+        key=version_sort_key,
+        reverse=True,
+    )
+
+
+@router.get("/phpmyadmin/runtime")
+def phpmyadmin_runtime(user=Depends(require_user)):
+    versions = _phpmyadmin_php8_versions()
+    marker = service_root("phpmyadmin") / ".serverengine-php-version"
+    selected = marker.read_text(errors="replace").strip() if marker.exists() else ""
+    if selected not in versions:
+        selected = versions[0] if versions else ""
+    return {"version": selected, "versions": versions}
+
+
+@router.put("/phpmyadmin/runtime")
+def update_phpmyadmin_runtime(payload: dict, user=Depends(require_user)):
+    version = str(payload.get("php_version") or "").strip()
+    if version not in _phpmyadmin_php8_versions():
+        raise HTTPException(status_code=400, detail="Choose an installed PHP 8.x CLI runtime.")
+    root = service_root("phpmyadmin")
+    root.joinpath(".serverengine-php-version").write_text(version + "\n")
+    running = _process_running("phpmyadmin")
+    job_id = None
+    if running:
+        job_id = f"restart-phpmyadmin-php-{version}"
+        job_store.enqueue_action(job_id, "phpmyadmin", "restart")
+    return {"version": version, "restart_queued": bool(job_id), "job_id": job_id}
+
+
 @router.put("/stalwart/storage")
 def save_stalwart_storage(payload: StalwartStorageRequest, user=Depends(require_user)):
     root = service_root("stalwart").resolve()
@@ -499,6 +555,14 @@ def catalog(user=Depends(require_user)):
 @router.post("/{service_id}/versions/refresh")
 def refresh_versions(service_id: str, install_method: str = Query(default="source", pattern="^(prebuilt|source)$"), user=Depends(require_user)):
     try:
+        if service_id == "phpmyadmin":
+            definition = get_service(service_id)
+            return {
+                "service": definition,
+                "versions": definition.versions if definition else [],
+                "source": "phpmyadmin-release-catalog",
+                "message": "Fetched the pinned phpMyAdmin release catalog.",
+            }
         definition, source, message = refresh_service_versions(service_id, force=True, install_method=install_method)
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
@@ -583,9 +647,77 @@ def set_nginx_default(payload: dict, user=Depends(require_user)):
     return {"active_version": version, "message": f"Nginx {version} is now the default runtime."}
 
 
+@router.get("/mysql/versions")
+def mysql_versions(user=Depends(require_user)):
+    """List every managed MySQL version and identify the active default."""
+    base = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / "mysql"
+    active_marker = base / ".serverengine-active-version"
+    active = active_marker.read_text(errors="replace").strip() if active_marker.exists() else None
+    values = []
+    versions_root = base / "versions"
+    if versions_root.exists():
+        for version_root in sorted(
+            (item for item in versions_root.iterdir() if item.is_dir()),
+            key=lambda item: version_sort_key(item.name),
+            reverse=True,
+        ):
+            binary = next(
+                (candidate for candidate in (version_root / "bin/mysqld", version_root / "usr/sbin/mysqld") if candidate.exists()),
+                None,
+            )
+            if not binary:
+                continue
+            marker = version_root / ".serverengine-version"
+            version = marker.read_text(errors="replace").strip() if marker.exists() else version_root.name
+            method_marker = version_root / ".serverengine-install-method"
+            method = method_marker.read_text(errors="replace").strip() if method_marker.exists() else "source"
+            values.append({
+                "version": version,
+                "path": str(version_root),
+                "install_method": method,
+                "active": active == version,
+                "status": "running" if active == version and _process_running("mysql") else "stopped",
+            })
+    legacy_binary = next(
+        (candidate for candidate in (base / "bin/mysqld", base / "usr/sbin/mysqld") if candidate.exists()),
+        None,
+    )
+    if legacy_binary and not values:
+        marker = base / ".serverengine-version"
+        version = marker.read_text(errors="replace").strip() if marker.exists() else "unknown"
+        method_marker = base / ".serverengine-install-method"
+        method = method_marker.read_text(errors="replace").strip() if method_marker.exists() else "source"
+        values.append({
+            "version": version,
+            "path": str(base),
+            "install_method": method,
+            "active": True,
+            "status": "running" if _process_running("mysql") else "stopped",
+        })
+    return {"active_version": active or (values[0]["version"] if values else None), "versions": values}
+
+
+@router.put("/mysql/default")
+def set_mysql_default(payload: dict, user=Depends(require_user)):
+    version = str(payload.get("version") or "").strip()
+    base = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / "mysql"
+    target = base / "versions" / version
+    if not any((target / candidate).exists() for candidate in ("bin/mysqld", "usr/sbin/mysqld")):
+        raise HTTPException(status_code=404, detail="That MySQL version is not installed")
+    current = service_root("mysql")
+    if current != target and _process_running("mysql"):
+        raise HTTPException(status_code=409, detail="Stop the running MySQL version before changing the default version.")
+    (base / ".serverengine-active-version").write_text(version + "\n")
+    return {"active_version": version, "message": f"MySQL {version} is now the default runtime."}
+
+
 @router.get("/nginx/settings")
 def nginx_settings(user=Depends(require_user)):
-    return {"http_port": website_service.nginx_http_port()}
+    return {
+        "http_port": website_service.nginx_http_port(),
+        "default_website_id": website_service.nginx_default_website_id(),
+        "websites": [{"id": site.id, "domain": site.domain} for site in website_service.list_without_nginx_guard()],
+    }
 
 
 @router.put("/nginx/settings")
@@ -594,8 +726,15 @@ def save_nginx_settings(payload: dict, user=Depends(require_user)):
         port = int(payload.get("http_port", 80))
     except (TypeError, ValueError):
         raise HTTPException(status_code=422, detail="Nginx HTTP port must be a number")
+    default_website_id = str(payload.get("default_website_id") or "").strip()
     saved = website_service.set_nginx_http_port(port)
-    return {"saved": True, "http_port": saved, "message": f"Nginx HTTP port set to {saved}."}
+    website_service.set_nginx_default_website(default_website_id)
+    return {
+        "saved": True,
+        "http_port": saved,
+        "default_website_id": default_website_id,
+        "message": "Nginx settings saved. Unknown hosts are rejected unless a default website is selected.",
+    }
 
 
 @router.put("/apache/default")
@@ -701,6 +840,18 @@ def installed(user=Depends(require_user)):
         if _installed_services_cache is not None:
             return _installed_services_cache
     detected = [InstalledService(id="server-engine", name="Server Engine", version="0.1.0", status="running", managed=True)]
+    phpmyadmin_root = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / "phpmyadmin"
+    phpmyadmin_marker = phpmyadmin_root / ".serverengine-version"
+    if phpmyadmin_marker.exists() and (phpmyadmin_root / "index.php").exists():
+        definition = get_service("phpmyadmin")
+        detected.append(InstalledService(
+            id="phpmyadmin",
+            name=definition.name if definition else "phpMyAdmin",
+            version=phpmyadmin_marker.read_text(errors="replace").strip() or "unknown",
+            status="running" if _process_running("phpmyadmin") else "stopped",
+            port=2525,
+            managed=False,
+        ))
     sqlserver_root = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / "sqlserver"
     sqlserver_marker = sqlserver_root / ".serverengine-version"
     if sqlserver_marker.exists() and shutil.which("docker"):
@@ -1379,6 +1530,13 @@ def _installed_service_version(service_id: str, package: str, version: str | Non
 def _process_running(process_name: str, version: str | None = None) -> bool:
     if process_name == "php" and version:
         return _php_process_running(version)
+    if process_name == "phpmyadmin":
+        pid_file = service_root("phpmyadmin") / "run/phpmyadmin.pid"
+        try:
+            os.kill(int(pid_file.read_text().strip()), 0)
+            return True
+        except (OSError, ValueError, FileNotFoundError):
+            return False
     pgrep = shutil.which("pgrep")
     target = str(binary_path("php", version)) if process_name == "php" else str(binary_path(process_name))
     if not pgrep:
@@ -1438,6 +1596,11 @@ def install(service_id: str, payload: InstallServiceRequest, user=Depends(requir
             raise HTTPException(status_code=400, detail="Choose an installed PHP CLI runtime for Composer.")
         if not php_cli_path(payload.php_version).exists():
             raise HTTPException(status_code=400, detail=f"PHP {payload.php_version} is not installed or its CLI is unavailable.")
+    if service_id == "phpmyadmin":
+        if not _phpmyadmin_php8_versions():
+            raise HTTPException(status_code=409, detail="Install a PHP 8.x CLI runtime before installing phpMyAdmin.")
+        if payload.php_version and payload.php_version not in _phpmyadmin_php8_versions():
+            raise HTTPException(status_code=400, detail="Choose an installed PHP 8.x CLI runtime for phpMyAdmin.")
     if service_id == "wp-cli" and payload.php_version:
         if not php_cli_path(payload.php_version).exists():
             raise HTTPException(status_code=400, detail=f"PHP {payload.php_version} is not installed or its CLI is unavailable.")
@@ -1448,8 +1611,11 @@ def install(service_id: str, payload: InstallServiceRequest, user=Depends(requir
     # packages. Resolve the selected catalog before accepting a version so a
     # release from the other method can never be queued accidentally.
     try:
-        refreshed, _, _ = refresh_service_versions(service_id, install_method=payload.install_method)
-        service = refreshed
+        if service_id == "phpmyadmin":
+            service = get_service(service_id)
+        else:
+            refreshed, _, _ = refresh_service_versions(service_id, install_method=payload.install_method)
+            service = refreshed
     except Exception:
         service.versions = []
     if not any(item.version == payload.version for item in service.versions):

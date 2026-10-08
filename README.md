@@ -124,17 +124,6 @@ Stop the development stack:
 docker compose -f docker-compose.dev.yml down
 ```
 
-To test the public installer in an AMD64 Ubuntu container, stop the current
-development stack and start the AMD64 target with the replacement GitHub token
-exported only for that command:
-
-```bash
-docker compose -f docker-compose.dev.yml down
-SE_GITHUB_TOKEN="github_pat_REPLACEMENT_TOKEN" \
-  docker compose -f docker-compose.dev.yml -f docker-compose.amd64.yml \
-  --profile installer run --rm installer-amd64
-```
-
 The repository wrapper provides the same workflow:
 
 ```bash

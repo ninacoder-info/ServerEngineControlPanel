@@ -1,11 +1,10 @@
 import React from "react";
 import {
   ArrowLeft,
-  CheckCircle2,
+  Construction,
   Edit3,
   ExternalLink,
   Globe2,
-  PauseCircle,
   Plus,
   Play,
   RefreshCw,
@@ -28,6 +27,21 @@ import ProjectOperationModal from "./ProjectOperationModal";
 
 const WEB_SERVER_IDS = ["nginx", "apache", "openlitespeed", "caddy"];
 
+function certificateExpiry(site) {
+  const raw = site.certificate?.expires_at || site.certificate_expires_at;
+  if (!raw) return null;
+  const timestamp = Date.parse(raw);
+  if (Number.isNaN(timestamp)) return null;
+  const days = (timestamp - Date.now()) / 86400000;
+  return { raw, days, expired: days <= 0, warning: days > 0 && days <= 30 };
+}
+
+function websiteUrl(site) {
+  const certificateIssued = site.certificate?.status === "issued" || site.certificate_status === "issued";
+  const scheme = site.ssl_enabled && certificateIssued ? "https" : "http";
+  return `${scheme}://${site.domain}`;
+}
+
 function DetailRow({ label, children }) {
   return (
     <div className="flex items-start justify-between gap-4 border-t border-neutral-200 py-3 text-sm dark:border-neutral-800">
@@ -37,6 +51,15 @@ function DetailRow({ label, children }) {
       </strong>
     </div>
   );
+}
+
+function ProjectListActions({ item, kind, onEdit, onRemove }) {
+  const url = `${item.ssl_enabled ? "https" : "http"}://${item.domain}`;
+  return <div className="flex shrink-0 gap-1">
+    <Button iconOnly aria-label="Open project" title="Open project" onClick={() => window.open(url, "_blank", "noopener,noreferrer")}><ExternalLink size={15} /></Button>
+    <Button iconOnly aria-label="Edit project" title="Edit project" onClick={onEdit}><Edit3 size={15} /></Button>
+    <Button iconOnly variant="ghost" className="text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:text-rose-400 dark:hover:bg-rose-950/30 dark:hover:text-rose-300" aria-label="Remove project" title="Remove project" onClick={onRemove}><Trash2 size={15} /></Button>
+  </div>;
 }
 
 export default function WebsitesPage({ onOpenTerminal }) {
@@ -77,22 +100,30 @@ export default function WebsitesPage({ onOpenTerminal }) {
     [],
   );
   const loadSupportingData = React.useCallback(() => {
-    Promise.all([
-      apiRequest("/api/v1/settings"),
-      apiRequest("/api/v1/databases/engines"),
-      apiRequest("/api/v1/projects/node"),
-      apiRequest("/api/v1/projects/proxy"),
-    ]).then(async ([settingsResponse, databaseResponse, nodeResponse, proxyResponse]) => {
-      const settings = settingsResponse.ok ? await settingsResponse.json() : {};
-      setDatabaseEngines(databaseResponse.ok ? await databaseResponse.json() : []);
-      setNodeProjects(nodeResponse.ok ? await nodeResponse.json() : []);
-      setProxyRoutes(proxyResponse.ok ? await proxyResponse.json() : []);
+    const read = (path, fallback) => apiRequest(path).then(async (response) => response.ok ? response.json() : fallback).catch(() => fallback);
+    read("/api/v1/settings", {}).then((settings) => {
       setRoot(settings.values?.default_site_root || "/server-engine/www");
-    }).catch(() => {});
+    });
+    read("/api/v1/databases/engines", []).then(setDatabaseEngines);
+    read("/api/v1/projects/node", []).then(setNodeProjects);
+    read("/api/v1/projects/proxy", []).then(setProxyRoutes);
   }, []);
   React.useEffect(() => {
     load();
-    const refresh = () => load();
+    loadSupportingData();
+    const refresh = (event) => {
+      const detail = event.detail || {};
+      if (detail.action === "updated" && detail.website_id) {
+        apiRequest(`/api/v1/websites/${detail.website_id}`)
+          .then((response) => (response.ok ? response.json() : null))
+          .then((site) => {
+            if (site) setSites((current) => current.map((item) => item.id === site.id ? site : item));
+          })
+          .catch(() => {});
+        return;
+      }
+      load();
+    };
     window.addEventListener("serverengine:websites-updated", refresh);
     return () => {
       window.removeEventListener("serverengine:websites-updated", refresh);
@@ -159,14 +190,24 @@ export default function WebsitesPage({ onOpenTerminal }) {
     if (!response.ok) setToast({ type: "error", message: await readApiError(response) });
     else setToast({ type: "success", message: `${action[0].toUpperCase()}${action.slice(1)} requested for ${project.domain}.` });
   };
-  const toggle = async (site) => {
-    const response = await apiRequest(`/api/v1/websites/${site.id}/actions`, {
-      method: "POST",
-      body: JSON.stringify({ action: site.enabled ? "disable" : "enable" }),
-    });
-    if (response.ok) save(await response.json());
-    else setError(await readApiError(response));
-  };
+  const editProject = (item, mode) => setProjectModal({ mode, existing: item });
+  const removeProject = (item, kind) => setDialog({
+    kind: "confirm",
+    title: `Delete ${item.domain}?`,
+    message: "The project record and generated server configuration will be removed. Project files stay on disk.",
+    submitLabel: "Delete project",
+    onSubmit: async () => {
+      const response = await apiRequest(`/api/v1/projects/${kind}/${item.id}`, { method: "DELETE" });
+      if (!response.ok) {
+        setToast({ type: "error", message: await readApiError(response) });
+        return;
+      }
+      if (kind === "node") setNodeProjects((current) => current.filter((entry) => entry.id !== item.id));
+      else setProxyRoutes((current) => current.filter((entry) => entry.id !== item.id));
+      setDialog(null);
+      setToast({ type: "success", message: `${item.domain} was removed.` });
+    },
+  });
   const remove = (site) =>
     setDialog({
       kind: "confirm",
@@ -203,7 +244,7 @@ export default function WebsitesPage({ onOpenTerminal }) {
             save(site);
             if (!options.keepOpen) setModal(null);
             if (job) {
-              setOperation({ job, title: job.type || (editing ? `Update ${site.domain}` : `Create ${site.domain}`), projectPath: site.project_path });
+              setOperation({ job, title: job.type || (editing ? `Update ${site.domain}` : `Create ${site.domain}`), kind: "website", projectPath: site.project_path });
             } else {
               setToast({
                 type: "success",
@@ -243,14 +284,6 @@ export default function WebsitesPage({ onOpenTerminal }) {
             >
               <Edit3 size={15} />
               Edit
-            </Button>
-            <Button variant="primary" onClick={() => toggle(selected)}>
-              {selected.enabled ? (
-                <PauseCircle size={15} />
-              ) : (
-                <CheckCircle2 size={15} />
-              )}
-              {selected.enabled ? "Disable" : "Enable"}
             </Button>
           </div>
         </div>
@@ -425,8 +458,13 @@ export default function WebsitesPage({ onOpenTerminal }) {
         </div>
       ) : showWebsites && visible.length ? (
         <div className="space-y-3">
-          {visible.map((site) => (
-            <article
+          {visible.map((site) => {
+            const expiry = certificateExpiry(site);
+            const certificateStatus = site.certificate?.status || site.certificate_status;
+            const certificateIssued = certificateStatus === "issued";
+            const tlsTone = !site.ssl_enabled || !certificateIssued ? "text-rose-600 dark:text-rose-400" : expiry?.expired ? "text-rose-600 dark:text-rose-400" : expiry?.warning ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400";
+            const tlsLabel = !site.ssl_enabled || !certificateIssued ? "TLS off" : expiry?.expired ? "TLS expired" : "TLS on";
+            return <article
               className="rounded-xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900"
               key={site.id}
             >
@@ -438,7 +476,7 @@ export default function WebsitesPage({ onOpenTerminal }) {
                   <div className="min-w-0">
                     <button
                       className="cursor-pointer truncate text-left text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400"
-                      onClick={() => navigate(`/websites/${site.id}`)}
+                      onClick={() => window.open(websiteUrl(site), "_blank", "noopener,noreferrer")}
                     >
                       {site.domain}
                     </button>
@@ -456,18 +494,22 @@ export default function WebsitesPage({ onOpenTerminal }) {
                     {site.php_version ? `PHP ${site.php_version}` : "Static"}
                   </span>
                   <span className="inline-flex items-center gap-1.5">
-                    <ShieldCheck size={14} />
-                    {site.ssl_enabled ? "TLS on" : "TLS off"}
+                    <span className="group/certificate-tooltip relative inline-flex items-center gap-1.5">
+                      <ShieldCheck size={14} className={tlsTone} />
+                      <span className={tlsTone}>{tlsLabel}</span>
+                      {site.ssl_enabled && (!certificateIssued || expiry) && (
+                        <span className="pointer-events-none absolute left-0 top-full z-30 mt-1 w-max max-w-xs rounded-md bg-neutral-900 px-2.5 py-2 text-xs font-normal text-white opacity-0 shadow-lg transition-opacity group-hover/certificate-tooltip:opacity-100 dark:bg-white dark:text-neutral-900">
+                          {!certificateIssued ? "Certificate not issued" : expiry.expired ? "Certificate expired" : expiry.warning ? "Certificate expires soon" : "Certificate expires"}{expiry ? `: ${new Date(expiry.raw).toLocaleString()}` : ""}
+                        </span>
+                      )}
+                    </span>
                   </span>
-                  <span
-                    className={
-                      site.enabled
-                        ? "font-semibold text-emerald-600 dark:text-emerald-400"
-                        : "font-semibold text-amber-600 dark:text-amber-400"
-                    }
-                  >
-                    {site.enabled ? "Ready" : "Disabled"}
-                  </span>
+                  {site.maintenance_enabled && (
+                    <span className="inline-flex items-center gap-1.5 font-semibold text-amber-600 dark:text-amber-400">
+                      <Construction size={14} />
+                      Maintenance
+                    </span>
+                  )}
                 </div>
                 <div className="flex shrink-0 gap-1">
                   <Button
@@ -480,23 +522,11 @@ export default function WebsitesPage({ onOpenTerminal }) {
                   </Button>
                   <Button
                     iconOnly
-                    aria-label="Open details"
-                    title="Open details"
-                    onClick={() => navigate(`/websites/${site.id}`)}
+                    aria-label="Open website"
+                    title="Open website in a new tab"
+                    onClick={() => window.open(websiteUrl(site), "_blank", "noopener,noreferrer")}
                   >
                     <ExternalLink size={15} />
-                  </Button>
-                  <Button
-                    iconOnly
-                    aria-label={site.enabled ? "Disable" : "Enable"}
-                    title={site.enabled ? "Disable" : "Enable"}
-                    onClick={() => toggle(site)}
-                  >
-                    {site.enabled ? (
-                      <PauseCircle size={15} />
-                    ) : (
-                      <CheckCircle2 size={15} />
-                    )}
                   </Button>
                   <Button
                     iconOnly
@@ -511,15 +541,15 @@ export default function WebsitesPage({ onOpenTerminal }) {
                     variant="ghost"
                     className="text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:text-rose-400 dark:hover:bg-rose-950/30 dark:hover:text-rose-300"
                     aria-label="Remove website"
-                    title="Remove website from Server Engine"
+                    title="Remove website"
                     onClick={() => remove(site)}
                   >
                     <Trash2 size={15} />
                   </Button>
                 </div>
               </div>
-            </article>
-          ))}
+            </article>;
+          })}
         </div>
       ) : showWebsites ? (
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-neutral-300 px-6 py-16 text-center dark:border-neutral-700">
@@ -543,7 +573,7 @@ export default function WebsitesPage({ onOpenTerminal }) {
           )}
         </div>
       ) : null}
-      {(showNodeProjects && visibleNodeProjects.length > 0 || showProxyRoutes && visibleProxyRoutes.length > 0) && <section className="space-y-3"><div><h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">{inventoryTab === "node" ? "Node.js projects" : inventoryTab === "proxy" ? "Reverse proxies" : "Projects and proxy routes"}</h3><p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">Node.js applications and existing services managed alongside PHP websites.</p></div><div className="space-y-3">{showNodeProjects && visibleNodeProjects.map((project) => <article key={project.id} className="rounded-xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900"><div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"><div className="flex min-w-0 items-center gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-300"><Server size={17} /></span><div className="min-w-0"><p className="truncate text-sm font-semibold text-neutral-900 dark:text-neutral-100">{project.domain}</p><p className="truncate text-xs text-neutral-500 dark:text-neutral-400">Node.js {project.node_version} · {project.process_manager} · {project.project_path}</p></div></div><div className="flex items-center gap-3"><span className={`text-xs font-semibold ${project.status === "running" ? "text-emerald-600 dark:text-emerald-400" : "text-neutral-500 dark:text-neutral-400"}`}>{project.status}</span>{project.process_manager !== "none" && <><Button iconOnly title={project.status === "running" ? "Stop project" : "Start project"} aria-label={project.status === "running" ? "Stop project" : "Start project"} onClick={() => nodeAction(project, project.status === "running" ? "stop" : "start")}>{project.status === "running" ? <RefreshCw size={15} /> : <Play size={15} />}</Button><Button iconOnly title="Restart project" aria-label="Restart project" onClick={() => nodeAction(project, "restart")}><RefreshCw size={15} /></Button></>}</div></div></article>)}{showProxyRoutes && visibleProxyRoutes.map((route) => <article key={route.id} className="rounded-xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div className="flex min-w-0 items-center gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-300"><Sparkles size={17} /></span><div className="min-w-0"><p className="truncate text-sm font-semibold text-neutral-900 dark:text-neutral-100">{route.domain}</p><p className="truncate text-xs text-neutral-500 dark:text-neutral-400">{route.target} · {route.server_type}</p></div></div><span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">{route.status}</span></div></article>)}</div></section>}
+      {(showNodeProjects && visibleNodeProjects.length > 0 || showProxyRoutes && visibleProxyRoutes.length > 0) && <section className="space-y-3"><div><h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">{inventoryTab === "node" ? "Node.js projects" : inventoryTab === "proxy" ? "Reverse proxies" : "Projects and proxy routes"}</h3><p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">Node.js applications and existing services managed alongside PHP websites.</p></div><div className="space-y-3">{showNodeProjects && visibleNodeProjects.map((project) => <article key={project.id} className="rounded-xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900"><div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"><div className="flex min-w-0 items-center gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-300"><Server size={17} /></span><div className="min-w-0"><p className="truncate text-sm font-semibold text-neutral-900 dark:text-neutral-100">{project.domain}</p><p className="truncate text-xs text-neutral-500 dark:text-neutral-400">Node.js {project.node_version} · {project.process_manager} · {project.project_path}</p></div></div><div className="flex items-center gap-3"><span className={`text-xs font-semibold ${project.status === "running" ? "text-emerald-600 dark:text-emerald-400" : "text-neutral-500 dark:text-neutral-400"}`}>{project.status}</span><ProjectListActions item={project} kind="node" onEdit={() => editProject(project, "node")} onRemove={() => removeProject(project, "node")} />{project.process_manager !== "none" && <><Button iconOnly title={project.status === "running" ? "Stop project" : "Start project"} aria-label={project.status === "running" ? "Stop project" : "Start project"} onClick={() => nodeAction(project, project.status === "running" ? "stop" : "start")}>{project.status === "running" ? <RefreshCw size={15} /> : <Play size={15} />}</Button><Button iconOnly title="Restart project" aria-label="Restart project" onClick={() => nodeAction(project, "restart")}><RefreshCw size={15} /></Button></>}</div></div></article>)}{showProxyRoutes && visibleProxyRoutes.map((route) => <article key={route.id} className="rounded-xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div className="flex min-w-0 items-center gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-300"><Sparkles size={17} /></span><div className="min-w-0"><p className="truncate text-sm font-semibold text-neutral-900 dark:text-neutral-100">{route.domain}</p><p className="truncate text-xs text-neutral-500 dark:text-neutral-400">{route.target} · {route.server_type}</p></div></div><span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">{route.status}</span><ProjectListActions item={route} kind="proxy" onEdit={() => editProject(route, "proxy")} onRemove={() => removeProject(route, "proxy")} /></div></article>)}</div></section>}
       {!loading && ((inventoryTab === "node" && !visibleNodeProjects.length) || (inventoryTab === "proxy" && !visibleProxyRoutes.length)) && <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-neutral-300 px-6 py-16 text-center dark:border-neutral-700"><Server size={30} className="text-blue-600" /><h3 className="mt-4 text-base font-semibold text-neutral-900 dark:text-neutral-100">{query ? "No matching projects" : `No ${inventoryTab === "node" ? "Node.js projects" : "reverse proxies"} configured`}</h3><p className="mt-2 max-w-md text-sm text-neutral-500 dark:text-neutral-400">Use Create website or project to add one.</p></div>}
       <WebsiteFormModal {...modalProps} />
       {templateModal && (
@@ -569,13 +599,15 @@ export default function WebsitesPage({ onOpenTerminal }) {
           }}
         />
       )}
-      {projectModal && <ProjectCreateModal mode={projectModal.mode} template={projectModal.template} root={root} nodeVersions={nodeVersions} onClose={() => setProjectModal(null)} onCreated={(result, kind) => {
+      {projectModal && <ProjectCreateModal mode={projectModal.mode} template={projectModal.template} existing={projectModal.existing} root={root} nodeVersions={nodeVersions} serverType={serverType} onClose={() => setProjectModal(null)} onCreated={(result, kind, editing) => {
         setProjectModal(null);
         const created = result?.project || result?.route;
-        if (result?.job) setOperation({ job: result.job, title: `Create ${created?.domain || kind}`, projectPath: created?.project_path || "" });
+        if (created && kind === "Reverse proxy") setProxyRoutes((current) => editing ? current.map((item) => item.id === created.id ? created : item) : [created, ...current.filter((item) => item.id !== created.id)]);
+        if (created && kind === "Node.js project") setNodeProjects((current) => editing ? current.map((item) => item.id === created.id ? created : item) : [created, ...current.filter((item) => item.id !== created.id)]);
+        if (result?.job) setOperation({ job: result.job, title: `Create ${created?.domain || kind}`, kind, projectPath: created?.project_path || "" });
         else setToast({ type: "success", message: `${kind} created successfully.` });
       }} />}
-      {operation && <ProjectOperationModal jobId={operation.job.id} title={operation.title} projectPath={operation.projectPath} onClose={() => setOperation(null)} />}
+      {operation && <ProjectOperationModal jobId={operation.job.id} title={operation.title} kind={operation.kind} projectPath={operation.projectPath} onClose={() => setOperation(null)} />}
       <ActionDialog
         dialog={dialog}
         onClose={() => setDialog(null)}

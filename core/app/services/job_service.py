@@ -28,7 +28,7 @@ from app.models.website import Website, WebsiteUpdateRequest
 from app.models.projects import NodeProject
 from app.services.website_service import website_service
 from app.services.service_catalog import apache_source_for, bind9_source_for, certbot_source_for, caddy_source_for, clamav_source_for, dovecot_source_for, ffmpeg_source_for, git_source_for, haproxy_source_for, imagemagick_source_for, lynis_source_for, mariadb_source_for, memcached_source_for, mongodb_prebuilt_for, mongodb_source_for, mysql_release_for, nginx_source_for, opensearch_source_for, openlitespeed_prebuilt_for, openlitespeed_source_for, openssl_source_for, php_source_for, postfix_source_for, powerdns_source_for, postgresql_source_for, prebuilt_package_for, python_asset_for, python_source_for, rabbitmq_source_for, redis_source_for, refresh_service_versions, rspamd_source_for, ruby_source_for, stalwart_prebuilt_for, stalwart_source_for, supervisor_source_for, unbound_source_for, valkey_source_for, vsftpd_source_for, wpcli_source_for
-from app.services.service_runtime import PHP_BASELINE_MODULES, PHP_REQUIRED_EXTENSIONS, SERVICE_PACKAGES, binary_path, composer_path, enable_php_baseline_extensions, ensure_composer_cache, ensure_nginx_layout, ensure_node_runtime, ensure_php_fpm_layout, ensure_php_runtime_configuration, ensure_php_runtime_launcher, managed_library_environment, nginx_paths, normalize_php_runtime_layout, package_for, php_cli_path, php_fpm_paths, php_runtime_library_path, prepare_mongodb_runtime, prepare_mysql_runtime, prepare_postgresql_runtime, prepare_powerdns_runtime, service_root, startup_enabled, version_sort_key
+from app.services.service_runtime import PHP_BASELINE_MODULES, PHP_REQUIRED_EXTENSIONS, SERVICE_PACKAGES, binary_path, composer_path, enable_php_baseline_extensions, ensure_composer_cache, ensure_nginx_layout, ensure_node_runtime, ensure_php_fpm_layout, ensure_php_runtime_configuration, ensure_php_runtime_launcher, managed_library_environment, nginx_paths, normalize_php_runtime_layout, package_for, php_cli_path, php_fpm_paths, php_runtime_library_path, prepare_mongodb_runtime, prepare_mysql_runtime, prepare_postgresql_runtime, prepare_powerdns_runtime, service_root, startup_enabled, supervisor_paths, version_sort_key
 from app.services.database_credentials import database_credentials
 
 
@@ -248,7 +248,12 @@ class JobStore:
         return job
 
     def enqueue_action(self, job_id: str, service_id: str, action: str, version: str | None = None) -> JobSummary:
-        job = self.create(job_id, f"{action.title()} {service_id}" + (f" {version}" if version else ""))
+        # Nginx's managed "restart" action is intentionally a graceful
+        # configuration reload (`nginx -s reload`), never a stop/start cycle.
+        # Keep the job label aligned with the command users will see in the
+        # output so website changes and the service card are not misleading.
+        verb = "Reload" if service_id == "nginx" and action == "restart" else action.title()
+        job = self.create(job_id, f"{verb} {service_id}" + (f" {version}" if version else ""))
         Thread(target=self._run_serialized, args=(self._run_action, job_id, service_id, action, version), daemon=True).start()
         return job
 
@@ -855,7 +860,10 @@ class JobStore:
         if not re.fullmatch(r"[A-Za-z0-9_$-]{1,32}", database_user or ""):
             raise RuntimeError("The application database user is invalid.")
         root = service_root("mysql")
-        client = root / "bin/mysql"
+        client = next(
+            (candidate for candidate in (root / "bin/mysql", root / "usr/bin/mysql") if candidate.exists()),
+            root / "bin/mysql",
+        )
         socket = root / "run/mysql.sock"
         if not client.exists() or not socket.exists():
             raise RuntimeError("MySQL must be installed and running before database provisioning.")
@@ -1082,7 +1090,8 @@ class JobStore:
         overlap. This protects APT/dpkg and prevents concurrent builds from
         exhausting the host.
         """
-        self._update(job_id, message="Waiting for the next available operation…", log=["Queued behind another operation; execution will start automatically."])
+        if self._task_lock.locked():
+            self._update(job_id, message="Waiting for the next available operation…", log=["Queued behind another operation; execution will start automatically."])
         with self._task_lock:
             try:
                 if self._is_cancelled(job_id):
@@ -1962,6 +1971,9 @@ class JobStore:
         if service_id == "sqlserver":
             self._run_sqlserver_action(job_id, action)
             return
+        if service_id == "phpmyadmin":
+            self._run_phpmyadmin_action(job_id, action)
+            return
         if service_id in {"mysql", "mariadb"}:
             self._run_mysql_action(job_id, action, service_id)
             return
@@ -2000,6 +2012,9 @@ class JobStore:
             return
         if service_id == "memcached":
             self._run_memcached_action(job_id, action)
+            return
+        if service_id == "supervisor":
+            self._run_supervisor_action(job_id, action)
             return
         if service_id == "nodejs" and action == "uninstall":
             root = service_root("nodejs", version)
@@ -2040,6 +2055,16 @@ class JobStore:
                 self._update(job_id, status="succeeded", message=f"PHP-FPM {version} stopped.")
                 return
             self._update(job_id, status="failed", message=f"No service controller exists for {service_id} on this host.")
+            return
+        if service_id == "nginx" and action == "stop":
+            # `nginx -s stop` trusts the PID file completely. During a
+            # start/reload race that file can exist but still be empty, which
+            # makes nginx fail with "invalid PID number" even when the
+            # managed master process is available. Reconcile the PID file
+            # with the process table like the other isolated services do.
+            self._stop_process_by_binary(nginx["binary"], nginx["pid"])
+            nginx["pid"].unlink(missing_ok=True)
+            self._update(job_id, status="succeeded", message="Nginx stopped.")
             return
         try:
             if service_id == "nginx" and action == "start" and _managed_process_alive(nginx["pid"]):
@@ -2090,7 +2115,11 @@ class JobStore:
                     self._update(job_id, log=output[-80:])
             if process.wait() != 0:
                 raise RuntimeError(f"Service command failed with exit code {process.returncode}")
-            self._update(job_id, status="succeeded", message=f"{service_id} {action} completed.")
+            if service_id == "nginx" and action == "restart":
+                message = "Nginx reload completed."
+            else:
+                message = f"{service_id} {action} completed."
+            self._update(job_id, status="succeeded", message=message)
         except Exception as error:
             self._update(job_id, status="failed", message=str(error))
 
@@ -2114,6 +2143,9 @@ class JobStore:
             return result.returncode == 0 and result.stdout.strip() == "true"
         if service_id in {"docker", "nodejs", "python", "ruby", "certbot", "git", "imagemagick", "ffmpeg", "lynis"}:
             return False
+        if service_id == "phpmyadmin":
+            root = service_root("phpmyadmin")
+            return _managed_process_alive(root / "run/phpmyadmin.pid")
         try:
             binary = php_fpm_paths(version)["binary"] if service_id == "php" and version else binary_path(service_id)
         except (KeyError, OSError, TypeError):
@@ -2140,6 +2172,138 @@ class JobStore:
             if str(binary) in command:
                 return True
         return False
+
+    def _run_supervisor_action(self, job_id: str, action: str):
+        root = service_root("supervisor")
+        supervisor, supervisorctl = supervisor_paths(root)
+        config = root / "conf/supervisord.conf"
+        socket = root / "run/supervisor.sock"
+        pid_file = root / "run/supervisord.pid"
+        log_file = root / "logs/supervisord.log"
+        try:
+            def supervisor_alive() -> bool:
+                try:
+                    pid = int(pid_file.read_text().strip())
+                    os.kill(pid, 0)
+                    return True
+                except (FileNotFoundError, OSError, ValueError):
+                    return False
+
+            if not supervisor.exists():
+                raise RuntimeError("Supervisor is not installed")
+            for directory in (config.parent, socket.parent, log_file.parent, root / "conf/programs"):
+                directory.mkdir(parents=True, exist_ok=True)
+            if not config.exists():
+                config.write_text(
+                    "[unix_http_server]\n"
+                    f"file={socket}\n\n"
+                    "[supervisord]\n"
+                    f"logfile={log_file}\n"
+                    f"pidfile={pid_file}\n"
+                    f"childlogdir={log_file.parent}\n"
+                    "nodaemon=false\n\n"
+                    "[rpcinterface:supervisor]\n"
+                    "supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface\n\n"
+                    "[supervisorctl]\n"
+                    f"serverurl=unix://{socket}\n\n"
+                    "[include]\n"
+                    f"files={root / 'conf/programs/*.conf'}\n"
+                )
+            runtime_env = managed_library_environment(root)
+            supervisor_command = [str(supervisor)]
+            supervisorctl_command = [str(supervisorctl)]
+            python = root / "venv/bin/python"
+            if not python.exists():
+                host_python = shutil.which("python3") or shutil.which("python")
+                if host_python:
+                    self._update(
+                        job_id,
+                        message="Preparing the isolated Supervisor Python runtime…",
+                        log=[f"$ {host_python} -m venv {root / 'venv'}"],
+                    )
+                    venv = subprocess.run(
+                        [host_python, "-m", "venv", str(root / "venv")],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        env=runtime_env,
+                    )
+                    if venv.returncode != 0:
+                        venv_log = (venv.stdout + venv.stderr).strip().splitlines()[-20:]
+                        raise RuntimeError(
+                            "Unable to create the isolated Supervisor Python runtime"
+                            + (f": {' '.join(venv_log[-3:])}" if venv_log else "")
+                        )
+            if python.exists():
+                module_check = subprocess.run(
+                    [str(python), "-c", "import supervisor, importlib.metadata as metadata; metadata.version('supervisor')"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    env=runtime_env,
+                )
+                if module_check.returncode != 0:
+                    pip = root / "venv/bin/pip"
+                    repair_command = [str(pip), "install", "--disable-pip-version-check", "--no-cache-dir", "--force-reinstall", "supervisor"] if pip.exists() else [str(python), "-m", "pip", "install", "--disable-pip-version-check", "--no-cache-dir", "--force-reinstall", "supervisor"]
+                    self._update(job_id, message="Repairing the isolated Supervisor Python runtime…", log=[f"$ {' '.join(repair_command)}"])
+                    repair = subprocess.run(repair_command, capture_output=True, text=True, check=False, env=runtime_env)
+                    repair_log = (repair.stdout + repair.stderr).strip().splitlines()[-80:]
+                    self._update(job_id, log=repair_log)
+                    if repair.returncode != 0:
+                        raise RuntimeError("Supervisor Python package is missing and could not be repaired: " + (repair_log[-1] if repair_log else "pip returned a non-zero exit code"))
+                    module_check = subprocess.run([str(python), "-c", "import supervisor, importlib.metadata as metadata; metadata.version('supervisor')"], capture_output=True, text=True, check=False, env=runtime_env)
+                if module_check.returncode == 0:
+                    # The generated console scripts depend on importlib
+                    # metadata. A partially copied venv can lose that
+                    # metadata even though the Supervisor Python modules are
+                    # present, so use the modules directly in that case.
+                    supervisor_command = [str(python), "-m", "supervisor.supervisord"]
+                    supervisorctl_command = [str(python), "-m", "supervisor.supervisorctl"]
+            if action == "start" and socket.exists() and supervisor_alive():
+                self._update(job_id, status="succeeded", message="Supervisor is already running.")
+                self._broadcast_service_status("supervisor", action, "succeeded", "Supervisor is already running.")
+                return
+            if socket.exists() and not supervisor_alive():
+                socket.unlink(missing_ok=True)
+            if action in {"stop", "restart"} and socket.exists():
+                stop = subprocess.run(
+                    [*supervisorctl_command, "-c", str(config), "shutdown"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    env=runtime_env,
+                )
+                self._update(job_id, log=(stop.stdout + stop.stderr).strip().splitlines()[-40:])
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline and socket.exists():
+                    time.sleep(0.1)
+                socket.unlink(missing_ok=True)
+            if action == "stop":
+                self._update(job_id, status="succeeded", message="Supervisor stopped.")
+                return
+            process = subprocess.Popen(
+                [*supervisor_command, "-c", str(config)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                start_new_session=True,
+                env=runtime_env,
+            )
+            output = []
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                if socket.exists() and supervisor_alive():
+                    self._update(job_id, status="succeeded", message=f"Supervisor {action} completed.")
+                    return
+                if process.poll() is not None:
+                    break
+                time.sleep(0.1)
+            if process.poll() is not None and process.returncode:
+                output = process.stdout.read().splitlines()[-40:] if process.stdout else []
+                raise RuntimeError("Supervisor failed to start" + (f": {' '.join(output[-3:])}" if output else ""))
+            raise RuntimeError("Supervisor did not create its control socket")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
 
     def _run_vsftpd_action(self, job_id: str, action: str):
         root = service_root("vsftpd")
@@ -2716,6 +2880,7 @@ class JobStore:
         logs = root / "logs"
         run = root / "run"
         config = root / "conf/my.cnf"
+        secure_file_dir = root / "secure-files"
         error_log = logs / "error.log"
         pid_file = run / "mysqld.pid"
         try:
@@ -2727,13 +2892,21 @@ class JobStore:
             # target before chowning it; chowning the symlink itself leaves the
             # actual error.log owned by root and MySQL then aborts on startup.
             log_directory = logs.resolve() if logs.is_symlink() else logs
-            for path in (data, log_directory, run, config.parent):
+            for path in (data, log_directory, run, config.parent, secure_file_dir):
                 path.mkdir(parents=True, exist_ok=True)
-            subprocess.run(["chown", "-R", f"{user}:{user}", str(data), str(log_directory), str(run)], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["chown", "-R", f"{user}:{user}", str(data), str(log_directory), str(run), str(secure_file_dir)], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             error_log.touch(exist_ok=True)
             subprocess.run(["chown", f"{user}:{user}", str(error_log)], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # MySQL's packaged layout is not identical across Ubuntu releases.
+            # Resolve the actual error-message directory instead of relying on
+            # mysqld's basedir guess (which otherwise reports a misleading
+            # missing share/mysql/errmsg.sys error).
+            errmsg_file = next(root.rglob("errmsg.sys"), None)
+            if errmsg_file is None:
+                raise RuntimeError(f"{label} error-message file errmsg.sys is missing from {root}")
+            message_dir = errmsg_file.parent
             if not config.exists():
-                config.write_text("[mysqld]\nbind-address=127.0.0.1\nport=3306\ndatadir=" + str(data) + "\nlog-error=" + str(error_log) + "\nslow_query_log=ON\nmax_connections=151\ninnodb_numa_interleave=OFF\nmysqlx=OFF\nsql_mode=STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION\n\n[client]\nport=3306\n")
+                config.write_text("[mysqld]\nbind-address=127.0.0.1\nport=3306\ndatadir=" + str(data) + "\nlog-error=" + str(error_log) + "\nlc-messages-dir=" + str(message_dir) + "\nsecure-file-priv=" + str(secure_file_dir) + "\nslow_query_log=ON\nmax_connections=151\ninnodb_numa_interleave=OFF\nmysqlx=OFF\nsql_mode=STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION\n\n[client]\nport=3306\n")
             else:
                 # Server Engine exposes the classic protocol only. Remove any
                 # previous X Protocol or NUMA setting so stale configs cannot
@@ -2741,9 +2914,9 @@ class JobStore:
                 config_lines = [
                     line
                     for line in config.read_text(errors="replace").splitlines()
-                    if not line.strip().lower().startswith(("mysqlx=", "innodb_numa_interleave="))
+                    if not line.strip().lower().startswith(("mysqlx=", "innodb_numa_interleave=", "lc-messages-dir=", "secure-file-priv="))
                 ]
-                config_lines.extend(["innodb_numa_interleave=OFF", "mysqlx=OFF"])
+                config_lines.extend(["innodb_numa_interleave=OFF", "mysqlx=OFF", f"lc-messages-dir={message_dir}", f"secure-file-priv={secure_file_dir}"])
                 config.write_text("\n".join(config_lines).rstrip() + "\n")
             if action == "stop":
                 self._stop_mysql_process(binary, pid_file)
@@ -2755,11 +2928,11 @@ class JobStore:
             runtime_env = self._prepare_mysql_runtime(root)
             if not (data / "mysql").exists():
                 self._update(job_id, status="running", message=f"Initializing the {label} data directory…", log=[])
-                initialize = subprocess.run([str(binary), f"--basedir={root}", f"--datadir={data}", f"--log-error={error_log}", "--initialize-insecure"], capture_output=True, text=True, check=False, env=runtime_env)
+                initialize = subprocess.run([str(binary), f"--basedir={root}", f"--datadir={data}", f"--log-error={error_log}", f"--lc-messages-dir={message_dir}", "--initialize-insecure"], capture_output=True, text=True, check=False, env=runtime_env)
                 if initialize.returncode != 0:
                     details = (initialize.stderr or initialize.stdout).strip().splitlines()[-20:]
-                raise RuntimeError(f"{label} initialization failed: " + (" | ".join(details) if details else f"exit code {initialize.returncode}"))
-            command = [str(binary), f"--defaults-file={config}", "--mysqlx=OFF", "--innodb-numa-interleave=OFF", f"--basedir={root}", f"--datadir={data}", f"--pid-file={pid_file}", f"--socket={run / 'mysql.sock'}", f"--log-error={error_log}", f"--user={user}"]
+                    raise RuntimeError(f"{label} initialization failed: " + (" | ".join(details) if details else f"exit code {initialize.returncode}"))
+            command = [str(binary), f"--defaults-file={config}", "--mysqlx=OFF", "--innodb-numa-interleave=OFF", f"--lc-messages-dir={message_dir}", f"--secure-file-priv={secure_file_dir}", f"--basedir={root}", f"--datadir={data}", f"--pid-file={pid_file}", f"--socket={run / 'mysql.sock'}", f"--log-error={error_log}", f"--user={user}"]
             self._update(job_id, status="running", message=f"Starting {label} with {config}…", log=[])
             with error_log.open("a") as log_file:
                 process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT, start_new_session=True, env=runtime_env)
@@ -3028,6 +3201,121 @@ class JobStore:
                     break
                 time.sleep(0.05)
 
+    @staticmethod
+    def _phpmyadmin_php8_cli(selected_version: str | None = None) -> Path | None:
+        versions_root = service_root("php") / "versions"
+        if selected_version and re.fullmatch(r"8\.\d+(?:\.\d+)?", selected_version):
+            selected = php_cli_path(selected_version)
+            if selected.exists():
+                return selected
+        candidates = []
+        if versions_root.exists():
+            candidates = sorted(
+                (item for item in versions_root.iterdir() if item.is_dir() and re.fullmatch(r"8\.\d+(?:\.\d+)?", item.name)),
+                key=lambda item: version_sort_key(item.name),
+                reverse=True,
+            )
+        for version_root in candidates:
+            cli = php_cli_path(version_root.name)
+            if cli.exists():
+                return cli
+        return None
+
+    def _run_phpmyadmin_install(self, job_id: str, requested_version: str, selected_php_version: str | None = None):
+        root = service_root("phpmyadmin")
+        staging = root.parent / f".phpmyadmin-{job_id}-staging"
+        archive = root.parent / f"phpMyAdmin-{requested_version}.tar.gz"
+        php_cli = self._phpmyadmin_php8_cli(selected_php_version)
+        if php_cli is None:
+            self._update(job_id, status="failed", message="phpMyAdmin requires an installed PHP 8.x CLI runtime.")
+            return
+        try:
+            url = f"https://files.phpmyadmin.net/phpMyAdmin/{requested_version}/phpMyAdmin-{requested_version}-all-languages.tar.gz"
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True, exist_ok=True)
+            self._update(job_id, status="running", progress=5, message=f"Downloading phpMyAdmin {requested_version}…", log=[f"$ curl -fL {url}"])
+            with urllib.request.urlopen(url, timeout=60) as response, archive.open("wb") as destination:
+                shutil.copyfileobj(response, destination)
+            self._update(job_id, progress=45, message=f"Extracting phpMyAdmin {requested_version} into its isolated service directory…")
+            with tarfile.open(archive, "r:gz") as package:
+                members = package.getmembers()
+                if any(member.name.startswith("/") or ".." in Path(member.name).parts for member in members):
+                    raise RuntimeError("The phpMyAdmin archive contains an unsafe path")
+                package.extractall(staging, filter="data")
+            extracted = next((item for item in staging.iterdir() if item.is_dir()), None)
+            if extracted is None or not (extracted / "index.php").exists():
+                raise RuntimeError("The phpMyAdmin archive did not contain a valid application")
+            if root.exists():
+                shutil.rmtree(root)
+            extracted.rename(root)
+            temp = root / "tmp"
+            temp.mkdir(parents=True, exist_ok=True)
+            secret = secrets.token_urlsafe(32)[:32]
+            (root / "config.inc.php").write_text(
+                "<?php\n"
+                f"$cfg['blowfish_secret'] = '{secret}';\n"
+                "$i = 1;\n"
+                "$cfg['Servers'][$i]['auth_type'] = 'cookie';\n"
+                "$cfg['Servers'][$i]['host'] = '127.0.0.1';\n"
+                "$cfg['Servers'][$i]['port'] = '3306';\n"
+                "$cfg['Servers'][$i]['AllowNoPassword'] = false;\n"
+                "$cfg['PmaAbsoluteUri'] = '/phpmyadmin/';\n"
+                f"$cfg['TempDir'] = '{temp}';\n"
+            )
+            (root / ".serverengine-version").write_text(requested_version + "\n")
+            (root / ".serverengine-php-version").write_text((selected_php_version or php_cli.parents[2].name) + "\n")
+            user = self._ensure_service_user()
+            subprocess.run(["chown", "-R", f"{user}:{user}", str(root)], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self._update(job_id, status="succeeded", progress=100, message=f"phpMyAdmin {requested_version} installed. Start it from the service card to open /phpmyadmin.")
+            self._broadcast_service_status("phpmyadmin", "install", "succeeded", "phpMyAdmin installed.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=f"Unable to install phpMyAdmin: {error}")
+        finally:
+            archive.unlink(missing_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+
+    def _run_phpmyadmin_action(self, job_id: str, action: str):
+        root = service_root("phpmyadmin")
+        selected_marker = root / ".serverengine-php-version"
+        selected_php_version = selected_marker.read_text(errors="replace").strip() if selected_marker.exists() else None
+        php_cli = self._phpmyadmin_php8_cli(selected_php_version)
+        pid_file = root / "run/phpmyadmin.pid"
+        log_file = root / "logs/phpmyadmin.log"
+        if not (root / "index.php").exists():
+            self._update(job_id, status="failed", message="phpMyAdmin is not installed.")
+            return
+        try:
+            root.joinpath("run").mkdir(parents=True, exist_ok=True)
+            root.joinpath("logs").mkdir(parents=True, exist_ok=True)
+            if action in {"stop", "uninstall"}:
+                if php_cli:
+                    self._stop_process_by_binary(php_cli, pid_file)
+                pid_file.unlink(missing_ok=True)
+                if action == "uninstall":
+                    shutil.rmtree(root, ignore_errors=True)
+                    self._update(job_id, status="succeeded", message="phpMyAdmin uninstalled.")
+                    self._broadcast_service_status("phpmyadmin", "uninstall", "succeeded", "phpMyAdmin uninstalled.")
+                else:
+                    self._update(job_id, status="succeeded", message="phpMyAdmin stopped.")
+                    self._broadcast_service_status("phpmyadmin", "stop", "succeeded", "phpMyAdmin stopped.")
+                return
+            if php_cli is None:
+                raise RuntimeError("phpMyAdmin requires an installed PHP 8.x CLI runtime.")
+            if action == "restart":
+                self._stop_process_by_binary(php_cli, pid_file)
+            log_file.touch(exist_ok=True)
+            command = [str(php_cli), "-S", "127.0.0.1:2525", "-t", str(root)]
+            self._update(job_id, status="running", progress=20, message="Starting phpMyAdmin through the isolated PHP built-in server…", log=["$ " + " ".join(command)])
+            process = subprocess.Popen(command, cwd=root, stdout=log_file.open("a"), stderr=subprocess.STDOUT, start_new_session=True)
+            pid_file.write_text(str(process.pid))
+            time.sleep(0.5)
+            if process.poll() is not None:
+                raise RuntimeError(f"phpMyAdmin server exited with code {process.returncode}")
+            self._update(job_id, status="succeeded", progress=100, message="phpMyAdmin is available at /phpmyadmin.")
+            self._broadcast_service_status("phpmyadmin", action, "succeeded", "phpMyAdmin is available at /phpmyadmin.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+
     def _force_stop_apache_runtime(self, job_id: str):
         """Stop the active managed Apache before replacing or adding a version."""
         root = service_root("apache")
@@ -3132,6 +3420,9 @@ class JobStore:
             return
         if service_id == "wp-cli":
             self._run_wpcli_binary(job_id, requested_version, php_version)
+            return
+        if service_id == "phpmyadmin":
+            self._run_phpmyadmin_install(job_id, requested_version, php_version)
             return
         if service_id == "mongodb" and install_method == "prebuilt":
             self._run_mongodb_prebuilt(job_id, requested_version)

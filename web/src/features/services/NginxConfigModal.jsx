@@ -4,10 +4,7 @@ import {
   Code2,
   Gauge,
   Globe2,
-  Layers3,
   PackageOpen,
-  RefreshCw,
-  ScrollText,
   Server,
   ShieldCheck,
   X,
@@ -24,10 +21,7 @@ const tabs = [
   ["versions", "Versions", PackageOpen],
   ["performance", "Performance", Gauge],
   ["security", "Security", ShieldCheck],
-  ["sites", "Sites", Layers3],
   ["configuration", "nginx.conf", Code2],
-  ["error-log", "Error log", RefreshCw],
-  ["response-log", "Response log", ScrollText],
 ];
 const inputClass =
   "mt-1.5 w-full rounded-md border border-neutral-300 bg-transparent px-3 py-2 text-sm text-neutral-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-neutral-700 dark:text-neutral-100";
@@ -87,9 +81,10 @@ function nginxDirective(content, directive, fallback) {
   return match ? match[1].trim() : fallback;
 }
 
-function Settings({ config, busy, message, httpPort, onSave }) {
+function Settings({ config, busy, message, httpPort, defaultWebsiteId, websites, onSave }) {
   const [values, setValues] = React.useState({
     listen: "80",
+    defaultWebsiteId: "",
     root: "/server-engine/www",
     index: "index.php index.html index.htm",
     php: "Enabled",
@@ -101,9 +96,10 @@ function Settings({ config, busy, message, httpPort, onSave }) {
     setValues((current) => ({
       ...current,
       listen: String(config?.http_port || httpPort || current.listen),
+      defaultWebsiteId: defaultWebsiteId || "",
       root: config?.web_root || current.root,
     }));
-  }, [config?.http_port, config?.web_root, httpPort]);
+  }, [config?.http_port, config?.web_root, httpPort, defaultWebsiteId]);
   return (
     <div className="space-y-5">
       <div>
@@ -126,6 +122,21 @@ function Settings({ config, busy, message, httpPort, onSave }) {
         </Field>
         <Field label="Default website root">
           <p className="mt-1.5 rounded-md border border-neutral-200 px-3 py-2 text-sm text-neutral-600 dark:border-neutral-800 dark:text-neutral-300">{values.root}</p>
+        </Field>
+        <Field label="Default website for unmatched hosts">
+          <select
+            className={`${inputClass} bg-white dark:bg-neutral-900`}
+            value={values.defaultWebsiteId}
+            onChange={(event) => set("defaultWebsiteId", event.target.value)}
+          >
+            <option value="">Reject unmatched domains (recommended)</option>
+            {(websites || []).map((website) => (
+              <option key={website.id} value={website.id}>{website.domain}</option>
+            ))}
+          </select>
+          <span className="mt-1 block text-xs font-normal leading-5 text-neutral-500 dark:text-neutral-400">
+            Direct IP requests and unknown Host headers will return 404 unless a website is selected.
+          </span>
         </Field>
         <Field label="Index files">
           <p className="mt-1.5 rounded-md border border-neutral-200 px-3 py-2 text-sm text-neutral-600 dark:border-neutral-800 dark:text-neutral-300">Managed per website</p>
@@ -366,8 +377,9 @@ export default function NginxConfigModal({ service, installed, onClose }) {
   const [tab, setTab] = React.useState("runtime");
   const [config, setConfig] = React.useState(null);
   const [httpPort, setHttpPort] = React.useState("80");
+  const [defaultWebsiteId, setDefaultWebsiteId] = React.useState("");
+  const [websites, setWebsites] = React.useState([]);
   const [text, setText] = React.useState("");
-  const [logs, setLogs] = React.useState(null);
   const [message, setMessage] = React.useState("");
   const [toast, setToast] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
@@ -434,25 +446,11 @@ export default function NginxConfigModal({ service, installed, onClose }) {
       .then((response) => (response.ok ? response.json() : null))
       .then((value) => {
         if (value?.http_port) setHttpPort(String(value.http_port));
+        setDefaultWebsiteId(value?.default_website_id || "");
+        setWebsites(value?.websites || []);
       })
       .catch(() => {});
   }, []);
-  const loadLogs = React.useCallback(
-    () =>
-      apiRequest(
-        `/api/v1/services/nginx/logs?lines=150&kind=${tab === "response-log" ? "response" : "error"}`,
-      )
-        .then((response) => (response.ok ? response.json() : null))
-        .then(setLogs)
-        .catch(() => {}),
-    [tab],
-  );
-  React.useEffect(() => {
-    if (!["error-log", "response-log"].includes(tab)) return undefined;
-    loadLogs();
-    const timer = window.setInterval(loadLogs, 2500);
-    return () => window.clearInterval(timer);
-  }, [tab, loadLogs]);
   async function save(content = text) {
     setBusy(true);
     const response = await apiRequest("/api/v1/services/nginx/configuration", {
@@ -476,7 +474,10 @@ export default function NginxConfigModal({ service, installed, onClose }) {
     setBusy(true);
     const response = await apiRequest("/api/v1/services/nginx/settings", {
       method: "PUT",
-      body: JSON.stringify({ http_port: Number(values.listen) }),
+      body: JSON.stringify({
+        http_port: Number(values.listen),
+        default_website_id: values.defaultWebsiteId || "",
+      }),
     });
     const body = response.ok
       ? await response.json()
@@ -488,6 +489,7 @@ export default function NginxConfigModal({ service, installed, onClose }) {
         : body.message || "Unable to save Nginx settings.",
     });
     if (response.ok && body.http_port) setHttpPort(String(body.http_port));
+    if (response.ok) setDefaultWebsiteId(body.default_website_id || "");
     setBusy(false);
   }
   function replaceDirective(content, directive, value) {
@@ -576,6 +578,8 @@ export default function NginxConfigModal({ service, installed, onClose }) {
               busy={busy}
               message={message}
               httpPort={httpPort}
+              defaultWebsiteId={defaultWebsiteId}
+              websites={websites}
               onSave={saveSettings}
             />
           )}
@@ -631,7 +635,6 @@ export default function NginxConfigModal({ service, installed, onClose }) {
             />
           )}
           {tab === "security" && <Security config={config} />}
-          {tab === "sites" && <Sites setMessage={setMessage} />}
           {tab === "configuration" && (
             <div className="space-y-4">
               <div>
@@ -686,8 +689,6 @@ export default function NginxConfigModal({ service, installed, onClose }) {
                       value="Configured in Performance"
                     />
                     <Row label="PID file" value="logs/nginx.pid" />
-                    <Row label="Error log" value="logs/error.log" />
-                    <Row label="Response log" value="logs/access.log" />
                   </div>
                   <div className="mt-4 flex gap-3">
                     <button
@@ -720,34 +721,6 @@ export default function NginxConfigModal({ service, installed, onClose }) {
                   {message}
                 </p>
               )}
-            </div>
-          )}
-          {["error-log", "response-log"].includes(tab) && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-400">
-                    Nginx{" "}
-                    {tab === "response-log" ? "response log" : "error log"}
-                  </h3>
-                  <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
-                    {logs?.path || "Loading…"}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className={`${buttonClass} border border-neutral-300 text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300`}
-                  onClick={loadLogs}
-                >
-                  <RefreshCw size={14} />
-                  Reload
-                </button>
-              </div>
-              <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-md bg-neutral-950 p-4 text-xs leading-5 text-neutral-300">
-                {logs?.available
-                  ? logs.lines.join("\n") || "No log lines recorded."
-                  : "No log exists yet."}
-              </pre>
             </div>
           )}
         </div>

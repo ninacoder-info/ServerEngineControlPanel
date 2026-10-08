@@ -1,11 +1,14 @@
 import os
 import secrets
+import asyncio
+import urllib.error
+import urllib.request
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI
 from starlette.requests import Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from app.api.dependencies import require_user
@@ -16,6 +19,8 @@ from app.services.job_service import enqueue_startup_services
 from app.api.routes.system import start_metrics_collector, stop_metrics_collector
 from app.services.log_rotation_service import log_rotation_service
 from app.services.job_service import job_store
+from app.services.service_runtime import service_root
+from app.services.database_credentials import database_credentials
 from app.services.cron_service import configure_cron_service
 from app.version import APP_VERSION
 
@@ -135,6 +140,79 @@ async def audit_mutations(request: Request, call_next):
 def php_info_page(version: str, user=Depends(require_user)):
     """Serve a real phpinfo document at the convenient browser URL."""
     return services.render_php_runtime_info(version, user)
+
+
+@app.api_route("/phpmyadmin", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)
+@app.api_route("/phpmyadmin/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)
+async def phpmyadmin_proxy(request: Request, path: str = "", user=Depends(require_user)):
+    """Proxy the isolated PHP built-in phpMyAdmin server without Nginx."""
+    root = service_root("phpmyadmin")
+    pid_file = root / "run/phpmyadmin.pid"
+    try:
+        running = pid_file.exists() and (Path("/proc") / pid_file.read_text().strip()).exists()
+    except OSError:
+        running = False
+    if not (root / "index.php").exists():
+        return Response("phpMyAdmin is not installed.", status_code=404, media_type="text/plain")
+    if not running:
+        return Response("phpMyAdmin is installed but stopped. Start it from Services.", status_code=503, media_type="text/plain")
+    target = "http://127.0.0.1:2525/" + path.lstrip("/")
+    if request.url.query:
+        target += "?" + request.url.query
+    body = await request.body()
+    headers = {}
+    for name in ("accept", "content-type", "cookie", "user-agent"):
+        value = request.headers.get(name)
+        if value:
+            headers[name] = value
+    query = request.query_params
+    database_name = query.get("db")
+    if database_name:
+        credentials = database_credentials.secret_for(query.get("engine", "mysql"), database_name)
+        if credentials:
+            def php_string(value: str) -> str:
+                return str(value).replace("\\", "\\\\").replace("'", "\\'")
+
+            config_path = root / "config.inc.php"
+            temp_dir = root / "tmp"
+            config_path.write_text(
+                "<?php\n"
+                "$cfg['blowfish_secret'] = 'server-engine-managed-phpmyadmin-secret';\n"
+                "$i = 1;\n"
+                "$cfg['Servers'][$i]['auth_type'] = 'config';\n"
+                f"$cfg['Servers'][$i]['user'] = '{php_string(credentials['username'])}';\n"
+                f"$cfg['Servers'][$i]['password'] = '{php_string(credentials['password'])}';\n"
+                "$cfg['Servers'][$i]['host'] = '127.0.0.1';\n"
+                "$cfg['Servers'][$i]['port'] = '3306';\n"
+                "$cfg['Servers'][$i]['AllowNoPassword'] = false;\n"
+                "$cfg['PmaAbsoluteUri'] = '/phpmyadmin/';\n"
+                f"$cfg['TempDir'] = '{php_string(str(temp_dir))}';\n"
+            )
+            try:
+                config_path.chmod(0o600)
+            except OSError:
+                pass
+
+    upstream_request = urllib.request.Request(target, data=body or None, headers=headers, method=request.method)
+
+    def fetch():
+        try:
+            upstream_context = urllib.request.urlopen(upstream_request, timeout=30)
+            with upstream_context as upstream:
+                return upstream.status, dict(upstream.headers.items()), upstream.read()
+        except urllib.error.HTTPError as error:
+            return error.code, dict(error.headers.items()), error.read()
+
+    status_code, upstream_headers, content = await asyncio.to_thread(fetch)
+    response_headers = {
+        name: value
+        for name, value in upstream_headers.items()
+        if name.lower() in {"content-type", "cache-control", "expires", "location", "set-cookie"}
+    }
+    location = response_headers.get("Location") or response_headers.get("location")
+    if location and location.startswith("http://127.0.0.1:2525"):
+        response_headers["Location"] = "/phpmyadmin" + location.removeprefix("http://127.0.0.1:2525")
+    return Response(content, status_code=status_code, headers=response_headers)
 
 WEB_DIST_VALUE = os.getenv("SE_WEB_DIST")
 WEB_DIST = Path(WEB_DIST_VALUE).resolve() if WEB_DIST_VALUE else None

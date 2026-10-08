@@ -390,6 +390,14 @@ stop_existing_server_engine() {
   fi
 
   if has systemctl; then
+    # Managed services are child processes of the control plane but must not
+    # be killed when only the panel is being replaced. Apply this runtime
+    # setting before stopping an older installation whose unit may still use
+    # systemd's default KillMode=control-group.
+    if systemctl is-active --quiet server-engine-core.service 2>/dev/null; then
+      systemctl set-property --runtime server-engine-core.service KillMode=process 2>/dev/null || true
+      log "Configured the running core unit to preserve managed service processes"
+    fi
     systemctl stop server-engine-web.service server-engine-core.service 2>/dev/null || true
   fi
   if server_engine_processes_running; then

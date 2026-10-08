@@ -13,6 +13,9 @@ RestartSec=3
 # and service-management operations. Managed service workers still drop to
 # the dedicated serverengine account in their own configurations.
 User=root
+# Managed services are launched in their own sessions by the control plane.
+# Keep them alive when the panel itself is replaced or restarted.
+KillMode=process
 
 [Install]
 WantedBy=multi-user.target

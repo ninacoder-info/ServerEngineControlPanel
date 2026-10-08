@@ -20,6 +20,12 @@ export default defineConfig({
         target: 'http://core-dev:8000',
         changeOrigin: true,
       },
+      // phpMyAdmin is served by the authenticated Python control plane
+      // proxy, not by the React SPA fallback.
+      '/phpmyadmin': {
+        target: 'http://core-dev:8000',
+        changeOrigin: true,
+      },
     },
   },
 });

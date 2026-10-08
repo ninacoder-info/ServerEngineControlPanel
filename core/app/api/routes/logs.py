@@ -4,6 +4,7 @@ from pathlib import Path
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
 from app.api.dependencies import require_user
+from app.services.job_service import job_store
 from app.services.website_service import website_service
 
 router = APIRouter(prefix="/api/v1/logs", tags=["logs"])
@@ -65,6 +66,16 @@ def _size(root: Path) -> int:
     return total
 
 
+def _source_path(source_id: str) -> tuple[Path, Path]:
+    root = _root()
+    path = (root / source_id).resolve()
+    if root != path and root not in path.parents:
+        raise HTTPException(status_code=400, detail="Invalid log source")
+    if not path.is_file() or path.suffix != ".log":
+        raise HTTPException(status_code=404, detail="Log source not found")
+    return root, path
+
+
 @router.get("/summary")
 def summary(user=Depends(require_user)):
     root = _root()
@@ -113,18 +124,13 @@ def sources(user=Depends(require_user)):
             item["php_version"] = relative[2]
             item["label"] = f"PHP {relative[2]} · {path.name}"
         items.append(item)
-    items.sort(key=lambda item: (-item["modified"], item["name"].lower()))
+    items.sort(key=lambda item: (item.get("label") or item["name"]).casefold())
     return {"sources": items[:500]}
 
 
 @router.get("/sources/{source_id:path}")
 def read_source(source_id: str, lines: int = Query(100, ge=1, le=1000), user=Depends(require_user)):
-    root = _root()
-    path = (root / source_id).resolve()
-    if root != path and root not in path.parents:
-        raise HTTPException(status_code=400, detail="Invalid log source")
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail="Log source not found")
+    root, path = _source_path(source_id)
     try:
         with path.open("rb") as handle:
             handle.seek(0, 2)
@@ -133,4 +139,26 @@ def read_source(source_id: str, lines: int = Query(100, ge=1, le=1000), user=Dep
             content = handle.read().decode("utf-8", errors="replace")
     except OSError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return {"id": source_id, "path": str(path), "lines": content.splitlines()[-lines:]}
+    return {"id": source_id, "path": str(path), "lines": content.splitlines()[-lines:], "size": path.stat().st_size}
+
+
+@router.post("/sources/{source_id:path}/clear")
+def clear_source(source_id: str, user=Depends(require_user)):
+    _, path = _source_path(source_id)
+    try:
+        path.write_bytes(b"")
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    job_store.publish({"type": "logs-updated", "action": "cleared", "id": source_id})
+    return {"id": source_id, "cleared": True, "size": 0}
+
+
+@router.delete("/sources/{source_id:path}")
+def delete_source(source_id: str, user=Depends(require_user)):
+    _, path = _source_path(source_id)
+    try:
+        path.unlink()
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    job_store.publish({"type": "logs-updated", "action": "deleted", "id": source_id})
+    return {"id": source_id, "deleted": True}

@@ -98,7 +98,7 @@ def version_sort_key(value: str) -> tuple:
 
 def service_root(service_id: str, version: str | None = None) -> Path:
     root = None
-    if service_id in {"nginx", "apache", "openlitespeed", "caddy", "redis"}:
+    if service_id in {"nginx", "apache", "openlitespeed", "caddy", "redis", "mysql"}:
         base = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / service_id
         if version:
             safe_version = version.replace("/", "-").replace("\\", "-")
@@ -194,23 +194,125 @@ def prepare_mysql_runtime(root: Path) -> dict[str, str]:
     """Stage MySQL's shared libraries inside its managed service root."""
     library_dir = root / ".runtime-libraries"
     library_dir.mkdir(parents=True, exist_ok=True)
-    required_libraries = ("libaio.so*", "libnuma.so*", "libncurses.so*", "libtinfo.so*")
+    required_libraries = (
+        "libaio.so*",
+        "libnuma.so*",
+        "libncurses.so*",
+        "libtinfo.so*",
+        "libicuuc.so*",
+        "libicui18n.so*",
+        "libicudata.so*",
+        "libevent_core-2.1.so*",
+        "libevent_pthreads-2.1.so*",
+        "libprotobuf-lite.so.32*",
+    )
     if any(not any(library_dir.rglob(pattern)) for pattern in required_libraries):
         apt = shutil.which("apt")
         dpkg_deb = shutil.which("dpkg-deb")
         if not apt or not dpkg_deb:
             raise RuntimeError("MySQL needs its runtime libraries, but the isolated package tools are unavailable")
+        apt_cache = shutil.which("apt-cache")
+        icu_package = next(
+            (
+                candidate
+                for candidate in ("libicu76", "libicu75", "libicu74", "libicu73", "libicu72")
+                if not apt_cache
+                or subprocess.run(
+                    [apt_cache, "show", candidate],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                ).returncode == 0
+            ),
+            "libicu74",
+        )
+        event_package = next(
+            (
+                candidate
+                for candidate in (
+                    "libevent-core-2.1-7t64",
+                    "libevent-core-2.1-7",
+                    "libevent-2.1-7t64",
+                    "libevent-2.1-7",
+                )
+                if not apt_cache
+                or subprocess.run(
+                    [apt_cache, "show", candidate],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                ).returncode == 0
+            ),
+            "libevent-core-2.1-7t64",
+        )
+        event_pthreads_package = next(
+            (
+                candidate
+                for candidate in (
+                    "libevent-pthreads-2.1-7t64",
+                    "libevent-pthreads-2.1-7",
+                )
+                if not apt_cache
+                or subprocess.run(
+                    [apt_cache, "show", candidate],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                ).returncode == 0
+            ),
+            "libevent-pthreads-2.1-7t64",
+        )
+        def has_apt_candidate(package: str) -> bool:
+            if not apt_cache:
+                return True
+            policy = subprocess.run(
+                [apt_cache, "policy", package],
+                capture_output=True,
+                text=True,
+                check=False,
+            ).stdout
+            return any(
+                line.strip().startswith("Candidate:")
+                and line.split(":", 1)[1].strip() not in {"", "(none)"}
+                for line in policy.splitlines()
+            )
+
+        protobuf_package = next(
+            (
+                candidate
+                for candidate in (
+                    "libprotobuf-lite32t64",
+                    "libprotobuf-lite32",
+                    "libprotobuf-lite23",
+                )
+                if has_apt_candidate(candidate)
+            ),
+            "libprotobuf-lite32t64",
+        )
         for archive in library_dir.glob("*.deb"):
             archive.unlink(missing_ok=True)
-        download = subprocess.run([apt, "download", "libaio1t64", "libnuma1", "libncurses6", "libtinfo6"], cwd=library_dir, capture_output=True, text=True, check=False)
+        runtime_packages = [
+            "libaio1t64",
+            "libnuma1",
+            "libncurses6",
+            "libtinfo6",
+            icu_package,
+            event_package,
+            event_pthreads_package,
+            protobuf_package,
+        ]
+        download = subprocess.run([apt, "download", *runtime_packages], cwd=library_dir, capture_output=True, text=True, check=False)
         if download.returncode != 0:
             raise RuntimeError("Unable to stage MySQL runtime libraries: " + (download.stderr or download.stdout).strip())
         archives = sorted(library_dir.glob("*.deb"))
-        if len(archives) < 4:
+        if len(archives) < len(runtime_packages):
             raise RuntimeError("MySQL runtime library packages were not downloaded")
         for archive in archives:
             subprocess.run([dpkg_deb, "-x", str(archive), str(library_dir)], check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             archive.unlink(missing_ok=True)
+        if any(not any(library_dir.rglob(pattern)) for pattern in required_libraries):
+            missing = ", ".join(pattern for pattern in required_libraries if not any(library_dir.rglob(pattern)))
+            raise RuntimeError(f"MySQL runtime libraries are incomplete; missing {missing}")
     aio_candidates = list(library_dir.rglob("libaio.so.1t64"))
     aio_link = next((path.parent / "libaio.so.1" for path in aio_candidates), None)
     if aio_link and not aio_link.exists():
@@ -218,6 +320,26 @@ def prepare_mysql_runtime(root: Path) -> dict[str, str]:
     library_paths = [library_dir, *[path for path in library_dir.rglob("*") if path.is_dir()]]
     environment = os.environ.copy()
     environment["LD_LIBRARY_PATH"] = ":".join(str(path) for path in library_paths)
+    # Fail once with the complete unresolved dependency list instead of
+    # making the user discover one missing .so file per restart attempt.
+    ldd = shutil.which("ldd")
+    mysql_binary = root / "bin/mysqld"
+    if ldd and mysql_binary.exists():
+        dependency_check = subprocess.run(
+            [ldd, str(mysql_binary)],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=environment,
+        )
+        missing = []
+        for line in dependency_check.stdout.splitlines():
+            if "=> not found" in line:
+                missing.append(line.split("=>", 1)[0].strip())
+            elif line.strip().endswith("not found"):
+                missing.append(line.strip())
+        if missing:
+            raise RuntimeError("MySQL runtime libraries unresolved: " + ", ".join(dict.fromkeys(missing)))
     return environment
 
 
@@ -353,6 +475,20 @@ def prepare_mongodb_runtime(root: Path) -> dict[str, str]:
     return environment
 
 
+def supervisor_paths(root: Path) -> tuple[Path, Path]:
+    """Resolve Supervisor launchers across source and package layouts."""
+    directories = (root / "venv/bin", root / "bin", root / "usr/bin", root / "usr/local/bin")
+    supervisord = next((directory / "supervisord" for directory in directories if (directory / "supervisord").exists()), None)
+    if supervisord is None and root.exists():
+        supervisord = next((candidate for candidate in root.rglob("supervisord") if candidate.is_file()), None)
+    supervisord = supervisord or directories[0] / "supervisord"
+    supervisorctl = next((directory / "supervisorctl" for directory in directories if (directory / "supervisorctl").exists()), None)
+    if supervisorctl is None and root.exists():
+        supervisorctl = next((candidate for candidate in root.rglob("supervisorctl") if candidate.is_file()), None)
+    supervisorctl = supervisorctl or supervisord.parent / "supervisorctl"
+    return supervisord, supervisorctl
+
+
 def binary_path(service_id: str, version: str | None = None) -> Path:
     root = service_root(service_id, version)
     if service_id == "nginx":
@@ -462,8 +598,7 @@ def binary_path(service_id: str, version: str | None = None) -> Path:
         candidates = [root / "bin/clamscan", root / "usr/bin/clamscan"]
         return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
     if service_id == "supervisor":
-        candidates = [root / "venv/bin/supervisord", root / "bin/supervisord"]
-        return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+        return supervisor_paths(root)[0]
     if service_id == "lynis":
         candidates = [root / "bin/lynis", root / "lynis"]
         return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
@@ -703,6 +838,12 @@ def php_fpm_paths(version: str) -> dict[str, Path]:
     return {"root": root, "binary": binary_path("php", version), "config": root / "conf/php-fpm.conf", "ini": root / "conf/php.ini", "pool": root / "conf/pool.d/www.conf", "pid": root / "run/php-fpm.pid", "socket": root / "run/php-fpm.sock", "error_log": root / "logs/error.log", "www": root / "www"}
 
 
+def php_runtime_state_root(version: str) -> Path:
+    """Return writable PHP state outside the immutable isolated runtime."""
+    safe_version = version.replace("/", "-").replace("\\", "-")
+    return Path(os.getenv("SE_PHP_STATE_ROOT", "/server-engine/php")) / safe_version
+
+
 PHP_BASELINE_MODULES = {
     "curl": ("curl",),
     "gd": ("gd",),
@@ -733,7 +874,7 @@ def php_default_ini(version: str, error_log: Path, root: Path | None = None) -> 
     runtime_root = root or error_log.parents[1]
     extension_dir = php_extension_dir(runtime_root)
     local_include_path = runtime_root / "usr/share/php"
-    session_path = runtime_root / "var/lib/php/sessions"
+    session_path = php_runtime_state_root(version) / "sessions"
     temp_path = runtime_root / "tmp"
     return base + f'''\n\n; Server Engine Laravel and WordPress production defaults for PHP {version}
 engine = On
@@ -803,9 +944,10 @@ def ensure_php_runtime_configuration(version: str) -> None:
     root = paths["root"]
     extension_dir = php_extension_dir(root)
     local_include_path = root / "usr/share/php"
-    session_path = root / "var/lib/php/sessions"
+    session_path = php_runtime_state_root(version) / "sessions"
+    opcache_path = php_runtime_state_root(version) / "opcache"
     temp_path = root / "tmp"
-    for directory in (root / "conf/conf.d", local_include_path, session_path, temp_path, root / "var/cache/php/opcache"):
+    for directory in (root / "conf/conf.d", local_include_path, session_path, opcache_path, temp_path):
         directory.mkdir(parents=True, exist_ok=True)
     content = paths["ini"].read_text(errors="replace") if paths["ini"].exists() else "[PHP]\n"
     directives = {
@@ -814,9 +956,10 @@ def ensure_php_runtime_configuration(version: str) -> None:
         "session.save_path": f'"{session_path}"',
         "sys_temp_dir": f'"{temp_path}"',
         "upload_tmp_dir": f'"{temp_path}"',
+        "date.timezone": "UTC",
         "user_ini.filename": "",
         "open_basedir": "",
-        "opcache.file_cache": f'"{root / "var/cache/php/opcache"}"',
+        "opcache.file_cache": f'"{opcache_path}"',
     }
     lines = content.splitlines()
     for key, value in directives.items():
@@ -876,6 +1019,10 @@ def ensure_php_runtime_permissions(version: str) -> None:
         root / "www",
         root / "data",
         root / "tmp",
+        # Keep mutable PHP state outside the extracted runtime. Package
+        # extraction commonly creates the runtime tree as root.
+        php_runtime_state_root(version) / "sessions",
+        php_runtime_state_root(version) / "opcache",
     )
     for path in writable:
         path.mkdir(parents=True, exist_ok=True)
@@ -1097,6 +1244,25 @@ def ensure_nginx_layout(paths: dict[str, Path] | None = None) -> dict[str, Path]
             config,
         ))
         shield_attached = shield_attached or shield_include_active
+        # A failed connector install can leave a managed include and a
+        # load_module line behind. Never let a missing, version-incompatible
+        # module prevent the whole Nginx service from starting.
+        missing_shield_module = False
+        for module_match in re.finditer(
+            r"(?mi)^\s*load_module\s+([^;]*modsecurity[^;]*)\s*;",
+            config,
+        ):
+            module_path = module_match.group(1).strip().strip('"')
+            if not Path(module_path).expanduser().exists():
+                missing_shield_module = True
+                break
+        if missing_shield_module:
+            config = re.sub(
+                r"(?mi)^\s*include\s+[^;]*modsecurity\.conf\s*;[^\n]*\n?",
+                "",
+                config,
+            )
+            shield_attached = False
         if not shield_attached:
             # A connector is compiled against one exact Nginx ABI. Never let
             # a stale module from a previous version prevent the selected

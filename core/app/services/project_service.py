@@ -211,6 +211,32 @@ class ProjectService:
             self._write(self.node_path, entries)
             return project
 
+    def update_node(self, project_id: str, payload: NodeProjectCreateRequest) -> NodeProject:
+        with self._lock:
+            entries = self._read(self.node_path)
+            item = next((entry for entry in entries if entry.get("id") == project_id), None)
+            if item is None:
+                raise HTTPException(404, "Node.js project not found")
+            domain = self._domain(payload.domain)
+            self._ensure_domain_free(domain, project_id)
+            path = Path(payload.project_path).expanduser().resolve()
+            if website_service.web_root not in path.parents and path != website_service.web_root:
+                raise HTTPException(400, "Node.js projects must stay inside the Server Engine website root.")
+            path.mkdir(parents=True, exist_ok=True)
+            previous_process_config = item.get("process_config_path", "")
+            updated = {**item, **payload.model_dump(mode="json"), "id": project_id, "domain": domain, "project_path": str(path), "updated_at": self._now()}
+            project = NodeProject.model_validate(updated)
+            project.config_path = self._write_provider_config(project)
+            project.process_config_path = self._write_node_process_config(project)
+            if previous_process_config and previous_process_config != project.process_config_path:
+                Path(previous_process_config).unlink(missing_ok=True)
+            for index, entry in enumerate(entries):
+                if entry.get("id") == project_id:
+                    entries[index] = project.model_dump(mode="json")
+                    break
+            self._write(self.node_path, entries)
+            return project
+
     def list_proxy(self) -> list[ProxyRoute]:
         return [ProxyRoute.model_validate(item) for item in self._read(self.proxy_path)]
 
@@ -233,6 +259,43 @@ class ProjectService:
             entries.append(route.model_dump(mode="json"))
             self._write(self.proxy_path, entries)
             return route
+
+    def update_proxy(self, route_id: str, payload: ProxyRouteCreateRequest) -> ProxyRoute:
+        target = payload.target.strip()
+        if not (target.startswith("unix:/") or urlparse(target).scheme in {"http", "https"}):
+            raise HTTPException(422, "Target must be an http(s) URL or an absolute unix socket path.")
+        if not payload.path.startswith("/"):
+            raise HTTPException(422, "Proxy path must start with /.")
+        with self._lock:
+            entries = self._read(self.proxy_path)
+            item = next((entry for entry in entries if entry.get("id") == route_id), None)
+            if item is None:
+                raise HTTPException(404, "Proxy route not found")
+            domain = self._domain(payload.domain)
+            self._ensure_domain_free(domain, route_id)
+            updated = {**item, **payload.model_dump(mode="json"), "id": route_id, "domain": domain, "target": target, "updated_at": self._now()}
+            route = ProxyRoute.model_validate(updated)
+            route.config_path = self._write_provider_config(route)
+            for index, entry in enumerate(entries):
+                if entry.get("id") == route_id:
+                    entries[index] = route.model_dump(mode="json")
+                    break
+            self._write(self.proxy_path, entries)
+            return route
+
+    def remove(self, kind: str, item_id: str) -> dict:
+        with self._lock:
+            path = self.node_path if kind == "node" else self.proxy_path
+            entries = self._read(path)
+            item = next((entry for entry in entries if entry.get("id") == item_id), None)
+            if item is None:
+                raise HTTPException(404, "Project not found")
+            self._write(path, [entry for entry in entries if entry.get("id") != item_id])
+            for config_key in ("config_path", "process_config_path"):
+                config_path = item.get(config_key, "")
+                if config_path:
+                    Path(config_path).unlink(missing_ok=True)
+            return item
 
 
 project_service = ProjectService()

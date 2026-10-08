@@ -23,7 +23,9 @@ function stageIndex(job, stages) {
   if (!job) return 0;
   if (job.status === "succeeded") return stages.length;
   const message = String(job.message || "").toLowerCase();
-  const hints = [
+  const hints = stages[0] === "Validating proxy" ? [
+    ["valid", 0], ["writ", 1], ["test", 2], ["reload", 3], ["restart", 3], ["verif", 4], ["ready", 4],
+  ] : [
     ["valid", 0],
     ["prepar", 1],
     ["download", 1],
@@ -44,11 +46,12 @@ function stageIndex(job, stages) {
   return Math.min(Math.floor(Number(job.progress || 0) / (100 / stages.length)), stages.length - 1);
 }
 
-export default function ProjectOperationModal({ jobId, title, onClose }) {
+export default function ProjectOperationModal({ jobId, title, kind = "", onClose }) {
   const [job, setJob] = React.useState(null);
   const [loading, setLoading] = React.useState(true);
   const [showOutput, setShowOutput] = React.useState(false);
-  const stages = React.useMemo(() => stagesFor(job?.type || title), [job?.type, title]);
+  const stages = React.useMemo(() => stagesFor(kind || job?.type || title), [job?.type, kind, title]);
+  const proxyOperation = kind === "Reverse proxy" || stages[0] === "Validating proxy";
 
   React.useEffect(() => {
     let alive = true;
@@ -89,7 +92,7 @@ export default function ProjectOperationModal({ jobId, title, onClose }) {
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Operations</p>
             <h2 id="project-operation-title" className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">{title}</h2>
-            <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">The project stays open here while Server Engine prepares and verifies it.</p>
+            <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">{proxyOperation ? "The proxy route stays here while Server Engine writes and verifies its configuration." : "The project stays open here while Server Engine prepares and verifies it."}</p>
           </div>
           {finished && <button type="button" aria-label="Close" className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800" onClick={onClose}><X size={18} /></button>}
         </div>

@@ -44,7 +44,9 @@ def _engine_state(engine_id: str) -> dict:
     service_id = definition["service_id"]
     if service_id == "mysql":
         root = service_root("mysql")
-        installed = (root / "bin/mysqld").exists()
+        # MySQL archives and Ubuntu packages use different layouts. Keep the
+        # database inventory in sync with the service controller's resolver.
+        installed = binary_path("mysql").exists()
         running = _running(root / "run/mysqld.pid")
     elif service_id == "mariadb":
         root = service_root("mariadb")
@@ -67,7 +69,11 @@ def _engine_state(engine_id: str) -> dict:
 
 def _mysql_paths() -> tuple[Path, Path, Path]:
     root = service_root("mysql")
-    return root / "bin/mysql", root / "run/mysql.sock", root / ".runtime-libraries"
+    client = next(
+        (candidate for candidate in (root / "bin/mysql", root / "usr/bin/mysql") if candidate.exists()),
+        root / "bin/mysql",
+    )
+    return client, root / "run/mysql.sock", root / ".runtime-libraries"
 
 
 def _mysql_environment(library_root: Path) -> dict[str, str]:

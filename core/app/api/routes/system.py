@@ -1,6 +1,9 @@
 import os
 import json
+import platform
 import re
+import socket
+import shutil
 import time
 import subprocess
 import urllib.error
@@ -337,6 +340,67 @@ def update_health_thresholds(payload: dict, user=Depends(require_user)):
 @router.get("/health")
 def health():
     return {"status": "ok", "service": "server-engine-core", "version": APP_VERSION, "timestamp": datetime.now(timezone.utc)}
+
+
+def _os_release() -> dict[str, str]:
+    values = {}
+    try:
+        for line in Path("/etc/os-release").read_text(encoding="utf-8").splitlines():
+            key, separator, value = line.partition("=")
+            if separator:
+                values[key] = value.strip().strip('"')
+    except OSError:
+        pass
+    return values
+
+
+@router.get("/system/server-info")
+def server_info(user=Depends(require_user)):
+    """Return lightweight host information for the global Server inspector."""
+    release = _os_release()
+    try:
+        uptime_seconds = max(0, int(float(Path("/proc/uptime").read_text().split()[0])))
+    except (OSError, ValueError, IndexError):
+        uptime_seconds = 0
+    memory = {}
+    try:
+        for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+            key, separator, value = line.partition(":")
+            if separator:
+                memory[key] = int(value.strip().split()[0]) * 1024
+    except (OSError, ValueError, IndexError):
+        memory = {}
+    memory_total = memory.get("MemTotal", 0)
+    memory_available = memory.get("MemAvailable", memory.get("MemFree", 0))
+    memory_used = max(memory_total - memory_available, 0)
+    disk = shutil.disk_usage("/")
+    return {
+        "hostname": socket.gethostname(),
+        "os": {
+            "name": release.get("PRETTY_NAME") or platform.system(),
+            "kernel": platform.release(),
+            "architecture": platform.machine(),
+        },
+        "uptime_seconds": uptime_seconds,
+        "cpu": {
+            "cores": os.cpu_count() or 1,
+            "load": [round(value, 2) for value in os.getloadavg()],
+        },
+        "memory": {
+            "total": memory_total,
+            "used": memory_used,
+            "available": memory_available,
+            "percent": round(memory_used / memory_total * 100, 1) if memory_total else 0,
+        },
+        "disk": {
+            "path": "/",
+            "total": disk.total,
+            "used": disk.total - disk.free,
+            "free": disk.free,
+        },
+        "server_engine": {"version": APP_VERSION, "python": platform.python_version()},
+        "collected_at": datetime.now(timezone.utc),
+    }
 
 
 @router.get("/capabilities")

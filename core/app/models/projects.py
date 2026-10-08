@@ -33,7 +33,7 @@ class NodeProject(BaseModel):
 
 
 class NodeProjectCreateRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=120, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    name: str = Field(min_length=1, max_length=120, pattern=r"^[A-Za-z0-9][A-Za-z0-9 ._-]*$")
     domain: str = Field(min_length=3, max_length=253)
     project_path: str = Field(min_length=1, max_length=1024)
     document_root: str = Field(default=".", max_length=255)
@@ -68,7 +68,7 @@ class ProxyRoute(BaseModel):
 
 
 class ProxyRouteCreateRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=120, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    name: str = Field(min_length=1, max_length=120, pattern=r"^[A-Za-z0-9][A-Za-z0-9 ._-]*$")
     domain: str = Field(min_length=3, max_length=253)
     target: str = Field(min_length=1, max_length=2048)
     path: str = Field(default="/", max_length=2048)

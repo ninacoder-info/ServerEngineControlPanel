@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { apiRequest, readApiError } from "../../lib/api";
+import useServiceSocketStatus from "../../hooks/useServiceSocketStatus";
 
 const tabs = [
   ["runtime", "Runtime", Activity],
@@ -26,9 +27,9 @@ export default function SupervisorConfigModal({
 }) {
   const item = installed[0] || service || {};
   const [tab, setTab] = React.useState("runtime");
-  const [status, setStatus] = React.useState(item.status || "stopped");
   const [busy, setBusy] = React.useState(false);
   const [message, setMessage] = React.useState("");
+  const { status, action: liveAction } = useServiceSocketStatus("supervisor", item.status || "stopped");
   const installedState = status !== "not-installed";
   const statusText = installedState
     ? status === "running"
@@ -56,7 +57,6 @@ export default function SupervisorConfigModal({
       setBusy(false);
       return;
     }
-    setStatus(nextAction === "stop" ? "stopped" : "running");
     setMessage(`Supervisor ${nextAction} request submitted.`);
     setBusy(false);
   }
@@ -223,7 +223,7 @@ export default function SupervisorConfigModal({
                     <>
                       <button
                         type="button"
-                        disabled={busy}
+                        disabled={busy || Boolean(liveAction)}
                         onClick={() => action("stop")}
                         className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800"
                       >
@@ -232,7 +232,7 @@ export default function SupervisorConfigModal({
                       </button>
                       <button
                         type="button"
-                        disabled={busy}
+                        disabled={busy || Boolean(liveAction)}
                         onClick={() => action("restart")}
                         className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800"
                       >
@@ -243,12 +243,12 @@ export default function SupervisorConfigModal({
                   ) : (
                     <button
                       type="button"
-                      disabled={busy}
+                      disabled={busy || Boolean(liveAction)}
                       onClick={() => action("start")}
                       className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
                     >
                       <Play size={15} />
-                      Start Supervisor
+                      Start
                     </button>
                   )}
                 </div>

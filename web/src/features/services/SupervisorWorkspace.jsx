@@ -23,8 +23,10 @@ import ActionDialog from "../../components/ActionDialog";
 import FormField, { formControlClass } from "../../components/FormField";
 import { apiRequest } from "../../lib/api";
 import ServiceNotInstalledState from "../../components/ServiceNotInstalledState";
+import ServiceStoppedState from "../../components/ServiceStoppedState";
 import { useServiceInstallationState } from "../../hooks/useServiceInstallationState";
 import { FolderPicker } from "../websites/WebsiteFormModal";
+import SupervisorConfigModal from "./SupervisorConfigModal";
 
 function FolderPickerPortal(props) {
   return createPortal(<FolderPicker {...props} />, document.body);
@@ -291,6 +293,7 @@ export default function SupervisorWorkspace() {
   const [query, setQuery] = React.useState("");
   const [status, setStatus] = React.useState("all");
   const [confirmDialog, setConfirmDialog] = React.useState(null);
+  const [configOpen, setConfigOpen] = React.useState(false);
 
   const savePrograms = (next) => {
     setPrograms(next);
@@ -324,6 +327,23 @@ export default function SupervisorWorkspace() {
         description="Install Supervisor to keep queue workers, schedulers, and long-running application processes alive with restart policies and logs."
         installLabel="Install Supervisor"
       />
+    );
+  }
+
+  if (!supervisorState.running) {
+    return (
+      <>
+        <ServiceStoppedState
+          icon={Server}
+          eyebrow="Process manager stopped"
+          title="Supervisor is not running"
+          description="Start Supervisor before managing queue workers, schedulers, and long-running application processes."
+          configureLabel="Configure"
+          onConfigure={() => setConfigOpen(true)}
+          onCheck={supervisorState.loadStatus}
+        />
+        {configOpen && <SupervisorConfigModal service={{ id: "supervisor", name: "Supervisor" }} installed={[{ status: "stopped" }]} onClose={() => setConfigOpen(false)} />}
+      </>
     );
   }
 

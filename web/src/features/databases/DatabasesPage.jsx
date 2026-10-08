@@ -25,8 +25,10 @@ import { apiRequest, readApiError } from "../../lib/api";
 import ActionDialog from "../../components/ActionDialog";
 import Toast from "../../components/Toast";
 import ServiceNotInstalledState from "../../components/ServiceNotInstalledState";
+import ServiceStoppedState from "../../components/ServiceStoppedState";
 import { useServiceInstallationState } from "../../hooks/useServiceInstallationState";
 import ServiceManagerModal from "../services/ServiceManagerModal";
+import InstallServiceModal from "../services/InstallServiceModal";
 import SecurePasswordInput from "../../components/SecurePasswordInput";
 import FormField from "../../components/FormField";
 
@@ -542,6 +544,7 @@ export default function DatabasesPage() {
   const [engineCatalog, setEngineCatalog] = React.useState(
     engines.map((engine) => ({ ...engine, installed: false, running: false })),
   );
+  const [phpMyAdmin, setPhpMyAdmin] = React.useState({ installed: false, running: false });
   const [engine, setEngine] = React.useState("mysql");
   const [query, setQuery] = React.useState("");
   const [modal, setModal] = React.useState(false);
@@ -553,6 +556,7 @@ export default function DatabasesPage() {
   const [importSubmitting, setImportSubmitting] = React.useState(false);
   const [serviceConfig, setServiceConfig] = React.useState(null);
   const [serviceConfigLoading, setServiceConfigLoading] = React.useState(false);
+  const [phpMyAdminInstallService, setPhpMyAdminInstallService] = React.useState(null);
   const [notice, setNotice] = React.useState("");
   const [toast, setToast] = React.useState(null);
   const [actionMenu, setActionMenu] = React.useState(null);
@@ -573,15 +577,17 @@ export default function DatabasesPage() {
     loadingRequest.current = true;
     setLoading(true);
     try {
-      const [catalogResponse, inventoryResponse, backupsResponse] = await Promise.all([
+      const [catalogResponse, inventoryResponse, backupsResponse, phpMyAdminResponse] = await Promise.all([
         apiRequest("/api/v1/databases/engines"),
         apiRequest(`/api/v1/databases?engine=${encodeURIComponent(engine)}`),
         apiRequest("/api/v1/backups"),
+        apiRequest("/api/v1/services/phpmyadmin/status"),
       ]);
-      const [catalog, inventory, backups] = await Promise.all([
+      const [catalog, inventory, backups, phpMyAdminState] = await Promise.all([
         catalogResponse.json(),
         inventoryResponse.json(),
         backupsResponse.ok ? backupsResponse.json() : Promise.resolve([]),
+        phpMyAdminResponse.ok ? phpMyAdminResponse.json() : Promise.resolve({ installed: false, running: false }),
       ]);
       setEngineCatalog(
         catalog.map((item) => ({
@@ -599,6 +605,7 @@ export default function DatabasesPage() {
       }
       setDatabases(inventory.databases || []);
       setBackupArchives(Array.isArray(backups) ? backups : []);
+      setPhpMyAdmin(phpMyAdminState);
       setNotice("");
       if (inventory.error) setToast({ type: "error", message: inventory.error });
     } catch {
@@ -616,6 +623,12 @@ export default function DatabasesPage() {
     load();
     const updateServiceStatus = (event) => {
       const detail = event.detail || {};
+      if (detail.serviceId === "phpmyadmin") {
+        if (detail.status === "succeeded") {
+          setPhpMyAdmin((current) => ({ ...current, installed: detail.action === "install" ? true : detail.action === "uninstall" ? false : current.installed, running: detail.action === "start" || detail.action === "restart" ? true : detail.action === "stop" ? false : current.running }));
+        }
+        return;
+      }
       if (!detail.serviceId || !engines.some((item) => item.id === detail.serviceId)) return;
       if (detail.status !== "succeeded") return;
       setEngineCatalog((current) => current.map((item) => {
@@ -688,6 +701,32 @@ export default function DatabasesPage() {
     } finally {
       setBackupCreating(false);
     }
+  };
+  const openPhpMyAdmin = async (database) => {
+    setActionMenu(null);
+    if (!phpMyAdmin?.installed) {
+      setServiceConfigLoading(true);
+      try {
+        const response = await apiRequest("/api/v1/services/catalog");
+        if (!response.ok) {
+          throw new Error(await readApiError(response, "Unable to load the phpMyAdmin installer."));
+        }
+        const catalog = await response.json();
+        const service = catalog.find((item) => item.id === "phpmyadmin");
+        if (!service) throw new Error("phpMyAdmin is not available in the service catalog.");
+        setPhpMyAdminInstallService(service);
+      } catch (error) {
+        setToast({ type: "error", message: error.message || "Unable to load the phpMyAdmin installer." });
+      } finally {
+        setServiceConfigLoading(false);
+      }
+      return;
+    }
+    if (!phpMyAdmin.running) {
+      setToast({ type: "error", message: "Start phpMyAdmin from Services first." });
+      return;
+    }
+    window.open(`/phpmyadmin/index.php?db=${encodeURIComponent(database.name)}&engine=${encodeURIComponent(database.engine)}`, "_blank", "noopener,noreferrer");
   };
   const deleteDatabaseBackup = async (archive) => {
     setConfirmDialog(null);
@@ -961,6 +1000,17 @@ export default function DatabasesPage() {
                 placeholder={isRedis ? "Search Redis keys (when metrics are connected)" : "Search databases or users"}
               />
             </label>
+            {!isRedis && (
+              <button
+                type="button"
+                onClick={() => setModal(true)}
+                disabled={!canCreateDatabase}
+                className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md bg-blue-600 px-3.5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <CirclePlus size={16} />
+                Add database
+              </button>
+            )}
           </div>
         </div>
         <div className="relative mt-5 overflow-visible">
@@ -975,32 +1025,15 @@ export default function DatabasesPage() {
               compact
             />
           ) : engineStopped ? (
-            <div className="flex min-h-64 items-center justify-center border-t border-neutral-200 px-5 py-12 dark:border-neutral-800">
-              <div className="max-w-lg text-center">
-                <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-amber-50 text-amber-600 dark:bg-amber-950/30 dark:text-amber-400">
-                  <Database size={23} />
-                </div>
-                <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400">
-                  Database service stopped
-                </p>
-                <h4 className="mt-2 text-lg font-semibold text-neutral-900 dark:text-neutral-100">
-                  {selectedEngine.name} is not running
-                </h4>
-                <p className="mt-2 text-sm leading-6 text-neutral-500 dark:text-neutral-400">
-                  Start {selectedEngine.name} before opening its database inventory. No database records are shown while the service is offline.
-                </p>
-                <div className="mt-5 flex flex-wrap justify-center gap-3">
-                  <button type="button" onClick={openServiceConfig} disabled={serviceConfigLoading} className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-70">
-                    {serviceConfigLoading && <RefreshCw size={15} className="animate-spin" />}
-                    {serviceConfigLoading ? "Loading configuration…" : "Open service configuration"}
-                  </button>
-                  <button type="button" onClick={load} className="inline-flex cursor-pointer items-center gap-2 rounded-md px-3.5 py-2 text-sm font-semibold text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800">
-                    <RefreshCw size={15} />
-                    Check again
-                  </button>
-                </div>
-              </div>
-            </div>
+            <ServiceStoppedState
+              icon={Database}
+              eyebrow="Database service stopped"
+              title={`${selectedEngine.name} is not running`}
+              description={`Start ${selectedEngine.name} before opening its database inventory. No database records are shown while the service is offline.`}
+              onConfigure={openServiceConfig}
+              configuring={serviceConfigLoading}
+              onCheck={load}
+            />
           ) : loading ? (
             <div className="border-t border-neutral-200 py-16 text-center text-sm text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
               Loading database inventory…
@@ -1085,6 +1118,17 @@ export default function DatabasesPage() {
                     </td>
                     <td className="px-3 py-4 text-right">
                       <div className="relative inline-flex" data-database-actions>
+                        {(item.engine === "mysql" || item.engine === "mariadb") && (
+                          <button
+                            type="button"
+                            title="Open in phpMyAdmin"
+                            aria-label={`Open ${item.name} in phpMyAdmin`}
+                            onClick={() => openPhpMyAdmin(item)}
+                            className="mr-1 inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+                          >
+                            <ExternalLink size={16} />
+                          </button>
+                        )}
                         <button
                           type="button"
                           aria-label={`More actions for ${item.name}`}
@@ -1238,6 +1282,12 @@ export default function DatabasesPage() {
           service={serviceConfig.service}
           installed={serviceConfig.versions}
           onClose={() => setServiceConfig(null)}
+        />
+      )}
+      {phpMyAdminInstallService && (
+        <InstallServiceModal
+          service={phpMyAdminInstallService}
+          onClose={() => setPhpMyAdminInstallService(null)}
         />
       )}
       <ActionDialog

@@ -39,6 +39,7 @@ import GlobalJobStatusBar from "../../components/GlobalJobStatusBar";
 import GlobalTerminalPane from "../../components/GlobalTerminalPane";
 import NginxConfigModal from "../services/NginxConfigModal";
 import ServiceManagerModal from "../services/ServiceManagerModal";
+import ServerInfoModal from "../../components/ServerInfoModal";
 import { useTranslation } from "../../lib/i18n";
 import { apiRequest } from "../../lib/api";
 import {
@@ -117,6 +118,7 @@ export default function DashboardPage({ user, onLogout }) {
     React.useState(readPanelPreferences);
   const [terminalPane, setTerminalPane] = React.useState({ open: false, height: 46, session: 0, sessionName: "Local Server", panel: "terminal", initialCommand: "" });
   const [serviceModal, setServiceModal] = React.useState(null);
+  const [serverInfoOpen, setServerInfoOpen] = React.useState(false);
   const overviewLoading = false;
   const location = useLocation();
   const navigate = useNavigate();
@@ -370,7 +372,8 @@ export default function DashboardPage({ user, onLogout }) {
         </div>
       </main>
       <GlobalTerminalPane open={terminalPane.open} height={terminalPane.height} session={terminalPane.session} sessionName={terminalPane.sessionName} initialCommand={terminalPane.initialCommand} panel={terminalPane.panel} onResize={resizeTerminal} onClose={closeTerminal} />
-      <GlobalJobStatusBar onOpenTerminal={openTerminal} onOpenLogs={openLogs} onOpenService={openServiceConfig} terminalOpen={terminalPane.open} panel={terminalPane.panel} />
+      <GlobalJobStatusBar onOpenTerminal={openTerminal} onOpenLogs={openLogs} onOpenServer={() => setServerInfoOpen(true)} onOpenService={openServiceConfig} terminalOpen={terminalPane.open} panel={terminalPane.panel} />
+      {serverInfoOpen && <ServerInfoModal onClose={() => setServerInfoOpen(false)} />}
       {serviceModal?.service?.id === "nginx" && <NginxConfigModal service={serviceModal.service} installed={serviceModal.installed} onClose={() => setServiceModal(null)} />}
       {serviceModal?.service && serviceModal.service.id !== "nginx" && <ServiceManagerModal service={serviceModal.service} installed={serviceModal.installed} onClose={() => setServiceModal(null)} />}
     </div>

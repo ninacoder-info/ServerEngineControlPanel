@@ -10,6 +10,7 @@ import {
   Globe2,
   History,
   Network,
+  PackageOpen,
   RefreshCw,
   RotateCcw,
   Server,
@@ -42,9 +43,11 @@ import SqlServerConfigModal from "./SqlServerConfigModal";
 import SaveButton from "../../components/SaveButton";
 import Toast from "../../components/Toast";
 import OpenSslCompatibilityModal from "./OpenSslCompatibilityModal";
+import InstallServiceModal from "./InstallServiceModal";
 
 const tabs = [
   ["runtime", "Runtime", Activity],
+  ["php-runtime", "PHP runtime", Activity],
   ["quick-settings", "Quick settings", SlidersHorizontal],
   ["configuration", "php.ini", FileCog],
   ["mysql-file", "my.cnf", FileCog],
@@ -1356,6 +1359,7 @@ export default function ServiceManagerModal({
   const isPhp = service.id === "php";
   const isMysql = service.id === "mysql";
   const isNginx = service.id === "nginx";
+  const isPhpMyAdmin = service.id === "phpmyadmin";
   const serviceLabel = isPhp
     ? `PHP-FPM ${installed?.version || service.versions[0]?.version || ""}`
     : service.name;
@@ -1378,6 +1382,11 @@ export default function ServiceManagerModal({
   const [phpTerminalPath, setPhpTerminalPath] = React.useState("");
   const [terminalToast, setTerminalToast] = React.useState(null);
   const [startupEnabled, setStartupEnabled] = React.useState(false);
+  const [phpMyAdminPhpVersion, setPhpMyAdminPhpVersion] = React.useState("");
+  const [phpMyAdminPhpVersions, setPhpMyAdminPhpVersions] = React.useState([]);
+  const [phpMyAdminPhpSaving, setPhpMyAdminPhpSaving] = React.useState(false);
+  const [mysqlVersions, setMysqlVersions] = React.useState([]);
+  const [showInstaller, setShowInstaller] = React.useState(false);
   const { status: liveStatus, action, setAction } = useServiceSocketStatus(service.id, installed?.status);
   React.useEffect(() => {
     setAvailableVersions(service.versions);
@@ -1394,7 +1403,7 @@ export default function ServiceManagerModal({
     if (response.ok && body.versions?.length) {
       setAvailableVersions(body.versions);
       window.sessionStorage.setItem(
-        `server-engine:service-versions:v10:${service.id}`,
+        `server-engine:service-versions:v10:${service.id}:default`,
         JSON.stringify(body.versions),
       );
       const installedVersion = initialInstalledItems.find(
@@ -1420,7 +1429,8 @@ export default function ServiceManagerModal({
     setVersionsRefreshing(false);
   };
   React.useEffect(() => {
-    const cacheKey = `server-engine:service-versions:v10:${service.id}`;
+    if (isMysql) return undefined;
+    const cacheKey = `server-engine:service-versions:v10:${service.id}:default`;
     const installedVersion = initialInstalledItems.find(
       (item) => item?.version,
     )?.version;
@@ -1439,7 +1449,18 @@ export default function ServiceManagerModal({
       window.sessionStorage.removeItem(cacheKey);
     }
     refreshVersions(false);
-  }, [service.id]);
+  }, [service.id, isMysql]);
+  const loadMysqlVersions = React.useCallback(() => {
+    apiRequest("/api/v1/services/mysql/versions")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((value) => {
+        setMysqlVersions(value?.versions || []);
+      })
+      .catch(() => {});
+  }, []);
+  React.useEffect(() => {
+    if (isMysql && tab === "versions") loadMysqlVersions();
+  }, [isMysql, tab, loadMysqlVersions]);
   const query =
     isPhp && version ? `?version=${encodeURIComponent(version)}&file=ini` : "";
   React.useEffect(() => {
@@ -1474,6 +1495,27 @@ export default function ServiceManagerModal({
       .catch(() => {});
     return undefined;
   }, [isPhp, version]);
+  React.useEffect(() => {
+    if (!isPhpMyAdmin) return undefined;
+    Promise.all([
+      apiRequest("/api/v1/services/phpmyadmin/runtime"),
+      apiRequest("/api/v1/services/php/runtimes"),
+    ])
+      .then(async ([runtimeResponse, phpResponse]) => {
+        const runtime = runtimeResponse.ok ? await runtimeResponse.json() : {};
+        const phpRuntimes = phpResponse.ok ? await phpResponse.json() : [];
+        const versions = phpRuntimes
+          .map((item) => item.version)
+          .filter((item) => /^8\.\d+(?:\.\d+)?$/.test(item));
+        setPhpMyAdminPhpVersions(versions);
+        setPhpMyAdminPhpVersion(runtime.version || versions[0] || "");
+      })
+      .catch(() => {
+        setPhpMyAdminPhpVersions([]);
+        setPhpMyAdminPhpVersion("");
+      });
+    return undefined;
+  }, [isPhpMyAdmin]);
   const loadLogs = React.useCallback(
     () =>
       apiRequest(
@@ -1581,7 +1623,13 @@ export default function ServiceManagerModal({
     setBusy(true);
     const r = await apiRequest(
       `/api/v1/services/${service.id}/switch-version`,
-      { method: "POST", body: JSON.stringify({ version, confirmed }) },
+      {
+        method: "POST",
+        body: JSON.stringify({
+          version,
+          confirmed,
+        }),
+      },
     );
     const body = r.ok ? await r.json() : { message: await readApiError(r) };
     setMessage(body.message || "Version switch request rejected.");
@@ -1658,6 +1706,21 @@ export default function ServiceManagerModal({
     });
     return r.ok;
   }
+  async function savePhpMyAdminPhpVersion() {
+    setPhpMyAdminPhpSaving(true);
+    const response = await apiRequest("/api/v1/services/phpmyadmin/runtime", {
+      method: "PUT",
+      body: JSON.stringify({ php_version: phpMyAdminPhpVersion }),
+    });
+    const body = response.ok ? await response.json() : { message: await readApiError(response) };
+    setTerminalToast({
+      type: response.ok ? "success" : "error",
+      message: response.ok
+        ? "phpMyAdmin will use PHP " + phpMyAdminPhpVersion + (body.restart_queued ? ". Restart queued." : ".")
+        : body.message || "Unable to save the phpMyAdmin PHP runtime.",
+    });
+    setPhpMyAdminPhpSaving(false);
+  }
   async function serviceAction(actionName) {
     setAction(actionName);
     const actionProgress =
@@ -1696,11 +1759,14 @@ export default function ServiceManagerModal({
       ? "Stop"
       : "Start";
   const visibleTabs = tabs.filter(([id]) => {
+    if (id === "php-runtime") return isPhpMyAdmin;
     if (id === "quick-settings") return isPhp;
+    if (id === "configuration") return isPhp || isMysql || isNginx;
     if (id === "extensions") return isPhp;
     if (id === "terminal") return isPhp;
     if (id === "mysql-file") return isMysql;
     if (id === "nginx-file") return isNginx;
+    if (id === "tuning") return !isMysql && !isPhpMyAdmin;
     if (id === "versions") return !isPhp;
     return true;
   });
@@ -1741,16 +1807,50 @@ export default function ServiceManagerModal({
               className={`inline-flex items-center gap-1.5 whitespace-nowrap border-b-2 px-1 pb-3 text-sm font-medium ${tab === id ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200"}`}
             >
               <Icon size={15} />
-              {isNginx && id === "configuration"
-                ? "Overview"
-                : isMysql && id === "tuning"
-                  ? "Performance"
-                  : label}
+              {isPhp && id === "configuration"
+                ? "php.ini"
+                : (isMysql || isNginx) && id === "configuration"
+                  ? "Overview"
+                : label}
             </button>
           ))}
         </div>
         {tab === "quick-settings" && isPhp && (
           <PHPQuickSettings text={text} save={save} busy={busy} message={message} />
+        )}
+        {tab === "php-runtime" && isPhpMyAdmin && (
+          <div className="space-y-5 pt-5">
+            <div>
+              <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
+                PHP runtime
+              </h3>
+              <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+                Choose the installed PHP 8.x CLI runtime used to serve phpMyAdmin.
+              </p>
+            </div>
+            <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+              PHP version
+              <select
+                className={inputClass + " bg-white dark:bg-neutral-900"}
+                value={phpMyAdminPhpVersion}
+                onChange={(event) => setPhpMyAdminPhpVersion(event.target.value)}
+                disabled={!phpMyAdminPhpVersions.length || phpMyAdminPhpSaving}
+              >
+                {!phpMyAdminPhpVersions.length && <option value="">No PHP 8.x runtime installed</option>}
+                {phpMyAdminPhpVersions.map((phpVersion) => (
+                  <option key={phpVersion} value={phpVersion}>PHP {phpVersion}</option>
+                ))}
+              </select>
+            </label>
+            <p className="text-xs text-neutral-500 dark:text-neutral-400">
+              Saving restarts phpMyAdmin automatically when it is running.
+            </p>
+            <div className="flex justify-end">
+              <SaveButton saving={phpMyAdminPhpSaving} onClick={savePhpMyAdminPhpVersion}>
+                Save PHP runtime
+              </SaveButton>
+            </div>
+          </div>
         )}
         {tab === "configuration" && (
           <div className="space-y-5 pt-5">
@@ -1889,23 +1989,65 @@ export default function ServiceManagerModal({
             </div>
           </div>
         )}
-        {tab === "versions" && (
+        {tab === "versions" && isMysql && (
+          <div className="space-y-4">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
+                  MySQL versions
+                </h3>
+                <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+                  Each release has its own data directory, configuration, logs, and runtime directory. Only the selected default runs.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                onClick={() => setShowInstaller(true)}
+              >
+                <PackageOpen size={15} />
+                Install version
+              </button>
+            </div>
+            <div className="divide-y divide-neutral-200 border-y border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
+              {mysqlVersions.length ? mysqlVersions.map((item) => (
+                <div key={`${item.version}-${item.path}`} className="flex items-center justify-between gap-4 py-4">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-medium text-neutral-900 dark:text-neutral-100">MySQL {item.version}</p>
+                      {item.active && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">Default</span>}
+                      <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">{item.install_method === "source" ? "Build from source" : "Prebuilt package"}</span>
+                    </div>
+                    <p className="mt-1 truncate text-xs text-neutral-500 dark:text-neutral-400">{item.path}</p>
+                  </div>
+                  {!item.active && (
+                    <button
+                      type="button"
+                      className="shrink-0 cursor-pointer text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400"
+                      onClick={async () => {
+                        const response = await apiRequest("/api/v1/services/mysql/default", {
+                          method: "PUT",
+                          body: JSON.stringify({ version: item.version }),
+                        });
+                        if (response.ok) loadMysqlVersions();
+                      }}
+                    >
+                      Make default
+                    </button>
+                  )}
+                </div>
+              )) : (
+                <p className="py-6 text-sm text-neutral-500 dark:text-neutral-400">No managed MySQL versions are available yet.</p>
+              )}
+            </div>
+          </div>
+        )}
+        {tab === "versions" && !isMysql && (
           <form className="space-y-4 pt-5" onSubmit={switchVersion}>
             <div className="flex items-center justify-between gap-3">
               <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
                 {service.name} version
               </label>
-              {isMysql && (
-                <button
-                  type="button"
-                  className="inline-flex cursor-pointer items-center gap-1.5 text-xs font-semibold text-blue-600 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60 dark:text-blue-400 dark:hover:text-blue-300"
-                  onClick={refreshVersions}
-                  disabled={versionsRefreshing || busy}
-                >
-                  <RefreshCw size={13} className={versionsRefreshing ? "animate-spin" : ""} />
-                  {versionsRefreshing ? "Fetching…" : "Fetch compatible versions"}
-                </button>
-              )}
             </div>
             <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
               <select
@@ -2033,11 +2175,7 @@ export default function ServiceManagerModal({
           </div>
         )}
         {tab === "tuning" &&
-          (isMysql ? (
-            <div className="space-y-5 pt-5">
-              <MySQLPerformance />
-            </div>
-          ) : isNginx ? (
+          (isNginx ? (
             <div className="space-y-5 pt-5">
               <NginxPerformance />
             </div>
@@ -2075,6 +2213,15 @@ export default function ServiceManagerModal({
           </div>
         )}
       </section>
+      {showInstaller && isMysql && (
+        <InstallServiceModal
+          service={service}
+          onClose={() => {
+            setShowInstaller(false);
+            loadMysqlVersions();
+          }}
+        />
+      )}
       <Toast
         message={terminalToast?.message}
         type={terminalToast?.type}

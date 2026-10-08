@@ -2,16 +2,19 @@ from __future__ import annotations
 
 import json
 import crypt
+import html
 import ipaddress
 import os
 import pwd
 import re
+import ssl
 import subprocess
 import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
+from html.parser import HTMLParser
 
 from fastapi import HTTPException
 
@@ -20,6 +23,47 @@ from app.services.service_runtime import managed_library_environment, nginx_path
 
 
 _DOMAIN = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$", re.I)
+
+
+class _MaintenanceHtmlParser(HTMLParser):
+    """Keep maintenance messages formatted without allowing active content."""
+
+    allowed_tags = {"p", "br", "strong", "b", "em", "i", "u", "h1", "h2", "h3", "ul", "ol", "li", "a"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.output: list[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        if tag not in self.allowed_tags:
+            return
+        if tag == "a":
+            href = next((value for key, value in attrs if key.lower() == "href"), "")
+            if href and re.match(r"^(?:https?://|mailto:)", href, re.I):
+                self.output.append(f'<a href="{html.escape(href, quote=True)}" target="_blank" rel="noopener noreferrer">')
+            else:
+                self.output.append("<a>")
+        elif tag == "br":
+            self.output.append("<br>")
+        else:
+            self.output.append(f"<{tag}>")
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+        if tag in self.allowed_tags and tag != "br":
+            self.output.append(f"</{tag}>")
+
+    def handle_data(self, data):
+        self.output.append(html.escape(data))
+
+
+def _maintenance_html(value: str) -> str:
+    parser = _MaintenanceHtmlParser()
+    parser.feed(value or "We'll be back shortly.")
+    parser.close()
+    content = "".join(parser.output).strip()
+    return content or "We'll be back shortly."
 
 
 class WebsiteService:
@@ -33,6 +77,8 @@ class WebsiteService:
         self.config_backup_root = state / "website-config-backups"
         self.certificate_root = state / "website-certificates"
         self._lock = RLock()
+        if (self.service_root / "nginx").exists():
+            self.ensure_nginx_default_server()
 
     @property
     def nginx_port_path(self) -> Path:
@@ -46,6 +92,91 @@ class WebsiteService:
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             return 80
 
+    def nginx_default_website_id(self) -> str:
+        try:
+            value = json.loads(self.nginx_port_path.read_text()).get("default_website_id", "")
+            return str(value or "").strip()
+        except (OSError, TypeError, json.JSONDecodeError):
+            return ""
+
+    def _nginx_settings(self) -> dict:
+        try:
+            value = json.loads(self.nginx_port_path.read_text())
+            return value if isinstance(value, dict) else {}
+        except (OSError, TypeError, json.JSONDecodeError):
+            return {}
+
+    def ensure_nginx_default_server(self) -> None:
+        """Create the first-match guard so unknown hosts never hit a site."""
+        sites_dir = self.service_root / "nginx" / "conf" / "sites"
+        try:
+            sites_dir.mkdir(parents=True, exist_ok=True)
+            port = self.nginx_http_port()
+            default_id = self.nginx_default_website_id()
+            sites = self.list_without_nginx_guard()
+            selected = next((site for site in sites if site.id == default_id), None) if default_id else None
+            selected_certificate = self.certificate_paths(selected)[0] if selected else None
+            selected_private_key = self.certificate_paths(selected)[1] if selected else None
+            selected_tls = bool(
+                selected
+                and selected.ssl_enabled
+                and selected_certificate
+                and selected_private_key
+                and selected_certificate.is_file()
+                and selected_private_key.is_file()
+            )
+            fallback_certificate = selected_certificate if selected_tls else None
+            fallback_private_key = selected_private_key if selected_tls else None
+            if not fallback_certificate:
+                for candidate in sites:
+                    certificate, private_key = self.certificate_paths(candidate)
+                    if candidate.ssl_enabled and certificate.is_file() and private_key.is_file():
+                        fallback_certificate, fallback_private_key = certificate, private_key
+                        break
+            lines = [
+                "# Managed by Server Engine. Unknown hosts must not fall through to a website.",
+                "server {",
+                f"    listen {port} default_server;",
+                "    server_name _;",
+            ]
+            if selected:
+                lines.extend([
+                    f"    root {selected.document_root};",
+                    "    index index.php index.html index.htm;",
+                    "    location / {",
+                    "        try_files $uri $uri/ /index.php?$query_string;",
+                    "    }",
+                    "    location ~ \\.php$ {",
+                    f"        fastcgi_pass unix:{self.service_root / 'php' / 'versions' / selected.php_version / 'run' / 'php-fpm.sock'};",
+                    f"        include {nginx_paths()['root'] / 'etc/nginx/fastcgi_params'};",
+                    "        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;",
+                    "    }",
+                ])
+            else:
+                lines.append("    return 404;")
+            lines.extend(["}", "", "server {"])
+            if fallback_certificate and fallback_private_key:
+                lines.extend([
+                    "    listen 443 ssl default_server;",
+                    f"    ssl_certificate {fallback_certificate};",
+                    f"    ssl_certificate_key {fallback_private_key};",
+                ])
+            else:
+                # A `listen ... ssl` socket is invalid without certificates.
+                # Keep the HTTPS fallback plain until a certificate exists;
+                # TLS requests will be rejected rather than reaching a site.
+                lines.append("    listen 443 default_server;")
+            lines.extend(["    server_name _;", "    return 444;", "}", ""])
+            (sites_dir / "000-server-engine-default.conf").write_text("\n".join(lines))
+        except OSError:
+            return
+
+    def list_without_nginx_guard(self) -> list[Website]:
+        try:
+            return [Website.model_validate(item) for item in self._read()]
+        except (OSError, ValueError):
+            return []
+
     def certificate_paths(self, site: Website) -> tuple[Path, Path]:
         if site.certificate_path and site.private_key_path:
             return Path(site.certificate_path), Path(site.private_key_path)
@@ -54,7 +185,26 @@ class WebsiteService:
 
     def certificate_info(self, site: Website) -> dict:
         certificate, private_key = self.certificate_paths(site)
-        return {"status": site.certificate_status, "source": site.certificate_source, "certificate_path": str(certificate), "private_key_path": str(private_key), "expires_at": site.certificate_expires_at, "available": certificate.is_file() and private_key.is_file()}
+        available = certificate.is_file() and private_key.is_file()
+        expires_at = site.certificate_expires_at
+        if available and certificate.is_file():
+            try:
+                decoded = ssl._ssl._test_decode_cert(str(certificate))
+                not_after = decoded.get("notAfter", "")
+                if not_after:
+                    expires_at = datetime.strptime(not_after, "%b %d %H:%M:%S %Y %Z").replace(tzinfo=timezone.utc).isoformat()
+            except (OSError, ValueError, ssl.SSLError):
+                pass
+        status = site.certificate_status
+        if available and expires_at:
+            try:
+                expiry = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+                if expiry.tzinfo is None:
+                    expiry = expiry.replace(tzinfo=timezone.utc)
+                status = "expired" if expiry <= datetime.now(timezone.utc) else "issued"
+            except ValueError:
+                pass
+        return {"status": status, "source": site.certificate_source, "certificate_path": str(certificate), "private_key_path": str(private_key), "expires_at": expires_at, "available": available}
 
     def store_certificate(self, website_id: str, certificate: str, private_key: str, source: str = "upload", expires_at: str = "") -> Website:
         if "BEGIN CERTIFICATE" not in certificate or "END CERTIFICATE" not in certificate:
@@ -111,7 +261,9 @@ class WebsiteService:
             raise HTTPException(400, "Nginx HTTP port must be between 1 and 65535")
         with self._lock:
             self.nginx_port_path.parent.mkdir(parents=True, exist_ok=True)
-            self.nginx_port_path.write_text(json.dumps({"http_port": port}, indent=2) + "\n")
+            settings = self._nginx_settings()
+            settings["http_port"] = port
+            self.nginx_port_path.write_text(json.dumps(settings, indent=2) + "\n")
             for site in [Website.model_validate(item) for item in self._read() if item.get("server_type") == "nginx"]:
                 generated = self.configuration(site)
                 provider_path = Path(generated["config_path"])
@@ -126,6 +278,8 @@ class WebsiteService:
             sites_dir = self.service_root / "nginx" / "conf" / "sites"
             if sites_dir.is_dir():
                 for provider_path in sites_dir.glob("*.conf"):
+                    if provider_path.name == "000-server-engine-default.conf":
+                        continue
                     try:
                         content = provider_path.read_text(errors="replace")
                     except OSError:
@@ -137,7 +291,21 @@ class WebsiteService:
                     )
                     if migrated != content:
                         provider_path.write_text(migrated)
+            self.ensure_nginx_default_server()
         return port
+
+    def set_nginx_default_website(self, website_id: str) -> str:
+        website_id = str(website_id or "").strip()
+        if website_id and not any(item.id == website_id for item in self.list_without_nginx_guard()):
+            raise HTTPException(404, "That website does not exist")
+        with self._lock:
+            settings = self._nginx_settings()
+            settings["http_port"] = self.nginx_http_port()
+            settings["default_website_id"] = website_id
+            self.nginx_port_path.parent.mkdir(parents=True, exist_ok=True)
+            self.nginx_port_path.write_text(json.dumps(settings, indent=2) + "\n")
+            self.ensure_nginx_default_server()
+        return website_id
 
     def list(self) -> list[Website]:
         with self._lock:
@@ -154,6 +322,7 @@ class WebsiteService:
                     if not provider_path.exists() or legacy_log_root in existing:
                         provider_path.parent.mkdir(parents=True, exist_ok=True)
                         provider_path.write_text(generated["content"])
+            self.ensure_nginx_default_server()
             return sites
 
     def get(self, website_id: str) -> Website | None:
@@ -270,7 +439,9 @@ class WebsiteService:
         if server_type not in {"nginx", "apache", "openlitespeed", "caddy"}:
             raise HTTPException(400, "Unsupported web-server provider")
         config_id = self._configuration_id(site)
-        names = " ".join([site.domain, *site.aliases])
+        all_names = [site.domain, *site.aliases]
+        canonical_host = site.canonical_domain if site.canonical_domain in all_names else ""
+        names = " ".join([canonical_host] if canonical_host and server_type == "nginx" else all_names)
         index = "index.php index.html index.htm default.php default.htm default.html"
         root = site.document_root
         socket = self.service_root / "php" / "versions" / site.php_version / "run" / "php-fpm.sock"
@@ -299,8 +470,8 @@ class WebsiteService:
                 *[f"    ServerAlias {alias}" for alias in site.aliases],
                 f"    DocumentRoot \"{root}\"",
                 f"    DirectoryIndex {index}",
-                f"    ErrorLog \"{site_log_root / f'{config_id}.error.log'}\"",
-                f"    CustomLog \"{site_log_root / f'{config_id}.access.log'}\" combined",
+                f"    ErrorLog \"{site_log_root / f'{config_id}.error.log'}\"" if site.error_log_enabled else "    ErrorLog /dev/null",
+                f"    CustomLog \"{site_log_root / f'{config_id}.access.log'}\" combined" if site.access_log_enabled else "    CustomLog /dev/null combined",
                 f"    <Directory \"{root}\">",
                 "        AllowOverride All",
                 *access_requirements,
@@ -337,7 +508,9 @@ class WebsiteService:
             lines.append("    file_server")
             if site.php_version:
                 lines.append(f"    php_fastcgi unix/{socket}")
-            lines.extend(["    log {", f"        output file {site_log_root / f'{config_id}.access.log'}", "    }", "}", ""])
+            if site.access_log_enabled:
+                lines.extend(["    log {", f"        output file {site_log_root / f'{config_id}.access.log'}", "    }"])
+            lines.extend(["}", ""])
         elif server_type == "openlitespeed":
             service_root = self.service_root / "openlitespeed"
             config_path = service_root / "conf" / "vhosts" / config_id / "vhost.conf"
@@ -375,10 +548,25 @@ class WebsiteService:
                 f"    server_name {names};",
                 f"    index {index};",
                 f"    root {root};",
-                f"    access_log {site_log_root / f'{config_id}.access.log'};",
-                f"    error_log {site_log_root / f'{config_id}.error.log'};",
+                f"    access_log {site_log_root / f'{config_id}.access.log'};" if site.access_log_enabled else "    access_log off;",
+                f"    error_log {site_log_root / f'{config_id}.error.log'};" if site.error_log_enabled else "    error_log off;",
                 "",
             ]
+            redirect_hosts = [host for host in all_names if canonical_host and host != canonical_host]
+            if redirect_hosts:
+                redirect_scheme = "https" if tls_ready else "http"
+                redirect_lines = []
+                for host in redirect_hosts:
+                    redirect_lines.extend([
+                        "server {",
+                        f"    listen {self.nginx_http_port()};",
+                        *(["    listen 443 ssl;", f"    ssl_certificate {certificate_path};", f"    ssl_certificate_key {private_key_path};"] if tls_ready else []),
+                        f"    server_name {host};",
+                        f"    return 301 {redirect_scheme}://{canonical_host}$request_uri;",
+                        "}",
+                        "",
+                    ])
+                lines = redirect_lines + lines
             if tls_ready and site.ssl_enforce_tls:
                 lines.extend(["    if ($scheme = http) {", "        return 301 https://$host$request_uri;", "    }", ""])
             if site.access_auth_enabled:
@@ -416,9 +604,9 @@ class WebsiteService:
                     lines.extend(self._nginx_maintenance_body(site, list(dict.fromkeys(access_ips + bypass))))
                 elif access_ips:
                     lines.extend(self._nginx_access_body(access_ips))
-                lines.extend([f"        fastcgi_pass unix:{socket};", f"        include {fastcgi_params};", "        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;", "    }"])
+                lines.extend(["        try_files $uri =404;", f"        fastcgi_pass unix:{socket};", f"        include {fastcgi_params};", "        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;", "    }"])
             if maintenance:
-                lines.extend(["", f"    location @server_engine_maintenance_{site.id.replace('-', '_')} {{", "        default_type text/plain;", f"        return {site.maintenance_response_code} \"{self._config_text(site.maintenance_message)}\\n\";", "    }"])
+                lines.extend(["", f"    location @server_engine_maintenance_{site.id.replace('-', '_')} {{", "        default_type text/html;", "        charset utf-8;", f"        return {site.maintenance_response_code} \"{self._config_text(_maintenance_html(site.maintenance_message))}\\n\";", "    }"])
             lines.extend(["", "    location ~ /\\.(?!well-known) {", "        deny all;", "    }", "}", ""])
         return {"website_id": site.id, "server_type": server_type, "config_path": str(config_path), "content": "\n".join(lines)}
 
@@ -435,6 +623,18 @@ class WebsiteService:
         result = []
         for raw in values or []:
             value = str(raw).strip()
+            if "*" in value:
+                parts = value.split(".")
+                first_wildcard = next((index for index, part in enumerate(parts) if part == "*"), -1)
+                if len(parts) != 4 or first_wildcard < 0 or any(part != "*" for part in parts[first_wildcard:]):
+                    raise HTTPException(400, f"Invalid maintenance bypass wildcard: {value}. Use formats such as 230.*.*.*")
+                try:
+                    octets = [int(part) for part in parts[:first_wildcard]] + [0] * (4 - first_wildcard)
+                    if any(octet < 0 or octet > 255 for octet in octets):
+                        raise ValueError
+                except ValueError as exc:
+                    raise HTTPException(400, f"Invalid maintenance bypass address: {value}") from exc
+                value = f"{'.'.join(str(octet) for octet in octets)}/{first_wildcard * 8}"
             try:
                 ipaddress.ip_network(value, strict=False)
             except ValueError as exc:
@@ -447,6 +647,18 @@ class WebsiteService:
         result = []
         for raw in values or []:
             value = str(raw).strip()
+            if "*" in value:
+                parts = value.split(".")
+                first_wildcard = next((index for index, part in enumerate(parts) if part == "*"), -1)
+                if len(parts) != 4 or first_wildcard < 0 or any(part != "*" for part in parts[first_wildcard:]):
+                    raise HTTPException(400, f"Invalid allowed IP wildcard: {value}. Use formats such as 230.*.*.*")
+                try:
+                    octets = [int(part) for part in parts[:first_wildcard]] + [0] * (4 - first_wildcard)
+                    if any(octet < 0 or octet > 255 for octet in octets):
+                        raise ValueError
+                except ValueError as exc:
+                    raise HTTPException(400, f"Invalid allowed IP address: {value}") from exc
+                value = f"{'.'.join(str(octet) for octet in octets)}/{first_wildcard * 8}"
             try:
                 ipaddress.ip_network(value, strict=False)
             except ValueError as exc:
@@ -458,7 +670,7 @@ class WebsiteService:
     def _rewrite_rules(value: str) -> list[str]:
         rules = [line.strip() for line in str(value or "").splitlines() if line.strip()]
         if not rules:
-            return ["try_files $uri $uri/ /index.php?$query_string;"]
+            return []
         if any(re.search(r"\b(?:http|server|location|events|upstream)\s*\{", line, re.I) for line in rules):
             raise HTTPException(400, "URL rewrite rules may only contain directives inside the website location")
         if any(";" not in line and not line.endswith("{") and not line.endswith("}") for line in rules):
@@ -505,12 +717,13 @@ class WebsiteService:
     @staticmethod
     def _hotlink(value: dict | None) -> dict:
         value = value or {}
+        enabled = bool(value.get("enabled", False))
         extensions = []
         for raw in str(value.get("extensions", "jpg, jpeg, png, gif, webp, svg")).split(","):
             extension = raw.strip().lower().lstrip(".")
             if extension and re.fullmatch(r"[a-z0-9]+", extension):
                 extensions.append(extension)
-        if not extensions:
+        if enabled and not extensions:
             raise HTTPException(400, "Add at least one protected file extension")
         domains = []
         for raw in value.get("domains", []) if isinstance(value.get("domains", []), list) else str(value.get("domains", "")).split(","):
@@ -523,7 +736,7 @@ class WebsiteService:
         redirect = str(value.get("redirect", "")).strip()
         if action == "redirect" and not re.fullmatch(r"https?://[^\s]+", redirect):
             raise HTTPException(400, "Hotlink redirect must be an HTTP or HTTPS URL")
-        return {"enabled": bool(value.get("enabled", False)), "extensions": list(dict.fromkeys(extensions)), "domains": list(dict.fromkeys(domains)), "allow_empty": bool(value.get("allow_empty", True)), "action": action, "redirect": redirect}
+        return {"enabled": enabled, "extensions": list(dict.fromkeys(extensions)), "domains": list(dict.fromkeys(domains)), "allow_empty": bool(value.get("allow_empty", True)), "action": action, "redirect": redirect}
 
     def _write_auth_file(self, site: Website, username: str, password: str | None = None) -> None:
         target = self.auth_root / f"{self._configuration_id(site)}.htpasswd"
@@ -582,6 +795,9 @@ class WebsiteService:
             sites = [Website.model_validate(item) for item in self._read()]
             domain, aliases = self._domains(payload.domain, payload.aliases)
             self._ensure_domains_free(sites, [domain, *aliases])
+            canonical_domain = payload.canonical_domain.strip().lower()
+            if canonical_domain and canonical_domain not in [domain, *aliases]:
+                raise HTTPException(400, "Canonical host must be one of the website domains or aliases")
             requested_project_path = payload.project_path.strip() or str(self.web_root / domain)
             project = self._safe_project_path(requested_project_path)
             web_root = self._normalize_web_root(payload.web_root)
@@ -607,12 +823,13 @@ class WebsiteService:
                 access_auth_enabled=payload.access_auth_enabled,
                 access_auth_username=payload.access_auth_username.strip(),
                 rewrite_rules="\n".join(self._rewrite_rules(payload.rewrite_rules)),
+                canonical_domain=canonical_domain,
                 redirects=self._redirects(payload.redirects),
                 proxies=self._proxies(payload.proxies),
                 hotlink=self._hotlink(payload.hotlink),
                 maintenance_enabled=payload.maintenance_enabled,
                 maintenance_response_code=payload.maintenance_response_code,
-                maintenance_message=payload.maintenance_message.strip() or "We’ll be back shortly.",
+                maintenance_message=payload.maintenance_message.strip() or "We'll be back shortly.",
                 maintenance_bypass=self._maintenance_bypass(payload.maintenance_bypass),
                 maintenance_start=payload.maintenance_start.strip(), maintenance_end=payload.maintenance_end.strip(),
                 database_enabled=payload.database_enabled, database_name=payload.database_name.strip(),
@@ -641,6 +858,10 @@ class WebsiteService:
             auth_password = changes.pop("access_auth_password", None)
             domain, aliases = self._domains(changes.get("domain", site.domain), changes.get("aliases", site.aliases))
             self._ensure_domains_free(sites, [domain, *aliases], website_id)
+            canonical_domain = str(changes.get("canonical_domain", site.canonical_domain)).strip().lower()
+            if canonical_domain and canonical_domain not in [domain, *aliases]:
+                raise HTTPException(400, "Canonical host must be one of the website domains or aliases")
+            changes["canonical_domain"] = canonical_domain
             if "project_path" in changes:
                 project = self._safe_project_path(changes["project_path"])
                 if not project.exists() or not project.is_dir():
@@ -662,7 +883,7 @@ class WebsiteService:
             if "hotlink" in changes:
                 changes["hotlink"] = self._hotlink(changes["hotlink"])
             if "maintenance_message" in changes:
-                changes["maintenance_message"] = changes["maintenance_message"].strip() or "We’ll be back shortly."
+                changes["maintenance_message"] = changes["maintenance_message"].strip() or "We'll be back shortly."
             for key in ("maintenance_start", "maintenance_end"):
                 if key in changes:
                     changes[key] = changes[key].strip()
@@ -677,6 +898,8 @@ class WebsiteService:
             site.domain, site.aliases = domain, aliases
             site.document_root = str(Path(site.project_path) if site.web_root == "." else Path(site.project_path) / site.web_root)
             site.updated_at = self._now()
+            if {"access_log_enabled", "error_log_enabled"}.intersection(changes) and self._custom_marker(site, "nginx").exists():
+                self._apply_custom_nginx_log_settings(site)
             self._write_auth_file(site, site.access_auth_username, auth_password)
             self._write_site(site, sites)
             return site
@@ -769,6 +992,29 @@ class WebsiteService:
     def _custom_marker(self, site: Website, provider: str) -> Path:
         return self.config_backup_root / self._configuration_id(site) / f"{provider}.custom"
 
+    def _apply_custom_nginx_log_settings(self, site: Website) -> None:
+        """Apply managed log switches without replacing a custom site config."""
+        generated = self.configuration(site, "nginx")
+        path = Path(generated["config_path"])
+        if not path.is_file():
+            return
+        content = path.read_text(errors="replace")
+        config_id = self._configuration_id(site)
+        log_root = self.log_root / "nginx" / "sites"
+        directives = {
+            "access_log": f"    access_log {log_root / f'{config_id}.access.log'};" if site.access_log_enabled else "    access_log off;",
+            "error_log": f"    error_log {log_root / f'{config_id}.error.log'};" if site.error_log_enabled else "    error_log off;",
+        }
+        for directive, replacement in directives.items():
+            pattern = rf"(?m)^([ \t]{{4}}){directive}\s+[^;]+;\s*$"
+            content, count = re.subn(pattern, replacement, content, count=1)
+            if count == 0:
+                insertion = content.rfind("\n}")
+                if insertion < 0:
+                    raise HTTPException(400, f"Custom Nginx configuration has no server block for {directive}")
+                content = content[:insertion] + f"\n{replacement}" + content[insertion:]
+        path.write_text(content)
+
     def delete(self, website_id: str, remove_files: bool = False) -> None:
         with self._lock:
             sites = [Website.model_validate(item) for item in self._read()]
@@ -821,7 +1067,9 @@ class WebsiteService:
         if not self.path.exists(): return []
         try:
             data = json.loads(self.path.read_text())
-            return data if isinstance(data, list) else []
+            if not isinstance(data, list):
+                return []
+            return data
         except (OSError, json.JSONDecodeError) as exc:
             raise HTTPException(500, f"Website registry is unreadable: {exc}")
 

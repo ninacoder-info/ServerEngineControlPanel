@@ -33,6 +33,16 @@ export default function InstallServiceModal({
   }
 
   async function refreshVersions(manual = true) {
+    if (service.id === "phpmyadmin") {
+      const fixedVersions = Array.isArray(service.versions) && service.versions.length
+        ? service.versions
+        : [{ version: "5.2.2", channel: "stable" }];
+      setVersions(fixedVersions);
+      selectPreferredVersion(fixedVersions);
+      setRefreshing(false);
+      if (manual) setToast({ type: "success", message: "Fetched the pinned phpMyAdmin release catalog." });
+      return;
+    }
     const method = installMethod;
     const requestId = refreshSequence.current + 1;
     refreshSequence.current = requestId;
@@ -87,6 +97,10 @@ export default function InstallServiceModal({
   }
 
   React.useEffect(() => {
+    if (service.id === "phpmyadmin") {
+      refreshVersions(false);
+      return;
+    }
     const cacheKey = `server-engine:service-versions:v10:${service.id}:${installMethod}`;
     try {
       const cached = JSON.parse(window.sessionStorage.getItem(cacheKey) || "null");
@@ -102,7 +116,7 @@ export default function InstallServiceModal({
   }, [service.id, installMethod]);
 
   React.useEffect(() => {
-    if (!(["composer", "wp-cli"].includes(service.id))) return undefined;
+    if (!(["composer", "wp-cli", "phpmyadmin"].includes(service.id))) return undefined;
     apiRequest("/api/v1/services/php/runtimes")
       .then((response) => (response.ok ? response.json() : []))
       .then((items) => {
@@ -123,7 +137,7 @@ export default function InstallServiceModal({
     setBusy(true);
     const response = await apiRequest(
       `/api/v1/services/${service.id}/install`,
-      { method: "POST", body: JSON.stringify({ version, confirmed: true, install_method: installMethod, php_version: ["composer", "wp-cli"].includes(service.id) ? phpVersion : undefined }) },
+      { method: "POST", body: JSON.stringify({ version, confirmed: true, install_method: installMethod, php_version: ["composer", "wp-cli", "phpmyadmin"].includes(service.id) ? phpVersion : undefined }) },
     );
     const body = response.ok
       ? await response.json()
@@ -219,7 +233,7 @@ export default function InstallServiceModal({
               )}
             </select>
           </label>
-          {["composer", "wp-cli"].includes(service.id) && (
+          {["composer", "wp-cli", "phpmyadmin"].includes(service.id) && (
             <label className="block text-sm font-medium text-neutral-800 dark:text-neutral-200">
               <span>PHP CLI runtime</span>
               <select
@@ -232,7 +246,7 @@ export default function InstallServiceModal({
                 {!phpRuntimes.length && <option value="">Install PHP first</option>}
               </select>
               <span className="mt-1 block text-xs font-normal text-neutral-500 dark:text-neutral-400">
-                {service.id === "wp-cli" ? "WP-CLI will use this PHP runtime. If it is removed, the latest installed PHP is selected automatically." : "Composer will use this PHP CLI runtime. If it is removed, the latest installed PHP is selected automatically."}
+                {service.id === "phpmyadmin" ? "phpMyAdmin will run through this PHP 8.x CLI runtime." : service.id === "wp-cli" ? "WP-CLI will use this PHP runtime. If it is removed, the latest installed PHP is selected automatically." : "Composer will use this PHP CLI runtime. If it is removed, the latest installed PHP is selected automatically."}
               </span>
             </label>
           )}
@@ -252,7 +266,7 @@ export default function InstallServiceModal({
             <button
               type="submit"
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={busy || refreshing || !version || !versions.length || (["composer", "wp-cli"].includes(service.id) && !phpVersion)}
+              disabled={busy || refreshing || !version || !versions.length || (["composer", "wp-cli", "phpmyadmin"].includes(service.id) && !phpVersion)}
             >
               {busy ? "Installing…" : "Install"}
             </button>

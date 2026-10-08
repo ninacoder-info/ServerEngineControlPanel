@@ -15,6 +15,7 @@ class Website(BaseModel):
     name: str
     domain: str
     aliases: list[str] = Field(default_factory=list)
+    canonical_domain: str = ""
     project_path: str
     web_root: str = "."
     document_root: str
@@ -32,13 +33,15 @@ class Website(BaseModel):
     access_allowed_ips: list[str] = Field(default_factory=list)
     access_auth_enabled: bool = False
     access_auth_username: str = ""
-    rewrite_rules: str = "try_files $uri $uri/ /index.php?$query_string;"
+    access_log_enabled: bool = True
+    error_log_enabled: bool = True
+    rewrite_rules: str = ""
     redirects: list[dict] = Field(default_factory=list)
     proxies: list[dict] = Field(default_factory=list)
     hotlink: dict = Field(default_factory=dict)
     maintenance_enabled: bool = False
     maintenance_response_code: MaintenanceResponseCode = "503"
-    maintenance_message: str = "We’ll be back shortly."
+    maintenance_message: str = "We'll be back shortly."
     maintenance_bypass: list[str] = Field(default_factory=list)
     maintenance_start: str = ""
     maintenance_end: str = ""
@@ -58,6 +61,7 @@ class WebsiteCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     domain: str = Field(min_length=3, max_length=253)
     aliases: list[str] = Field(default_factory=list, max_length=50)
+    canonical_domain: str = Field(default="", max_length=253)
     project_path: str = Field(default="", max_length=1024)
     web_root: str = Field(default=".", max_length=255)
     php_version: str = Field(default="", max_length=32)
@@ -70,13 +74,15 @@ class WebsiteCreateRequest(BaseModel):
     access_auth_enabled: bool = False
     access_auth_username: str = Field(default="", max_length=128)
     access_auth_password: str = Field(default="", max_length=256)
-    rewrite_rules: str = Field(default="try_files $uri $uri/ /index.php?$query_string;", max_length=12000)
+    access_log_enabled: bool = True
+    error_log_enabled: bool = True
+    rewrite_rules: str = Field(default="", max_length=12000)
     redirects: list[dict] = Field(default_factory=list)
     proxies: list[dict] = Field(default_factory=list)
     hotlink: dict = Field(default_factory=dict)
     maintenance_enabled: bool = False
     maintenance_response_code: MaintenanceResponseCode = "503"
-    maintenance_message: str = Field(default="We’ll be back shortly.", max_length=2000)
+    maintenance_message: str = Field(default="We'll be back shortly.", max_length=2000)
     maintenance_bypass: list[str] = Field(default_factory=list, max_length=100)
     maintenance_start: str = Field(default="", max_length=64)
     maintenance_end: str = Field(default="", max_length=64)
@@ -105,6 +111,7 @@ class WebsiteUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     domain: str | None = Field(default=None, min_length=3, max_length=253)
     aliases: list[str] | None = Field(default=None, max_length=50)
+    canonical_domain: str | None = Field(default=None, max_length=253)
     project_path: str | None = Field(default=None, min_length=1, max_length=1024)
     web_root: str | None = Field(default=None, max_length=255)
     php_version: str | None = Field(default=None, max_length=32)
@@ -117,6 +124,8 @@ class WebsiteUpdateRequest(BaseModel):
     access_auth_enabled: bool | None = None
     access_auth_username: str | None = Field(default=None, max_length=128)
     access_auth_password: str | None = Field(default=None, max_length=256)
+    access_log_enabled: bool | None = None
+    error_log_enabled: bool | None = None
     rewrite_rules: str | None = Field(default=None, max_length=12000)
     redirects: list[dict] | None = Field(default=None, max_length=100)
     proxies: list[dict] | None = Field(default=None, max_length=100)

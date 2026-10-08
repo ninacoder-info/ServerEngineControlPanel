@@ -38,6 +38,14 @@ def _account_path_allowed(path: str, user) -> None:
         raise HTTPException(status_code=403, detail="This path is outside the hosting account home") from error
 
 
+def _queue_provider_reload(site):
+    """Queue one provider reload while an identical reload is already active."""
+    expected = ("Reload nginx" if site.server_type == "nginx" else f"Restart {site.server_type}").lower()
+    if any(job.status in {"queued", "running"} and job.type.lower() == expected for job in job_store.list()):
+        return
+    job_store.enqueue_action(f"provider-reload-site-{site.id}-{uuid.uuid4().hex[:8]}", site.server_type, "restart")
+
+
 class WebsiteConfigurationSaveRequest(BaseModel):
     content: str = Field(max_length=200000)
 
@@ -59,7 +67,8 @@ class WebsiteCertificateRequest(BaseModel):
 def list_websites(user=Depends(require_user)):
     sites = website_service.list()
     owned = account_isolation.filter_owned(user, "website", [site.id for site in sites])
-    return sites if owned is None else [site for site in sites if site.id in owned]
+    visible = sites if owned is None else [site for site in sites if site.id in owned]
+    return [{**site.model_dump(mode="json"), "certificate": website_service.certificate_info(site)} for site in visible]
 
 
 @router.get("/directories")
@@ -141,7 +150,7 @@ def save_website_configuration(website_id: str, payload: WebsiteConfigurationSav
     site = _require_site(website_id, user)
     provider = server_type or site.server_type
     result = website_service.save_provider_configuration(website_id, provider, payload.content)
-    job_store.enqueue_action(f"provider-reload-site-config-{site.id}-{uuid.uuid4().hex[:8]}", provider, "restart")
+    _queue_provider_reload(site)
     result["saved"] = True
     return result
 
@@ -151,7 +160,7 @@ def restore_website_configuration(website_id: str, payload: WebsiteConfiguration
     site = _require_site(website_id, user)
     provider = server_type or site.server_type
     result = website_service.restore_provider_configuration(website_id, provider, payload.restore)
-    job_store.enqueue_action(f"provider-restore-site-config-{site.id}-{uuid.uuid4().hex[:8]}", provider, "restart")
+    _queue_provider_reload(site)
     result["restored"] = payload.restore
     return result
 
@@ -182,7 +191,7 @@ def create_website(payload: WebsiteCreateRequest, user=Depends(require_user)):
     _account_path_allowed(payload.project_path, user)
     site = website_service.create(payload)
     account_isolation.claim(user, "website", site.id, check_quota=False)
-    job_store.enqueue_action(f"provider-reload-site-{site.id}-{uuid.uuid4().hex[:8]}", site.server_type, "restart")
+    _queue_provider_reload(site)
     job_store.publish({"type": "websites-updated", "action": "created", "website_id": site.id})
     return site
 
@@ -254,7 +263,7 @@ def update_website(website_id: str, payload: WebsiteUpdateRequest, user=Depends(
     # the active provider immediately. The action is serialized with other
     # service operations and its result is delivered over the shared jobs
     # socket; the PATCH response remains the website record for compatibility.
-    job_store.enqueue_action(f"provider-reload-site-{site.id}-{uuid.uuid4().hex[:8]}", site.server_type, "restart")
+    _queue_provider_reload(site)
     job_store.publish({"type": "websites-updated", "action": "updated", "website_id": site.id})
     return site
 

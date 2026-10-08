@@ -208,6 +208,13 @@ export default function Topbar({
               }),
             );
           }
+          if (message.type === "logs-updated") {
+            window.dispatchEvent(
+              new CustomEvent("serverengine:logs-updated", {
+                detail: message,
+              }),
+            );
+          }
           if (message.type === "malware-schedule") {
             window.dispatchEvent(
               new CustomEvent("serverengine:malware-schedule", {

@@ -14,6 +14,7 @@ from pathlib import Path
 from threading import RLock, Thread
 
 from app.services.job_service import job_store
+from app.services.service_runtime import prepare_mysql_runtime
 from app.services.website_service import website_service
 
 
@@ -350,7 +351,9 @@ class BackupService:
 
         mysql_candidates = (
             ("MySQL", service_root / "mysql/bin/mysqldump", service_root / "mysql/run/mysql.sock"),
+            ("MySQL", service_root / "mysql/usr/bin/mysqldump", service_root / "mysql/run/mysql.sock"),
             ("MariaDB", service_root / "mariadb/bin/mariadb-dump", service_root / "mariadb/run/mariadb.sock"),
+            ("MariaDB", service_root / "mariadb/usr/bin/mariadb-dump", service_root / "mariadb/run/mariadb.sock"),
             ("MySQL", Path("/usr/bin/mysqldump"), Path("/var/run/mysqld/mysqld.sock")),
             ("MariaDB", Path("/usr/bin/mariadb-dump"), Path("/run/mysqld/mysqld.sock")),
         )
@@ -376,6 +379,7 @@ class BackupService:
             else:
                 client_candidates = (
                     service_root / ("mysql/bin/mysql" if engine == "MySQL" else "mariadb/bin/mariadb"),
+                    service_root / ("mysql/usr/bin/mysql" if engine == "MySQL" else "mariadb/usr/bin/mariadb"),
                     service_root / ("mysql/bin/mariadb" if engine == "MySQL" else "mariadb/bin/mysql"),
                     Path("/usr/bin/mysql" if engine == "MySQL" else "/usr/bin/mariadb"),
                 )
@@ -386,8 +390,9 @@ class BackupService:
                         raise RuntimeError(f"{engine} backup failed: {message}")
                     self._log(backup_id, f"Skipped {engine} backup: {message}")
                     continue
+                runtime_environment = prepare_mysql_runtime(service_root / "mysql") if engine == "MySQL" else os.environ.copy()
                 self._log(backup_id, f"$ {client} --socket={socket} -uroot -e 'SHOW DATABASES'")
-                result = subprocess.run([str(client), f"--socket={socket}", "-uroot", "--batch", "--skip-column-names", "-e", "SHOW DATABASES"], capture_output=True, text=True, check=False, timeout=60)
+                result = subprocess.run([str(client), f"--socket={socket}", "-uroot", "--batch", "--skip-column-names", "-e", "SHOW DATABASES"], capture_output=True, text=True, check=False, timeout=60, env=runtime_environment)
                 if result.returncode != 0:
                     message = result.stderr.strip()[-1000:] or "the database service did not return an error message"
                     if not best_effort:
@@ -409,8 +414,9 @@ class BackupService:
                 output = engine_directory / f"{name}.sql"
                 database_args = ["--databases", name]
                 self._log(backup_id, f"$ {binary} --socket={socket} --databases {name} --single-transaction --routines --triggers --events")
+                runtime_environment = prepare_mysql_runtime(service_root / "mysql") if engine == "MySQL" else os.environ.copy()
                 with output.open("w") as stream:
-                    result = subprocess.run([str(binary), f"--socket={socket}", "-uroot", *database_args, "--single-transaction", "--routines", "--triggers", "--events"], stdout=stream, stderr=subprocess.PIPE, text=True, check=False, timeout=1800)
+                    result = subprocess.run([str(binary), f"--socket={socket}", "-uroot", *database_args, "--single-transaction", "--routines", "--triggers", "--events"], stdout=stream, stderr=subprocess.PIPE, text=True, check=False, timeout=1800, env=runtime_environment)
                 if result.returncode == 0:
                     dumps.append((output, f"databases/{engine.lower()}/{name}.sql"))
                     continue

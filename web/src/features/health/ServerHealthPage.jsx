@@ -659,25 +659,29 @@ export default function ServerHealthPage() {
             <button type="button" onClick={() => navigate("/logs")} className="cursor-pointer text-sm font-semibold text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100">View logs</button>
           </div>
           <div className="mt-4 grid gap-x-8 md:grid-cols-2">
-            {serviceRows.length ? serviceRows.map(({ id, name, version, status, icon: Icon }) => (
-              <div
-                key={id}
-                className="flex items-center gap-3 border-b border-neutral-200 py-3 last:border-0 dark:border-neutral-800"
-              >
-                <Icon size={17} className="text-neutral-400" />
-                <span className="min-w-0 flex-1">
-                  <strong className="block text-sm font-medium text-neutral-800 dark:text-neutral-200">
-                    {name}
-                  </strong>
-                  <small className="text-xs text-neutral-500 dark:text-neutral-400">
-                    {version ? `${status} · v${version}` : status}
-                  </small>
-                </span>
-                <span
-                  className={`h-2 w-2 rounded-full ${status === "running" ? "bg-emerald-500" : status === "stopped" ? "bg-amber-500" : "bg-neutral-400"}`}
-                />
-              </div>
-            )) : <p className="py-4 text-sm text-neutral-500 dark:text-neutral-400">No managed services are installed yet.</p>}
+            {serviceRows.length ? serviceRows.map(({ id, name, version, status, icon: Icon }) => {
+              const isNodeRuntime = id === "nodejs" || id.startsWith("nodejs@");
+              const displayStatus = isNodeRuntime && status !== "running" ? "Installed" : status;
+              return (
+                <div
+                  key={id}
+                  className="flex items-center gap-3 border-b border-neutral-200 py-3 last:border-0 dark:border-neutral-800"
+                >
+                  <Icon size={17} className="text-neutral-400" />
+                  <span className="min-w-0 flex-1">
+                    <strong className="block text-sm font-medium text-neutral-800 dark:text-neutral-200">
+                      {name}
+                    </strong>
+                    <small className="text-xs text-neutral-500 dark:text-neutral-400">
+                      {version ? `${displayStatus} · v${version}` : displayStatus}
+                    </small>
+                  </span>
+                  <span
+                    className={`h-2 w-2 rounded-full ${isNodeRuntime || status === "running" ? "bg-emerald-500" : status === "stopped" ? "bg-amber-500" : "bg-neutral-400"}`}
+                  />
+                </div>
+              );
+            }) : <p className="py-4 text-sm text-neutral-500 dark:text-neutral-400">No managed services are installed yet.</p>}
           </div>
         </div>
       </section>

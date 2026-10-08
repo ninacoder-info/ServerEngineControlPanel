@@ -1,5 +1,5 @@
 import React from "react";
-import { CheckCircle2, CircleAlert, Database, FileText, Globe2, Layers3, LoaderCircle, TerminalSquare, Zap } from "lucide-react";
+import { CheckCircle2, CircleAlert, Database, FileText, Globe2, Layers3, LoaderCircle, Server, TerminalSquare, Zap } from "lucide-react";
 import { apiRequest } from "../lib/api";
 
 function statusIcon(status) {
@@ -9,7 +9,7 @@ function statusIcon(status) {
   return <LoaderCircle className="animate-spin" size={17} />;
 }
 
-export default function GlobalJobStatusBar({ onOpenTerminal, onOpenLogs, onOpenService, terminalOpen = false, panel = "terminal" }) {
+export default function GlobalJobStatusBar({ onOpenTerminal, onOpenLogs, onOpenServer, onOpenService, terminalOpen = false, panel = "terminal" }) {
   const [jobs, setJobs] = React.useState([]);
   const [services, setServices] = React.useState([]);
   const activeJob = jobs.find((job) => job.status === "running" || job.status === "queued");
@@ -90,6 +90,7 @@ export default function GlobalJobStatusBar({ onOpenTerminal, onOpenLogs, onOpenS
         {serviceButton(redis, Zap)}
         <button type="button" title="Open logs" className={`inline-flex h-5 shrink-0 cursor-pointer items-center gap-1 rounded px-1.5 text-xs text-white hover:bg-white/15 ${terminalOpen && panel === "logs" ? "bg-white/20" : ""}`} onClick={onOpenLogs}><FileText size={14} />Logs</button>
         <button type="button" title="Open terminal" className={`inline-flex h-5 shrink-0 cursor-pointer items-center gap-1 rounded px-1.5 text-xs text-white hover:bg-white/15 ${terminalOpen && panel === "terminal" ? "bg-white/20" : ""}`} onClick={onOpenTerminal}><TerminalSquare size={14} />Terminal</button>
+        <button type="button" title="Show server information" className="inline-flex h-5 shrink-0 cursor-pointer items-center gap-1 rounded px-1.5 text-xs text-white hover:bg-white/15" onClick={onOpenServer}><Server size={14} />Server</button>
       </div>
     </div>
   </>;
