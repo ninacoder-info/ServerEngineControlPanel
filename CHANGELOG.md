@@ -4,6 +4,22 @@ Release notes for the Server Engine control panel and control-plane runtime.
 
 ## Unreleased
 
+## v0.1.55
+
+- Fixed the Application Shield Nginx connector flow after installing a new
+  Nginx version, allowing the matching connector to be attached again.
+- Added working open, edit, and remove actions for Node.js projects and
+  reverse-proxy routes while keeping PHP and Terminal controls exclusive to
+  websites.
+- Fixed the Websites page so project and proxy registries load immediately on
+  first render instead of only after opening a modal.
+- Added independent project/proxy loading so unrelated supporting-request
+  failures cannot hide existing routes.
+- Added the Application Shield reports and detection-category chart updates,
+  including readable long detection labels.
+- Added the missing ApexCharts dependencies to the web package and refreshed
+  the Docker development frontend dependency installation.
+
 ## v0.1.54
 
 - Added SQLite indexing for Application Shield audit events, with fast reports,
