@@ -14,6 +14,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
+from urllib.parse import urlsplit
 
 from app.models.application_shield import (
     ApplicationShieldOverview,
@@ -28,6 +29,21 @@ from app.models.application_shield_geo import ApplicationShieldGeoEntry, Applica
 from app.services.service_runtime import binary_path, ensure_nginx_layout, managed_library_environment, nginx_paths
 from app.services.website_service import website_service
 from app.services.geoip_service import geoip_service
+
+
+_CONTINENT_COUNTRIES = {
+    "AF": "AF", "AX": "EU", "AL": "EU", "DZ": "AF", "AS": "OC", "AD": "EU", "AO": "AF", "AI": "NA", "AQ": "AN", "AG": "NA", "AR": "SA", "AM": "AS", "AW": "NA", "AU": "OC", "AT": "EU", "AZ": "AS",
+    "BS": "NA", "BH": "AS", "BD": "AS", "BB": "NA", "BY": "EU", "BE": "EU", "BZ": "NA", "BJ": "AF", "BM": "NA", "BT": "AS", "BO": "SA", "BQ": "NA", "BA": "EU", "BW": "AF", "BV": "AN", "BR": "SA", "IO": "AS", "BN": "AS", "BG": "EU", "BF": "AF", "BI": "AF",
+    "CV": "AF", "KH": "AS", "CM": "AF", "CA": "NA", "KY": "NA", "CF": "AF", "TD": "AF", "CL": "SA", "CN": "AS", "CX": "AS", "CC": "AS", "CO": "SA", "KM": "AF", "CG": "AF", "CD": "AF", "CK": "OC", "CR": "NA", "CI": "AF", "HR": "EU", "CU": "NA", "CW": "NA", "CY": "AS", "CZ": "EU",
+    "DK": "EU", "DJ": "AF", "DM": "NA", "DO": "NA", "EC": "SA", "EG": "AF", "SV": "NA", "GQ": "AF", "ER": "AF", "EE": "EU", "SZ": "AF", "ET": "AF", "FK": "SA", "FO": "EU", "FJ": "OC", "FI": "EU", "FR": "EU", "GF": "SA", "PF": "OC", "TF": "AN", "GA": "AF", "GM": "AF", "GE": "AS", "DE": "EU", "GH": "AF", "GI": "EU", "GR": "EU", "GL": "NA", "GD": "NA", "GP": "NA", "GU": "OC", "GT": "NA", "GG": "EU", "GN": "AF", "GW": "AF", "GY": "SA",
+    "HT": "NA", "HM": "AN", "VA": "EU", "HN": "NA", "HK": "AS", "HU": "EU", "IS": "EU", "IN": "AS", "ID": "AS", "IR": "AS", "IQ": "AS", "IE": "EU", "IM": "EU", "IL": "AS", "IT": "EU", "JM": "NA", "JP": "AS", "JE": "EU", "JO": "AS", "KZ": "AS", "KE": "AF", "KI": "OC", "KP": "AS", "KR": "AS", "KW": "AS", "KG": "AS", "LA": "AS", "LV": "EU", "LB": "AS", "LS": "AF", "LR": "AF", "LY": "AF", "LI": "EU", "LT": "EU", "LU": "EU",
+    "MO": "AS", "MG": "AF", "MW": "AF", "MY": "AS", "MV": "AS", "ML": "AF", "MT": "EU", "MH": "OC", "MQ": "NA", "MR": "AF", "MU": "AF", "YT": "AF", "MX": "NA", "FM": "OC", "MD": "EU", "MC": "EU", "MN": "AS", "ME": "EU", "MS": "NA", "MA": "AF", "MZ": "AF", "MM": "AS", "NA": "AF", "NR": "OC", "NP": "AS", "NL": "EU", "NC": "OC", "NZ": "OC", "NI": "NA", "NE": "AF", "NG": "AF", "NU": "OC", "NF": "OC", "MK": "EU", "MP": "OC", "NO": "EU", "OM": "AS", "PK": "AS", "PW": "OC", "PS": "AS", "PA": "NA", "PG": "OC", "PY": "SA", "PE": "SA", "PH": "AS", "PN": "OC", "PL": "EU", "PT": "EU", "PR": "NA", "QA": "AS", "RE": "AF", "RO": "EU", "RU": "EU", "RW": "AF", "BL": "NA", "SH": "AF", "KN": "NA", "LC": "NA", "MF": "NA", "PM": "NA", "VC": "NA", "WS": "OC", "SM": "EU", "ST": "AF", "SA": "AS", "SN": "AF", "RS": "EU", "SC": "AF", "SL": "AF", "SG": "AS", "SX": "NA", "SK": "EU", "SI": "EU", "SB": "OC", "SO": "AF", "ZA": "AF", "GS": "AN", "SS": "AF", "ES": "EU", "LK": "AS", "SD": "AF", "SR": "SA", "SJ": "EU", "SE": "EU", "CH": "EU", "SY": "AS", "TW": "AS", "TJ": "AS", "TZ": "AF", "TH": "AS", "TL": "AS", "TG": "AF", "TK": "OC", "TO": "OC", "TT": "NA", "TN": "AF", "TR": "AS", "TM": "AS", "TC": "NA", "TV": "OC", "UG": "AF", "UA": "EU", "AE": "AS", "GB": "EU", "US": "NA", "UM": "OC", "UY": "SA", "UZ": "AS", "VU": "OC", "VE": "SA", "VN": "AS", "VG": "NA", "VI": "NA", "WF": "OC", "EH": "AF", "YE": "AS", "ZM": "AF", "ZW": "AF"}
+_CONTINENT_NAMES = {"AF": "Africa", "AN": "Antarctica", "AS": "Asia", "EU": "Europe", "NA": "North America", "OC": "Oceania", "SA": "South America"}
+
+
+def _continent_for_country(code: str) -> tuple[str, str]:
+    continent = _CONTINENT_COUNTRIES.get(str(code or "").upper(), "")
+    return continent, _CONTINENT_NAMES.get(continent, "")
 
 
 class ApplicationShieldService:
@@ -88,6 +104,28 @@ class ApplicationShieldService:
                 CREATE INDEX IF NOT EXISTS idx_shield_events_status ON audit_events(status, occurred_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_shield_events_source ON audit_events(source_ip, occurred_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_shield_events_country ON audit_events(country_code, occurred_at DESC);
+                CREATE TABLE IF NOT EXISTS report_cache (
+                    cache_key TEXT PRIMARY KEY,
+                    generated_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    payload TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS hourly_security_rollups (
+                    bucket_start TEXT PRIMARY KEY,
+                    requests INTEGER NOT NULL DEFAULT 0,
+                    blocked INTEGER NOT NULL DEFAULT 0,
+                    allowed INTEGER NOT NULL DEFAULT 0,
+                    client_errors INTEGER NOT NULL DEFAULT 0,
+                    server_errors INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE TABLE IF NOT EXISTS daily_security_rollups (
+                    bucket_start TEXT PRIMARY KEY,
+                    requests INTEGER NOT NULL DEFAULT 0,
+                    blocked INTEGER NOT NULL DEFAULT 0,
+                    allowed INTEGER NOT NULL DEFAULT 0,
+                    client_errors INTEGER NOT NULL DEFAULT 0,
+                    server_errors INTEGER NOT NULL DEFAULT 0
+                );
                 CREATE TABLE IF NOT EXISTS audit_log_state (
                     path TEXT PRIMARY KEY,
                     inode INTEGER NOT NULL DEFAULT 0,
@@ -696,52 +734,126 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
             "country": country,
         }
 
-    def report(self, hours: int = 24) -> dict:
+    def report(self, hours: int = 24, host: str = "", country: str = "") -> dict:
+        hours = max(1, min(hours, 8760))
+        host = (host or "").strip().lower()
+        country = (country or "").strip().upper()
+        cache_key = f"report:v3:{hours}:{host}:{country}"
+        now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
+        with self._events_connection() as db:
+            cached = db.execute("SELECT generated_at, expires_at, payload FROM report_cache WHERE cache_key = ?", (cache_key,)).fetchone()
+            if cached:
+                try:
+                    if cached[1] > now_iso:
+                        value = json.loads(cached[2])
+                        value["cached"] = True
+                        value["cache_expires_at"] = cached[1]
+                        return value
+                except (TypeError, json.JSONDecodeError):
+                    pass
         self._sync_audit_events()
-        hours = max(1, min(hours, 720))
-        cutoff = (datetime.now(timezone.utc).timestamp() - hours * 3600)
+        cutoff = now.timestamp() - hours * 3600
         cutoff_iso = datetime.fromtimestamp(cutoff, timezone.utc).isoformat()
+        conditions = ["occurred_at >= ?"]
+        query_params: list[str] = [cutoff_iso]
+        if host:
+            conditions.append("LOWER(host) = ?")
+            query_params.append(host)
+        if country:
+            conditions.append("UPPER(country_code) = ?")
+            query_params.append(country)
+        where = " AND ".join(conditions)
         with self._events_connection() as db:
             summary = db.execute(
                 """SELECT COUNT(*) AS total,
                           SUM(CASE WHEN outcome = 'Blocked' THEN 1 ELSE 0 END) AS blocked,
                           SUM(CASE WHEN outcome = 'Allowed' THEN 1 ELSE 0 END) AS allowed,
-                          COUNT(DISTINCT source_ip) AS unique_sources
-                   FROM audit_events WHERE occurred_at >= ?""", (cutoff_iso,)
-            ).fetchone()
+                          COUNT(DISTINCT source_ip) AS unique_sources,
+                          COUNT(DISTINCT host) AS protected_hosts
+                   FROM audit_events WHERE """ + where, query_params).fetchone()
             countries = db.execute(
                 """SELECT country_code, country_name, continent_code, continent_name,
                           COUNT(*) AS requests,
                           SUM(CASE WHEN outcome = 'Blocked' THEN 1 ELSE 0 END) AS blocked
-                   FROM audit_events WHERE occurred_at >= ? AND country_code != ''
-                   GROUP BY country_code ORDER BY blocked DESC, requests DESC LIMIT 100""", (cutoff_iso,)
-            ).fetchall()
-            rules = db.execute(
-                """SELECT messages FROM audit_events WHERE occurred_at >= ? AND messages != '[]'""", (cutoff_iso,)
-            ).fetchall()
+                   FROM audit_events WHERE """ + where + " AND country_code != '' GROUP BY country_code ORDER BY blocked DESC, requests DESC LIMIT 100", query_params).fetchall()
+            rows = db.execute("SELECT occurred_at, source_ip, host, method, uri, status, outcome, country_code, country_name, continent_code, continent_name, messages FROM audit_events WHERE """ + where, query_params).fetchall()
             statuses = db.execute(
                 """SELECT COALESCE(status, 0) AS status, COUNT(*) AS count
-                   FROM audit_events WHERE occurred_at >= ? GROUP BY status ORDER BY count DESC""", (cutoff_iso,)
-            ).fetchall()
+                   FROM audit_events WHERE """ + where + " GROUP BY status ORDER BY count DESC", query_params).fetchall()
+            methods = db.execute("SELECT method, COUNT(*) AS count FROM audit_events WHERE """ + where + " GROUP BY method ORDER BY count DESC", query_params).fetchall()
+            hosts = db.execute("SELECT host, COUNT(*) AS requests, SUM(CASE WHEN outcome = 'Blocked' THEN 1 ELSE 0 END) AS blocked FROM audit_events WHERE """ + where + " GROUP BY host ORDER BY blocked DESC, requests DESC LIMIT 25", query_params).fetchall()
+            sources = db.execute("SELECT source_ip, COUNT(*) AS requests, SUM(CASE WHEN outcome = 'Blocked' THEN 1 ELSE 0 END) AS blocked, COUNT(DISTINCT host) AS hosts FROM audit_events WHERE """ + where + " GROUP BY source_ip ORDER BY blocked DESC, requests DESC LIMIT 25", query_params).fetchall()
         rule_counts = Counter()
-        for row in rules:
+        category_counts = Counter()
+        path_counts = Counter()
+        timeline = Counter()
+        for row in rows:
+            timestamp = row["occurred_at"] or ""
+            bucket = timestamp[:13] + ":00:00+00:00" if hours <= 48 else timestamp[:10] + "T00:00:00+00:00"
+            timeline[(bucket, "requests")] += 1
+            status = int(row["status"] or 0)
+            if row["outcome"] == "Blocked": timeline[(bucket, "blocked")] += 1
+            if row["outcome"] == "Allowed": timeline[(bucket, "allowed")] += 1
+            if 400 <= status < 500: timeline[(bucket, "client_errors")] += 1
+            if 500 <= status < 600: timeline[(bucket, "server_errors")] += 1
+            path_counts[urlsplit(row["uri"] or "?").path or "/"] += 1
             try:
                 for _, message in json.loads(row["messages"] or "[]"):
                     rule_counts[message] += 1
+                    lowered = message.lower()
+                    category = "Other detection"
+                    for keyword, label in (("sql", "SQL injection"), ("scanner", "Scanner behavior"), ("travers", "Path traversal"), ("command", "Command injection"), ("credential", "Credential abuse"), ("sensitive", "Sensitive file exposure"), ("xss", "Cross-site scripting")):
+                        if keyword in lowered:
+                            category = label
+                            break
+                    category_counts[category] += 1
             except (TypeError, json.JSONDecodeError):
                 continue
         total = int(summary["total"] or 0)
-        return {
+        ordered_buckets = sorted({key[0] for key in timeline})
+        payload = {
             "hours": hours,
             "source": "Application Shield SQLite event index",
+            "generated_at": now_iso,
+            "cache_expires_at": (now.timestamp() + 3600),
+            "cached": False,
+            "filters": {"host": host, "country": country},
             "summary": {
                 "total": total, "blocked": int(summary["blocked"] or 0),
-                "allowed": int(summary["allowed"] or 0), "unique_sources": int(summary["unique_sources"] or 0),
+                "allowed": int(summary["allowed"] or 0), "unique_sources": int(summary["unique_sources"] or 0), "protected_hosts": int(summary["protected_hosts"] or 0),
             },
             "countries": [dict(row) for row in countries],
             "rule_groups": [{"message": message, "count": count} for message, count in rule_counts.most_common(100)],
+            "categories": [{"category": label, "count": count} for label, count in category_counts.most_common(20)],
+            "timeline": [{"bucket": bucket, "requests": timeline[(bucket, "requests")], "blocked": timeline[(bucket, "blocked")], "allowed": timeline[(bucket, "allowed")], "client_errors": timeline[(bucket, "client_errors")], "server_errors": timeline[(bucket, "server_errors")]} for bucket in ordered_buckets],
+            "hosts": [dict(row) for row in hosts],
+            "sources": [dict(row) for row in sources],
+            "paths": [{"path": path, "count": count} for path, count in path_counts.most_common(25)],
+            "methods": [dict(row) for row in methods],
             "statuses": [{"status": int(row["status"]), "count": int(row["count"])} for row in statuses],
         }
+        expires_at = datetime.fromtimestamp(now.timestamp() + 3600, timezone.utc).isoformat()
+        payload["cache_expires_at"] = expires_at
+        with self._events_connection() as db:
+            if not host and not country:
+                hourly = Counter()
+                daily = Counter()
+                for row in rows:
+                    timestamp = row["occurred_at"] or ""
+                    hour_bucket = timestamp[:13] + ":00:00+00:00"
+                    day_bucket = timestamp[:10] + "T00:00:00+00:00"
+                    for bucket, target in ((hour_bucket, hourly), (day_bucket, daily)):
+                        target[(bucket, "requests")] += 1
+                        target[(bucket, "blocked")] += int(row["outcome"] == "Blocked")
+                        target[(bucket, "allowed")] += int(row["outcome"] == "Allowed")
+                        target[(bucket, "client_errors")] += int(400 <= int(row["status"] or 0) < 500)
+                        target[(bucket, "server_errors")] += int(500 <= int(row["status"] or 0) < 600)
+                for table, values in (("hourly_security_rollups", hourly), ("daily_security_rollups", daily)):
+                    for bucket in {key[0] for key in values}:
+                        db.execute(f"INSERT OR REPLACE INTO {table}(bucket_start, requests, blocked, allowed, client_errors, server_errors) VALUES (?, ?, ?, ?, ?, ?)", (bucket, values[(bucket, "requests")], values[(bucket, "blocked")], values[(bucket, "allowed")], values[(bucket, "client_errors")], values[(bucket, "server_errors")]))
+            db.execute("INSERT OR REPLACE INTO report_cache(cache_key, generated_at, expires_at, payload) VALUES (?, ?, ?, ?)", (cache_key, now_iso, expires_at, json.dumps(payload, separators=(",", ":"))))
+        return payload
 
     def logs(self, lines: int = 120) -> dict:
         candidates = [
@@ -987,29 +1099,52 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
         self._sync_audit_events()
         limit = max(1, min(limit, 5000))
         with self._events_connection() as db:
-            countries = db.execute(
-                """SELECT country_code, country_name, continent_code, continent_name,
-                          COUNT(*) AS requests,
-                          SUM(CASE WHEN outcome = 'Blocked' THEN 1 ELSE 0 END) AS blocked
-                   FROM audit_events WHERE country_code != ''
-                   GROUP BY country_code ORDER BY blocked DESC, requests DESC LIMIT ?""", (limit,)
-            ).fetchall()
-            continents = db.execute(
-                """SELECT continent_code, continent_name, COUNT(*) AS requests,
-                          SUM(CASE WHEN outcome = 'Blocked' THEN 1 ELSE 0 END) AS blocked
-                   FROM audit_events WHERE continent_code != ''
-                   GROUP BY continent_code ORDER BY blocked DESC, requests DESC LIMIT ?""", (limit,)
+            rows = db.execute(
+                "SELECT country_code, country_name, continent_code, continent_name, outcome, source_ip FROM audit_events WHERE country_code != ''"
             ).fetchall()
             recent = db.execute(
                 "SELECT * FROM audit_events WHERE country_code != '' ORDER BY occurred_at DESC, id DESC LIMIT ?",
                 (min(limit, 100),),
             ).fetchall()
             count = int(db.execute("SELECT COUNT(*) FROM audit_events").fetchone()[0])
+        country_totals = {}
+        continent_totals = {}
+        for row in rows:
+            code = str(row["country_code"] or "").upper()
+            continent_code = row["continent_code"] or ""
+            continent_name = row["continent_name"] or ""
+            if not continent_code:
+                resolved = geoip_service.lookup(row["source_ip"] or "") or {}
+                continent_code = resolved.get("continent_code", "")
+                continent_name = resolved.get("continent_name", "")
+            if not continent_code:
+                continent_code, continent_name = _continent_for_country(code)
+            country = country_totals.setdefault(code, {
+                "country_code": code,
+                "country_name": row["country_name"] or code,
+                "continent_code": continent_code,
+                "continent_name": continent_name,
+                "requests": 0,
+                "blocked": 0,
+            })
+            country["requests"] += 1
+            country["blocked"] += int(row["outcome"] == "Blocked")
+            if continent_code:
+                continent = continent_totals.setdefault(continent_code, {
+                    "continent_code": continent_code,
+                    "continent_name": continent_name or _CONTINENT_NAMES.get(continent_code, continent_code),
+                    "requests": 0,
+                    "blocked": 0,
+                })
+                continent["requests"] += 1
+                continent["blocked"] += int(row["outcome"] == "Blocked")
+        countries = sorted(country_totals.values(), key=lambda item: (item["blocked"], item["requests"]), reverse=True)[:limit]
+        continents = sorted(continent_totals.values(), key=lambda item: (item["blocked"], item["requests"]), reverse=True)[:limit]
         return {
             "source": "Application Shield SQLite event index",
             "events_considered": count,
-            "countries": [dict(row) for row in countries],
-            "continents": [dict(row) for row in continents],
+            "countries": countries,
+            "continents": continents,
             "recent_events": [self._event_public(row) for row in recent],
         }
 

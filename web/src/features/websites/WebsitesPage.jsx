@@ -23,6 +23,7 @@ import { apiRequest, readApiError } from "../../lib/api";
 import WebsiteFormModal from "./WebsiteFormModal";
 import ApplicationTemplatesModal from "./ApplicationTemplatesModal";
 import ProjectCreateModal from "./ProjectCreateModal";
+import ProxyEditModal from "./ProxyEditModal";
 import ProjectOperationModal from "./ProjectOperationModal";
 
 const WEB_SERVER_IDS = ["nginx", "apache", "openlitespeed", "caddy"];
@@ -599,13 +600,20 @@ export default function WebsitesPage({ onOpenTerminal }) {
           }}
         />
       )}
-      {projectModal && <ProjectCreateModal mode={projectModal.mode} template={projectModal.template} existing={projectModal.existing} root={root} nodeVersions={nodeVersions} serverType={serverType} onClose={() => setProjectModal(null)} onCreated={(result, kind, editing) => {
+      {projectModal?.mode === "node" && <ProjectCreateModal mode={projectModal.mode} template={projectModal.template} existing={projectModal.existing} root={root} nodeVersions={nodeVersions} serverType={serverType} onClose={() => setProjectModal(null)} onCreated={(result, kind, editing) => {
         setProjectModal(null);
         const created = result?.project || result?.route;
         if (created && kind === "Reverse proxy") setProxyRoutes((current) => editing ? current.map((item) => item.id === created.id ? created : item) : [created, ...current.filter((item) => item.id !== created.id)]);
         if (created && kind === "Node.js project") setNodeProjects((current) => editing ? current.map((item) => item.id === created.id ? created : item) : [created, ...current.filter((item) => item.id !== created.id)]);
         if (result?.job) setOperation({ job: result.job, title: `Create ${created?.domain || kind}`, kind, projectPath: created?.project_path || "" });
         else setToast({ type: "success", message: `${kind} created successfully.` });
+      }} />}
+      {projectModal?.mode === "proxy" && <ProxyEditModal existing={projectModal.existing} serverType={serverType} onClose={() => setProjectModal(null)} onCreated={(result, kind, editing) => {
+        setProjectModal(null);
+        const created = result?.route;
+        if (created) setProxyRoutes((current) => editing ? current.map((item) => item.id === created.id ? created : item) : [created, ...current.filter((item) => item.id !== created.id)]);
+        if (result?.job) setOperation({ job: result.job, title: `${editing ? "Update" : "Create"} ${created?.domain || kind}`, kind, projectPath: "" });
+        else setToast({ type: "success", message: `${created?.domain || kind} ${editing ? "updated" : "created"} successfully.` });
       }} />}
       {operation && <ProjectOperationModal jobId={operation.job.id} title={operation.title} kind={operation.kind} projectPath={operation.projectPath} onClose={() => setOperation(null)} />}
       <ActionDialog

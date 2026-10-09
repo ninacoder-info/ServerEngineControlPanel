@@ -1,12 +1,21 @@
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 
 from app.api.dependencies import require_user
-from app.models.projects import NodeProjectActionRequest, NodeProjectCreateRequest, ProxyRouteCreateRequest
+from app.models.projects import NodeProjectActionRequest, NodeProjectCreateRequest, ProxyCertificateRequest, ProxyRouteCreateRequest
 import uuid
 from app.services.job_service import job_store
 from app.services.project_service import project_service
 
 router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
+
+
+class ProjectConfigurationSaveRequest(BaseModel):
+    content: str = Field(max_length=200000)
+
+
+class ProxyActionRequest(BaseModel):
+    action: str = Field(pattern="^(enable|disable)$")
 
 
 @router.get("/node")
@@ -79,3 +88,34 @@ def delete_proxy_route(route_id: str, user=Depends(require_user)):
 @router.get("/proxy/{route_id}/configuration")
 def proxy_route_configuration(route_id: str, user=Depends(require_user)):
     return project_service.configuration("proxy", route_id)
+
+
+@router.get("/proxy/{route_id}/certificate")
+def proxy_route_certificate(route_id: str, user=Depends(require_user)):
+    return project_service.proxy_certificate_info(route_id)
+
+
+@router.post("/proxy/{route_id}/certificate")
+def install_proxy_certificate(route_id: str, payload: ProxyCertificateRequest, user=Depends(require_user)):
+    route = project_service.store_proxy_certificate(route_id, payload.certificate, payload.private_key)
+    job = job_store.enqueue_action(f"certificate-reload-proxy-{route.id}-{uuid.uuid4().hex[:8]}", route.server_type, "restart")
+    return {"route": route, "job": job}
+
+
+@router.put("/proxy/{route_id}/configuration")
+def save_proxy_route_configuration(route_id: str, payload: ProjectConfigurationSaveRequest, user=Depends(require_user)):
+    result = project_service.save_proxy_configuration(route_id, payload.content)
+    route = next((item for item in project_service.list_proxy() if item.id == route_id), None)
+    if route is None:
+        raise HTTPException(404, "Proxy route not found")
+    job = job_store.enqueue_action(f"provider-reload-proxy-config-{route.id}-{uuid.uuid4().hex[:8]}", route.server_type, "restart")
+    result["saved"] = True
+    result["job"] = job
+    return result
+
+
+@router.post("/proxy/{route_id}/actions")
+def proxy_route_action(route_id: str, payload: ProxyActionRequest, user=Depends(require_user)):
+    route = project_service.proxy_action(route_id, payload.action)
+    job = job_store.enqueue_action(f"provider-reload-proxy-action-{route.id}-{uuid.uuid4().hex[:8]}", route.server_type, "restart")
+    return {"route": route, "job": job}

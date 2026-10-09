@@ -80,33 +80,6 @@ const inputClass =
   "mt-1.5 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100";
 const buttonClass =
   "inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60";
-const starterPrograms = [
-  {
-    id: "laravel-worker",
-    name: "Laravel queue worker",
-    group: "Website",
-    command: "php artisan queue:work --sleep=3 --tries=3",
-    directory: "/server-engine/www/example.com",
-    user: "serverengine",
-    processes: 2,
-    autostart: true,
-    autorestart: true,
-    status: "stopped",
-  },
-  {
-    id: "laravel-scheduler",
-    name: "Laravel scheduler",
-    group: "Website",
-    command: "php artisan schedule:work",
-    directory: "/server-engine/www/example.com",
-    user: "serverengine",
-    processes: 1,
-    autostart: true,
-    autorestart: true,
-    status: "stopped",
-  },
-];
-
 const programSchema = z.object({
   id: z.string(),
   name: z.string().trim().min(1, "Enter a program name."),
@@ -282,9 +255,10 @@ export default function SupervisorWorkspace() {
   const supervisorState = useServiceInstallationState("supervisor");
   const [programs, setPrograms] = React.useState(() => {
     try {
-      return JSON.parse(localStorage.getItem("serverengine:supervisor-programs") || "null") || starterPrograms;
+      const saved = JSON.parse(localStorage.getItem("serverengine:supervisor-programs") || "[]");
+      return Array.isArray(saved) ? saved.filter((item) => !["laravel-worker", "laravel-scheduler"].includes(item.id)) : [];
     } catch {
-      return starterPrograms;
+      return [];
     }
   });
   const [editing, setEditing] = React.useState(null);
@@ -299,6 +273,9 @@ export default function SupervisorWorkspace() {
     setPrograms(next);
     localStorage.setItem("serverengine:supervisor-programs", JSON.stringify(next));
   };
+  React.useEffect(() => {
+    localStorage.setItem("serverengine:supervisor-programs", JSON.stringify(programs));
+  }, [programs]);
   const saveProgram = (program) => {
     savePrograms(programs.some((item) => item.id === program.id) ? programs.map((item) => item.id === program.id ? program : item) : [...programs, program]);
     setEditing(null);

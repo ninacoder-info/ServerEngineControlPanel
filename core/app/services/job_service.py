@@ -2280,6 +2280,7 @@ class JobStore:
                 socket.unlink(missing_ok=True)
             if action == "stop":
                 self._update(job_id, status="succeeded", message="Supervisor stopped.")
+                self._broadcast_service_status("supervisor", action, "succeeded", "Supervisor stopped.")
                 return
             process = subprocess.Popen(
                 [*supervisor_command, "-c", str(config)],
@@ -2294,6 +2295,7 @@ class JobStore:
             while time.monotonic() < deadline:
                 if socket.exists() and supervisor_alive():
                     self._update(job_id, status="succeeded", message=f"Supervisor {action} completed.")
+                    self._broadcast_service_status("supervisor", action, "succeeded", f"Supervisor {action} completed.")
                     return
                 if process.poll() is not None:
                     break
@@ -2304,6 +2306,7 @@ class JobStore:
             raise RuntimeError("Supervisor did not create its control socket")
         except Exception as error:
             self._update(job_id, status="failed", message=str(error))
+            self._broadcast_service_status("supervisor", action, "failed", str(error))
 
     def _run_vsftpd_action(self, job_id: str, action: str):
         root = service_root("vsftpd")

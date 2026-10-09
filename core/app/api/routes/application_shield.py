@@ -41,8 +41,8 @@ def traffic(page: int = 1, page_size: int = 50, limit: int | None = None, user=D
 
 
 @router.get("/report")
-def report(hours: int = 24, user=Depends(require_user)):
-    return application_shield_service.report(hours)
+def report(hours: int = 24, host: str = "", country: str = "", user=Depends(require_user)):
+    return application_shield_service.report(hours, host=host, country=country)
 
 
 @router.get("/attack-map")

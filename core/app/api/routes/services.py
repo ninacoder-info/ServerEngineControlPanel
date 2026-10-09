@@ -838,6 +838,9 @@ def installed(user=Depends(require_user)):
     global _installed_services_cache
     with _inventory_cache_lock:
         if _installed_services_cache is not None:
+            supervisor = next((item for item in _installed_services_cache if item.id == "supervisor"), None)
+            if supervisor is not None:
+                supervisor.status = "running" if _supervisor_running() else "stopped"
             return _installed_services_cache
     detected = [InstalledService(id="server-engine", name="Server Engine", version="0.1.0", status="running", managed=True)]
     phpmyadmin_root = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / "phpmyadmin"
@@ -945,6 +948,14 @@ def installed(user=Depends(require_user)):
                     version = _installed_service_version("python", package, version_root.name)
                     if version is not None:
                         detected.append(InstalledService(id=f"python@{version_root.name}", name=f"Python {version_root.name}", version=version_root.name, status="installed", managed=False))
+            continue
+        if service_id == "supervisor":
+            supervisor_root = service_root("supervisor")
+            marker = supervisor_root / ".serverengine-version"
+            version = marker.read_text(errors="replace").strip() if marker.exists() else _installed_service_version(service_id, package)
+            if version is not None:
+                definition = get_service(service_id)
+                detected.append(InstalledService(id="supervisor", name=definition.name if definition else "Supervisor", version=version, status="running" if _supervisor_running() else "stopped", managed=False))
             continue
         if service_id == "apache":
             apache_base = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / "apache"
@@ -1525,6 +1536,15 @@ def _installed_service_version(service_id: str, package: str, version: str | Non
         # inventory endpoint fail. The installer repairs managed ownership on
         # the next update; until then treat this runtime as undetected.
         return None
+
+
+def _supervisor_running() -> bool:
+    pid_file = service_root("supervisor") / "run/supervisord.pid"
+    try:
+        os.kill(int(pid_file.read_text().strip()), 0)
+        return True
+    except (OSError, ValueError, FileNotFoundError):
+        return False
 
 
 def _process_running(process_name: str, version: str | None = None) -> bool:

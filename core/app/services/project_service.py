@@ -5,6 +5,7 @@ import os
 import pwd
 import re
 import shlex
+import ssl
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -113,10 +114,54 @@ class ProjectService:
             lines = [f"vhDomain {domain}", "context / {", "  type proxy", f"  uri {path}", f"  handler {target}", "}"]
         else:
             config_path = root / "conf/sites" / f"{config_id}.conf"
-            lines = ["server {", "    listen 80;", f"    server_name {domain};", "", f"    location {path} {{", f"        proxy_pass {target};", f"        proxy_connect_timeout {timeout}s;", f"        proxy_read_timeout {timeout}s;", f"        proxy_set_header Host {send_host};", "        proxy_set_header X-Real-IP $remote_addr;", "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;", "        proxy_set_header X-Forwarded-Proto $scheme;"]
+            aliases = " ".join([domain, *getattr(item, "aliases", [])])
+            http_listener = "    listen 80;" if not isinstance(item, ProxyRoute) or item.ssl_allow_http or not (item.ssl_enabled and item.certificate_path and item.private_key_path) else ""
+            lines = ["server {", *([http_listener] if http_listener else []), f"    server_name {aliases};"]
+            if isinstance(item, ProxyRoute):
+                if item.cache_enabled:
+                    lines.insert(0, f"proxy_cache_path /server-engine/data/proxy-cache/{config_id} levels=1:2 keys_zone=proxy_{config_id.replace('-', '_')}:10m max_size=1g inactive={item.cache_ttl}s use_temp_path=off;")
+                lines.extend([
+                    f"    access_log {'/server-engine/logs/proxy/' + config_id + '.access.log' if item.access_log_enabled else 'off'};",
+                    f"    error_log {'/server-engine/logs/proxy/' + config_id + '.error.log' if item.error_log_enabled else '/dev/null'} warn;",
+                ])
+                if item.ssl_enabled and item.certificate_path and item.private_key_path:
+                    lines.extend(["    listen 443 ssl http2;", f"    ssl_certificate {item.certificate_path};", f"    ssl_certificate_key {item.private_key_path};"])
+                if item.ssl_enforce_tls:
+                    lines.extend(["    if ($scheme = http) { return 301 https://$host$request_uri; }"])
+                for redirect in item.redirects:
+                    source = redirect.get("source_path", "/")
+                    target_url = redirect.get("target", "")
+                    code = redirect.get("code", "301")
+                    if target_url:
+                        lines.append(f"    return {code} {target_url};")
+                if item.maintenance_enabled:
+                    lines.extend([f"    error_page 503 = @server_engine_proxy_maintenance_{config_id};"])
+                if item.cache_enabled:
+                    lines.append(f"    proxy_cache_valid any {item.cache_ttl}s;")
+            lines.extend(["", f"    location {path} {{"])
+            if isinstance(item, ProxyRoute) and item.access_allowed_ips:
+                lines.extend([*(f"        allow {value};" for value in item.access_allowed_ips), "        deny all;"])
+            lines.extend([f"        proxy_pass {target};", f"        proxy_connect_timeout {timeout}s;", f"        proxy_read_timeout {timeout}s;", f"        proxy_set_header Host {send_host};", "        proxy_set_header X-Real-IP $remote_addr;", "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;", "        proxy_set_header X-Forwarded-Proto $scheme;", f"        proxy_buffering {'on' if getattr(item, 'buffering', True) else 'off'};"])
+            if isinstance(item, ProxyRoute) and item.cache_enabled:
+                lines.append(f"        proxy_cache proxy_{config_id.replace('-', '_')};")
+            if isinstance(item, ProxyRoute) and item.maintenance_enabled:
+                message = item.maintenance_message.replace('\\', '\\\\').replace('"', '\\"').replace("\n", " ")
+                lines.append(f"        return {item.maintenance_response_code} \"{message}\";")
+            if isinstance(item, ProxyRoute) and item.hotlink.get("enabled"):
+                domains = " ".join(str(value) for value in item.hotlink.get("domains", []))
+                lines.append(f"        valid_referers none blocked server_names {domains};")
+                lines.append("        if ($invalid_referer) { return 403; }")
             if websocket:
-                lines.extend(["        proxy_set_header Upgrade $http_upgrade;", '        proxy_set_header Connection "upgrade";'])
+                lines.extend(["        proxy_http_version 1.1;", "        proxy_set_header Upgrade $http_upgrade;", '        proxy_set_header Connection "upgrade";'])
+            if isinstance(item, ProxyRoute):
+                for key, value in item.headers.items():
+                    if re.fullmatch(r"[A-Za-z0-9-]+", str(key)) and "\n" not in str(value) and "\r" not in str(value):
+                        lines.append(f"        proxy_set_header {key} {value};")
             lines.extend(["    }", "}"])
+        if isinstance(item, ProxyRoute) and item.custom_config and item.enabled:
+            lines = [item.custom_config.rstrip()]
+        if isinstance(item, ProxyRoute) and not item.enabled:
+            lines = [f"# Server Engine proxy {item.id} is disabled."]
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text("\n".join(lines) + "\n")
         return str(config_path)
@@ -251,8 +296,20 @@ class ProjectService:
             self._ensure_domain_free(domain)
             now = self._now()
             route = ProxyRoute(id=str(uuid.uuid4()), name=payload.name.strip(), domain=domain, target=target,
-                path=payload.path.strip(), send_host=payload.send_host.strip(), websocket=payload.websocket,
-                timeout=payload.timeout, server_type=payload.server_type, ssl_enabled=payload.ssl_enabled,
+                path=payload.path.strip(), aliases=[item.strip().lower() for item in payload.aliases if item.strip()],
+                canonical_domain=payload.canonical_domain.strip().lower(), send_host=payload.send_host.strip(),
+                websocket=payload.websocket, buffering=payload.buffering, timeout=payload.timeout,
+                server_type=payload.server_type, ssl_enabled=payload.ssl_enabled,
+                ssl_enforce_tls=payload.ssl_enforce_tls, ssl_allow_http=payload.ssl_allow_http,
+                certificate_path=payload.certificate_path.strip(), private_key_path=payload.private_key_path.strip(),
+                access_allowed_ips=payload.access_allowed_ips, access_auth_enabled=payload.access_auth_enabled,
+                access_auth_username=payload.access_auth_username.strip(), access_log_enabled=payload.access_log_enabled,
+                error_log_enabled=payload.error_log_enabled, redirects=payload.redirects, headers=payload.headers,
+                cache_enabled=payload.cache_enabled, cache_ttl=payload.cache_ttl,
+                maintenance_enabled=payload.maintenance_enabled, maintenance_response_code=payload.maintenance_response_code,
+                maintenance_message=payload.maintenance_message.strip() or "We'll be back shortly.",
+                maintenance_bypass=payload.maintenance_bypass, maintenance_start=payload.maintenance_start.strip(),
+                maintenance_end=payload.maintenance_end.strip(), hotlink=payload.hotlink,
                 created_at=now, updated_at=now)
             route.config_path = self._write_provider_config(route)
             entries = self._read(self.proxy_path)
@@ -274,12 +331,92 @@ class ProjectService:
             domain = self._domain(payload.domain)
             self._ensure_domain_free(domain, route_id)
             updated = {**item, **payload.model_dump(mode="json"), "id": route_id, "domain": domain, "target": target, "updated_at": self._now()}
+            updated["aliases"] = [value.strip().lower() for value in payload.aliases if value.strip()]
+            updated["canonical_domain"] = payload.canonical_domain.strip().lower()
             route = ProxyRoute.model_validate(updated)
             route.config_path = self._write_provider_config(route)
             for index, entry in enumerate(entries):
                 if entry.get("id") == route_id:
                     entries[index] = route.model_dump(mode="json")
                     break
+            self._write(self.proxy_path, entries)
+            return route
+
+    def proxy_action(self, route_id: str, action: str) -> ProxyRoute:
+        if action not in {"enable", "disable"}:
+            raise HTTPException(400, "Unsupported proxy action")
+        with self._lock:
+            entries = self._read(self.proxy_path)
+            item = next((entry for entry in entries if entry.get("id") == route_id), None)
+            if item is None:
+                raise HTTPException(404, "Proxy route not found")
+            item["enabled"] = action == "enable"
+            item["status"] = "ready" if item["enabled"] else "disabled"
+            item["updated_at"] = self._now()
+            route = ProxyRoute.model_validate(item)
+            route.config_path = self._write_provider_config(route)
+            item.update(route.model_dump(mode="json"))
+            self._write(self.proxy_path, entries)
+            return route
+
+    def save_proxy_configuration(self, route_id: str, content: str) -> dict:
+        with self._lock:
+            entries = self._read(self.proxy_path)
+            item = next((entry for entry in entries if entry.get("id") == route_id), None)
+            if item is None:
+                raise HTTPException(404, "Proxy route not found")
+            path = Path(item.get("config_path", ""))
+            if not path:
+                raise HTTPException(404, "Generated proxy configuration is not available")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            previous = path.with_suffix(path.suffix + ".previous")
+            if path.exists():
+                previous.write_text(path.read_text(errors="replace"))
+            path.write_text(content)
+            item["custom_config"] = content
+            item["updated_at"] = self._now()
+            self._write(self.proxy_path, entries)
+            return {"id": route_id, "path": str(path), "content": content, "has_previous": previous.exists()}
+
+    def proxy_certificate_info(self, route_id: str) -> dict:
+        route = next((item for item in self.list_proxy() if item.id == route_id), None)
+        if route is None:
+            raise HTTPException(404, "Proxy route not found")
+        certificate = Path(route.certificate_path) if route.certificate_path else Path(os.getenv("SE_STATE_DIR", "/var/lib/server-engine")) / "proxy-certificates" / route_id / "fullchain.pem"
+        private_key = Path(route.private_key_path) if route.private_key_path else certificate.parent / "privkey.pem"
+        expires_at = route.certificate_expires_at
+        if certificate.is_file():
+            try:
+                decoded = ssl._ssl._test_decode_cert(str(certificate))
+                if decoded.get("notAfter"):
+                    expires_at = datetime.strptime(decoded["notAfter"], "%b %d %H:%M:%S %Y %Z").replace(tzinfo=timezone.utc).isoformat()
+            except (OSError, ValueError, ssl.SSLError):
+                pass
+        available = certificate.is_file() and private_key.is_file()
+        return {"status": "issued" if available else route.certificate_status, "source": route.certificate_source, "certificate_path": str(certificate), "private_key_path": str(private_key), "expires_at": expires_at, "available": available}
+
+    def store_proxy_certificate(self, route_id: str, certificate: str, private_key: str) -> ProxyRoute:
+        if "BEGIN CERTIFICATE" not in certificate or "END CERTIFICATE" not in certificate:
+            raise HTTPException(400, "Certificate must be PEM encoded.")
+        if "BEGIN" not in private_key or "PRIVATE KEY" not in private_key or "END" not in private_key:
+            raise HTTPException(400, "Private key must be PEM encoded.")
+        with self._lock:
+            entries = self._read(self.proxy_path)
+            item = next((entry for entry in entries if entry.get("id") == route_id), None)
+            if item is None:
+                raise HTTPException(404, "Proxy route not found")
+            root = Path(os.getenv("SE_STATE_DIR", "/var/lib/server-engine")) / "proxy-certificates" / route_id
+            certificate_path = Path(item.get("certificate_path") or root / "fullchain.pem")
+            private_key_path = Path(item.get("private_key_path") or root / "privkey.pem")
+            certificate_path.parent.mkdir(parents=True, exist_ok=True)
+            certificate_path.write_text(certificate.strip() + "\n")
+            private_key_path.write_text(private_key.strip() + "\n")
+            certificate_path.chmod(0o644)
+            private_key_path.chmod(0o600)
+            item.update({"certificate_path": str(certificate_path), "private_key_path": str(private_key_path), "certificate_status": "issued", "certificate_source": "upload", "ssl_enabled": True, "updated_at": self._now()})
+            route = ProxyRoute.model_validate(item)
+            route.config_path = self._write_provider_config(route)
+            item.update(route.model_dump(mode="json"))
             self._write(self.proxy_path, entries)
             return route
 
