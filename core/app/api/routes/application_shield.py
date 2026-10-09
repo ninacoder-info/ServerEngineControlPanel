@@ -40,6 +40,11 @@ def traffic(page: int = 1, page_size: int = 50, limit: int | None = None, user=D
     return application_shield_service.traffic(page=page, page_size=page_size)
 
 
+@router.get("/report")
+def report(hours: int = 24, user=Depends(require_user)):
+    return application_shield_service.report(hours)
+
+
 @router.get("/attack-map")
 def attack_map(limit: int = 1000, user=Depends(require_user)):
     return application_shield_service.attack_map(limit)

@@ -54,6 +54,7 @@ def _website_log_metadata(path: Path, root: Path, sites=None) -> dict:
 
 
 def _size(root: Path) -> int:
+    """Return all managed log-volume bytes, including SQLite indexes/WAL files."""
     total = 0
     if not root.is_dir():
         return 0

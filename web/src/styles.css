@@ -11,6 +11,13 @@
   --se-muted: #616161;
   --se-accent: #0066b8;
   --se-accent-hover: #005a9e;
+  --se-map-surface: #f8fafc;
+  --se-map-empty: #e5e7eb;
+  --se-map-border: #cbd5e1;
+  --se-map-border-strong: #64748b;
+  --se-map-accent: #2563eb;
+  --se-map-hover: #f59e0b;
+  --se-map-selected: #f97316;
 }
 
 html.dark {
@@ -22,6 +29,13 @@ html.dark {
   --se-muted: #858585;
   --se-accent: #569cd6;
   --se-accent-hover: #75beff;
+  --se-map-surface: #111827;
+  --se-map-empty: #374151;
+  --se-map-border: #4b5563;
+  --se-map-border-strong: #cbd5e1;
+  --se-map-accent: #60a5fa;
+  --se-map-hover: #fbbf24;
+  --se-map-selected: #fb923c;
 }
 
 /* Make the existing Tailwind utility classes use the active VS Code palette. */
@@ -80,4 +94,16 @@ a {
 
 ::selection {
   background: color-mix(in srgb, var(--se-accent) 35%, transparent);
+}
+
+/* Keep the Application Shield origin chart inspectable on narrow panels. */
+div.flex.h-56.items-end.gap-2.border-b.border-l.border-neutral-300 {
+  width: 100%;
+  height: 16rem;
+  gap: 0.75rem;
+  overflow-x: auto;
+}
+
+div.flex.h-56.items-end.gap-2.border-b.border-l.border-neutral-300 > div {
+  flex: 0 0 4rem;
 }

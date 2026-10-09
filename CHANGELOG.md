@@ -4,6 +4,18 @@ Release notes for the Server Engine control panel and control-plane runtime.
 
 ## Unreleased
 
+## v0.1.54
+
+- Added SQLite indexing for Application Shield audit events, with fast reports,
+  traffic pagination, country grouping, rule grouping, and activity summaries.
+- Defaulted ModSecurity audit logging to `SecAuditLogParts ABFHZ` so request and
+  response bodies are not stored in new audit transactions.
+- Added Application Shield world traffic map with dark/light theme support,
+  country hover details, click-to-inspect data, and country flags.
+- Included the Application Shield SQLite index in the Logs page size total.
+- Added `react-simple-maps`, bundled world map data, and ISO country mapping to
+  the production frontend without an external map API key.
+
 - Removed stale Application Shield Nginx module references when the exact
   connector is missing, allowing Nginx to start after an incomplete install.
 - Prevented Application Shield from writing an Nginx include without a

@@ -4,11 +4,13 @@ import json
 import ipaddress
 import os
 import shutil
+import sqlite3
 import subprocess
 import tempfile
 import re
 import time
 import uuid
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
@@ -41,6 +43,10 @@ class ApplicationShieldService:
         self.rules_path = Path(os.getenv("SE_APPLICATION_SHIELD_RULES_PATH", str(state_dir / "application-shield-rules.json")))
         self.ip_path = Path(os.getenv("SE_APPLICATION_SHIELD_IP_PATH", str(state_dir / "application-shield-ip.json")))
         self.geo_path = Path(os.getenv("SE_APPLICATION_SHIELD_GEO_PATH", str(state_dir / "application-shield-geo.json")))
+        self.events_db_path = Path(os.getenv(
+            "SE_APPLICATION_SHIELD_DB_PATH",
+            "/server-engine/logs/application-shield/application-shield.db",
+        ))
         self.service_root = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services"))
         self._lock = RLock()
         self._traffic_cache_signature: tuple[int, int] | None = None
@@ -48,6 +54,48 @@ class ApplicationShieldService:
         self._activity_cache_expires = 0.0
         self._activity_cache_signature: tuple[int, int] | None = None
         self._activity_cache: dict | None = None
+        self._setup_events_db()
+
+    def _events_connection(self):
+        connection = sqlite3.connect(self.events_db_path, timeout=30)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("PRAGMA synchronous=NORMAL")
+        connection.execute("PRAGMA busy_timeout=30000")
+        return connection
+
+    def _setup_events_db(self) -> None:
+        self.events_db_path.parent.mkdir(parents=True, exist_ok=True)
+        with self._events_connection() as db:
+            db.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS audit_events (
+                    id TEXT PRIMARY KEY,
+                    occurred_at TEXT NOT NULL DEFAULT '',
+                    source_ip TEXT NOT NULL DEFAULT '',
+                    host TEXT NOT NULL DEFAULT '',
+                    method TEXT NOT NULL DEFAULT '',
+                    uri TEXT NOT NULL DEFAULT '',
+                    status INTEGER,
+                    outcome TEXT NOT NULL DEFAULT 'Inspected',
+                    country_code TEXT NOT NULL DEFAULT '',
+                    country_name TEXT NOT NULL DEFAULT '',
+                    continent_code TEXT NOT NULL DEFAULT '',
+                    continent_name TEXT NOT NULL DEFAULT '',
+                    messages TEXT NOT NULL DEFAULT '[]'
+                );
+                CREATE INDEX IF NOT EXISTS idx_shield_events_time ON audit_events(occurred_at DESC, id DESC);
+                CREATE INDEX IF NOT EXISTS idx_shield_events_status ON audit_events(status, occurred_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_shield_events_source ON audit_events(source_ip, occurred_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_shield_events_country ON audit_events(country_code, occurred_at DESC);
+                CREATE TABLE IF NOT EXISTS audit_log_state (
+                    path TEXT PRIMARY KEY,
+                    inode INTEGER NOT NULL DEFAULT 0,
+                    offset INTEGER NOT NULL DEFAULT 0,
+                    updated_at TEXT NOT NULL DEFAULT ''
+                );
+                """
+            )
 
     def policy(self) -> ApplicationShieldPolicy:
         if not self.path.exists():
@@ -327,6 +375,11 @@ class ApplicationShieldService:
             # that are blocked by the WAF or return a server error. Do not
             # retain ordinary 404 scans as audit transactions.
             'SecAuditLogRelevantStatus "^(?:403|406|409|429|444|499|5)"',
+            # Bodies are not needed for traffic reports and can contain
+            # credentials, personal data, or large application responses.
+            # Keep request metadata, response status/headers, rule messages,
+            # and the transaction terminator only.
+            "SecAuditLogParts ABFHZ",
             f"SecAuditLog {audit_path}",
             # IncludeOptional is Apache-only syntax. This file is consumed
             # by Nginx's ModSecurity rules parser, so use native ModSecurity
@@ -511,6 +564,185 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
         with self._lock:
             self._write_engine_config(self.policy())
 
+    @staticmethod
+    def _audit_event_from_block(block: bytes) -> dict | None:
+        text = block.decode("utf-8", errors="replace")
+        sections = {}
+        for match in re.finditer(r"(?ms)^---[^\r\n-]+---([A-Z])--\s*\n(.*?)(?=^---[^\r\n-]+---[A-Z]--|\Z)", text):
+            sections[match.group(1)] = match.group(2)
+        event_match = re.search(r"(?m)^---([^\r\n-]+)---A--", text)
+        if not event_match or "Z" not in sections:
+            return None
+        event_id = event_match.group(1)
+        metadata = sections.get("A", "").splitlines()
+        metadata_line = metadata[0] if metadata else ""
+        timestamp = ""
+        timestamp_match = re.search(r"\[([^\]]+)\]", metadata_line)
+        if timestamp_match:
+            try:
+                timestamp = datetime.strptime(timestamp_match.group(1), "%d/%b/%Y:%H:%M:%S %z").isoformat()
+            except ValueError:
+                timestamp = timestamp_match.group(1)
+        source_match = re.search(r"\]\s+\S+\s+(\S+)", metadata_line)
+        source_ip = source_match.group(1) if source_match else "Unknown"
+        request_headers = {}
+        request_lines = sections.get("B", "").splitlines()
+        request_line = next((line for line in request_lines if re.match(r"\S+\s+\S+\s+HTTP/", line)), "")
+        request_match = re.match(r"(\S+)\s+(\S+)\s+HTTP/", request_line)
+        if request_match:
+            method, uri = request_match.group(1), request_match.group(2)
+        else:
+            method, uri = "?", "?"
+        for line in request_lines:
+            if ":" in line:
+                key, value = line.split(":", 1)
+                request_headers[key.lower()] = value.strip()
+        source_ip = request_headers.get("x-forwarded-for", request_headers.get("cf-connecting-ip", source_ip)).split(",", 1)[0].strip()
+        final = sections.get("F", "")
+        status_match = re.search(r"HTTP/[0-9.]+\s+(\d{3})", final)
+        status = int(status_match.group(1)) if status_match else None
+        messages = list(dict.fromkeys(re.findall(r'\[id "([0-9]+)"\].*?\[msg "([^"]+)"\]', sections.get("H", ""))))
+        country = geoip_service.lookup(source_ip) or {}
+        country_code = request_headers.get("cf-ipcountry", "").strip().upper()
+        if not country.get("country_code") and country_code and country_code != "XX":
+            country = {"country_code": country_code, "country_name": country_code, "continent_code": "", "continent_name": ""}
+        outcome = "Blocked" if status in {403, 406, 409, 429, 444, 499} else "Allowed" if status else "Inspected"
+        return {
+            "id": event_id,
+            "occurred_at": timestamp,
+            "source_ip": source_ip,
+            "host": request_headers.get("host", "Unknown"),
+            "method": method,
+            "uri": uri,
+            "status": status,
+            "outcome": outcome,
+            "country_code": country.get("country_code", ""),
+            "country_name": country.get("country_name", ""),
+            "continent_code": country.get("continent_code", ""),
+            "continent_name": country.get("continent_name", ""),
+            "messages": messages,
+        }
+
+    def _sync_audit_events(self) -> None:
+        path = Path(self.policy().audit_log_path)
+        if not path.exists() or not path.is_file():
+            return
+        try:
+            stat = path.stat()
+        except OSError:
+            return
+        with self._events_connection() as db:
+            state = db.execute("SELECT inode, offset FROM audit_log_state WHERE path = ?", (str(path),)).fetchone()
+            offset = int(state[1]) if state else 0
+            if state and not isinstance(state, sqlite3.Row):
+                state = {"inode": state[0], "offset": state[1]}
+            if state and (int(state["inode"]) != int(stat.st_ino) or int(state["offset"]) > stat.st_size):
+                offset = 0
+            with path.open("rb") as source:
+                source.seek(offset)
+                data = source.read()
+            if not data:
+                return
+            markers = list(re.finditer(rb"(?m)^---[^\r\n-]+---A--\r?\n", data))
+            parsed = []
+            consumed = 0
+            for index, marker in enumerate(markers):
+                end = markers[index + 1].start() if index + 1 < len(markers) else len(data)
+                block = data[marker.start():end]
+                if not re.search(rb"(?m)^---[^\r\n-]+---Z--\s*$", block):
+                    break
+                event = self._audit_event_from_block(block)
+                if event:
+                    parsed.append(event)
+                consumed = end
+            if not consumed:
+                return
+            db.executemany(
+                """INSERT OR REPLACE INTO audit_events(
+                    id, occurred_at, source_ip, host, method, uri, status, outcome,
+                    country_code, country_name, continent_code, continent_name, messages
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                [(
+                    event["id"], event["occurred_at"], event["source_ip"], event["host"],
+                    event["method"], event["uri"], event["status"], event["outcome"],
+                    event["country_code"], event["country_name"], event["continent_code"],
+                    event["continent_name"], json.dumps(event["messages"], separators=(",", ":")),
+                ) for event in parsed],
+            )
+            db.execute(
+                """INSERT INTO audit_log_state(path, inode, offset, updated_at) VALUES (?, ?, ?, ?)
+                   ON CONFLICT(path) DO UPDATE SET inode = excluded.inode, offset = excluded.offset, updated_at = excluded.updated_at""",
+                (str(path), int(stat.st_ino), offset + consumed, datetime.now(timezone.utc).isoformat()),
+            )
+
+    @staticmethod
+    def _event_public(row: sqlite3.Row) -> dict:
+        try:
+            messages = json.loads(row["messages"] or "[]")
+        except json.JSONDecodeError:
+            messages = []
+        country = None
+        if row["country_code"]:
+            country = {
+                "country_code": row["country_code"],
+                "country_name": row["country_name"],
+                "continent_code": row["continent_code"],
+                "continent_name": row["continent_name"],
+            }
+        return {
+            "id": row["id"], "time": row["occurred_at"], "method": row["method"],
+            "uri": row["uri"], "source_ip": row["source_ip"], "host": row["host"],
+            "status": row["status"], "outcome": row["outcome"], "messages": messages,
+            "country": country,
+        }
+
+    def report(self, hours: int = 24) -> dict:
+        self._sync_audit_events()
+        hours = max(1, min(hours, 720))
+        cutoff = (datetime.now(timezone.utc).timestamp() - hours * 3600)
+        cutoff_iso = datetime.fromtimestamp(cutoff, timezone.utc).isoformat()
+        with self._events_connection() as db:
+            summary = db.execute(
+                """SELECT COUNT(*) AS total,
+                          SUM(CASE WHEN outcome = 'Blocked' THEN 1 ELSE 0 END) AS blocked,
+                          SUM(CASE WHEN outcome = 'Allowed' THEN 1 ELSE 0 END) AS allowed,
+                          COUNT(DISTINCT source_ip) AS unique_sources
+                   FROM audit_events WHERE occurred_at >= ?""", (cutoff_iso,)
+            ).fetchone()
+            countries = db.execute(
+                """SELECT country_code, country_name, continent_code, continent_name,
+                          COUNT(*) AS requests,
+                          SUM(CASE WHEN outcome = 'Blocked' THEN 1 ELSE 0 END) AS blocked
+                   FROM audit_events WHERE occurred_at >= ? AND country_code != ''
+                   GROUP BY country_code ORDER BY blocked DESC, requests DESC LIMIT 100""", (cutoff_iso,)
+            ).fetchall()
+            rules = db.execute(
+                """SELECT messages FROM audit_events WHERE occurred_at >= ? AND messages != '[]'""", (cutoff_iso,)
+            ).fetchall()
+            statuses = db.execute(
+                """SELECT COALESCE(status, 0) AS status, COUNT(*) AS count
+                   FROM audit_events WHERE occurred_at >= ? GROUP BY status ORDER BY count DESC""", (cutoff_iso,)
+            ).fetchall()
+        rule_counts = Counter()
+        for row in rules:
+            try:
+                for _, message in json.loads(row["messages"] or "[]"):
+                    rule_counts[message] += 1
+            except (TypeError, json.JSONDecodeError):
+                continue
+        total = int(summary["total"] or 0)
+        return {
+            "hours": hours,
+            "source": "Application Shield SQLite event index",
+            "summary": {
+                "total": total, "blocked": int(summary["blocked"] or 0),
+                "allowed": int(summary["allowed"] or 0), "unique_sources": int(summary["unique_sources"] or 0),
+            },
+            "countries": [dict(row) for row in countries],
+            "rule_groups": [{"message": message, "count": count} for message, count in rule_counts.most_common(100)],
+            "statuses": [{"status": int(row["status"]), "count": int(row["count"])} for row in statuses],
+        }
+
     def logs(self, lines: int = 120) -> dict:
         candidates = [
             Path(self.policy().audit_log_path),
@@ -519,7 +751,20 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
         for path in candidates:
             if path.exists() and path.is_file():
                 try:
-                    output = path.read_text(errors="replace").splitlines()[-max(1, min(lines, 1000)):]
+                    count = max(1, min(lines, 1000))
+                    with path.open("rb") as handle:
+                        handle.seek(0, os.SEEK_END)
+                        position = handle.tell()
+                        chunks = []
+                        newlines = 0
+                        while position > 0 and newlines <= count:
+                            size = min(65536, position)
+                            position -= size
+                            handle.seek(position)
+                            chunk = handle.read(size)
+                            chunks.append(chunk)
+                            newlines += chunk.count(b"\n")
+                    output = b"".join(reversed(chunks)).decode("utf-8", errors="replace").splitlines()[-count:]
                     if output:
                         return {"path": str(path), "lines": output, "available": True}
                     return {"path": str(path), "lines": [], "available": False, "message": "No Application Shield audit events have been recorded yet."}
@@ -589,6 +834,27 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
         ordered = list(reversed(all_events))[(page - 1) * page_size:page * page_size]
         blocked = sum(1 for event in all_events if event["outcome"] == "Blocked")
         return {"events": ordered, "summary": {"requests_inspected": self.metrics().requests_observed, "blocked": blocked, "unique_sources": len({event["source_ip"] for event in all_events})}, "pagination": {"page": page, "page_size": page_size, "total": total, "has_next": page * page_size < total, "has_previous": page > 1}}
+
+    def traffic(self, page: int = 1, page_size: int = 50, limit: int | None = None) -> dict:
+        """Return traffic from the indexed event store without rescanning the raw log."""
+        if limit is not None:
+            page_size = limit
+        page = max(1, page)
+        page_size = max(1, min(page_size, 100))
+        self._sync_audit_events()
+        with self._events_connection() as db:
+            total = int(db.execute("SELECT COUNT(*) FROM audit_events").fetchone()[0])
+            blocked = int(db.execute("SELECT COUNT(*) FROM audit_events WHERE outcome = 'Blocked'").fetchone()[0])
+            unique_sources = int(db.execute("SELECT COUNT(DISTINCT source_ip) FROM audit_events").fetchone()[0])
+            rows = db.execute(
+                "SELECT * FROM audit_events ORDER BY occurred_at DESC, id DESC LIMIT ? OFFSET ?",
+                (page_size, (page - 1) * page_size),
+            ).fetchall()
+        return {
+            "events": [self._event_public(row) for row in rows],
+            "summary": {"requests_inspected": self.metrics().requests_observed, "blocked": blocked, "unique_sources": unique_sources},
+            "pagination": {"page": page, "page_size": page_size, "total": total, "has_next": page * page_size < total, "has_previous": page > 1},
+        }
 
     def attack_map(self, limit: int = 1000) -> dict:
         """Return real country/continent aggregates from audited traffic."""
@@ -689,6 +955,110 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
             inspection_rate=inspection_rate,
             inspection_rate_label="100% of observed provider traffic" if inspection_rate is not None else "No traffic observed",
         )
+
+    def metrics(self) -> ApplicationShieldMetrics:
+        """Return metrics from access-log counts and indexed shield events."""
+        policy = self.policy()
+        overview = self.overview()
+        attached = {connector.provider for connector in overview.connectors if connector.attached}
+        protected_sites = sum(1 for site in website_service.list() if site.enabled and site.server_type in attached)
+        access_logs = []
+        for site in website_service.list():
+            if site.enabled and site.server_type in attached:
+                access_logs.append(website_service.log_root / site.server_type / "sites" / f"{website_service._configuration_id(site)}.access.log")
+        if "nginx" in attached:
+            access_logs.append(nginx_paths()["access_log"])
+        requests_observed = sum(self._line_count(path) for path in access_logs)
+        self._sync_audit_events()
+        with self._events_connection() as db:
+            requests_blocked = int(db.execute("SELECT COUNT(*) FROM audit_events WHERE outcome = 'Blocked'").fetchone()[0])
+        inspection_rate = 100.0 if policy.enabled and attached and requests_observed else None
+        return ApplicationShieldMetrics(
+            protection_status="Active" if policy.enabled else "Disabled",
+            requests_blocked=requests_blocked,
+            protected_sites=protected_sites,
+            requests_observed=requests_observed,
+            inspection_rate=inspection_rate,
+            inspection_rate_label="100% of observed provider traffic" if inspection_rate is not None else "No traffic observed",
+        )
+
+    def attack_map(self, limit: int = 1000) -> dict:
+        """Aggregate every indexed event, rather than only the visible page."""
+        self._sync_audit_events()
+        limit = max(1, min(limit, 5000))
+        with self._events_connection() as db:
+            countries = db.execute(
+                """SELECT country_code, country_name, continent_code, continent_name,
+                          COUNT(*) AS requests,
+                          SUM(CASE WHEN outcome = 'Blocked' THEN 1 ELSE 0 END) AS blocked
+                   FROM audit_events WHERE country_code != ''
+                   GROUP BY country_code ORDER BY blocked DESC, requests DESC LIMIT ?""", (limit,)
+            ).fetchall()
+            continents = db.execute(
+                """SELECT continent_code, continent_name, COUNT(*) AS requests,
+                          SUM(CASE WHEN outcome = 'Blocked' THEN 1 ELSE 0 END) AS blocked
+                   FROM audit_events WHERE continent_code != ''
+                   GROUP BY continent_code ORDER BY blocked DESC, requests DESC LIMIT ?""", (limit,)
+            ).fetchall()
+            recent = db.execute(
+                "SELECT * FROM audit_events WHERE country_code != '' ORDER BY occurred_at DESC, id DESC LIMIT ?",
+                (min(limit, 100),),
+            ).fetchall()
+            count = int(db.execute("SELECT COUNT(*) FROM audit_events").fetchone()[0])
+        return {
+            "source": "Application Shield SQLite event index",
+            "events_considered": count,
+            "countries": [dict(row) for row in countries],
+            "continents": [dict(row) for row in continents],
+            "recent_events": [self._event_public(row) for row in recent],
+        }
+
+    def activity(self, hours: int = 24) -> dict:
+        """Build hourly activity from indexed timestamps without reading the raw log."""
+        hours = max(1, min(hours, 168))
+        self._sync_audit_events()
+        now = int(time.time())
+        start = now - hours * 3600
+        buckets = [{"timestamp": start + index * 3600, "requests": 0, "blocked": 0} for index in range(hours)]
+        cutoff = datetime.fromtimestamp(start, timezone.utc).isoformat()
+        with self._events_connection() as db:
+            rows = db.execute("SELECT occurred_at, outcome FROM audit_events WHERE occurred_at >= ?", (cutoff,)).fetchall()
+        for row in rows:
+            try:
+                timestamp = int(datetime.fromisoformat(row["occurred_at"]).timestamp())
+            except (TypeError, ValueError):
+                continue
+            bucket = min(hours - 1, max(0, (timestamp - start) // 3600))
+            buckets[bucket]["requests"] += 1
+            buckets[bucket]["blocked"] += int(row["outcome"] == "Blocked")
+        return {"hours": hours, "source": "Application Shield SQLite event index", "buckets": buckets}
+
+    def rules(self) -> list[ApplicationShieldRule]:
+        """Read rule hit counts from SQLite instead of rescanning the audit file."""
+        if not self.rules_path.exists():
+            return []
+        try:
+            values = json.loads(self.rules_path.read_text())
+            if not isinstance(values, list):
+                return []
+            self._sync_audit_events()
+            with self._events_connection() as db:
+                rows = db.execute("SELECT messages FROM audit_events WHERE messages != '[]'").fetchall()
+            hits = Counter()
+            for row in rows:
+                try:
+                    for rule_id, _ in json.loads(row["messages"] or "[]"):
+                        hits[str(rule_id)] += 1
+                except (TypeError, json.JSONDecodeError):
+                    continue
+            result = []
+            for item in values:
+                rule = ApplicationShieldRule.model_validate(item)
+                rule_id = str(1000000 + (uuid.uuid5(uuid.NAMESPACE_URL, f"server-engine:shield-rule:{rule.id}").int % 899999))
+                result.append(rule.model_copy(update={"hits": hits[rule_id]}))
+            return result
+        except (OSError, json.JSONDecodeError, ValueError) as error:
+            raise RuntimeError(f"Application Shield rule registry is unreadable: {error}") from error
 
     def protected_sites(self) -> list[dict]:
         """Return live website profiles that are currently behind a connector."""
