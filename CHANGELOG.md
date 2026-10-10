@@ -4,6 +4,89 @@ Release notes for the Server Engine control panel and control-plane runtime.
 
 ## Unreleased
 
+## v0.1.60
+
+- Added the full file-manager workspace with SimpleBar scrolling, resizable
+  navigation, cut and paste actions, secure downloads, context menus, and a
+  CodeMirror editor toolbar.
+- Added live service indicators for Server, Nginx, Application Shield, Logs,
+  and Terminal, including socket-driven status updates and runtime-aware
+  terminal sessions.
+- Added nftables configuration, firewall disabled-state handling, reusable IP
+  validation, and improved Application Shield traffic and audit reporting.
+- Improved website and reverse-proxy management with maintenance mode,
+  redirects, canonical domains, TLS status and expiry details, log controls,
+  proxy routing, and isolated ACME challenge paths.
+- Added CMS deployment improvements for Laravel, WordPress, and Drupal,
+  including runtime selection, dependency provisioning, validation, database
+  setup, administrator credentials, and rollback on failure.
+- Added PHP, Node.js, MySQL, phpMyAdmin, Supervisor, and service configuration
+  improvements with live status updates and reusable configuration modal
+  behavior.
+- Added appearance settings, sidebar collapse mode, shared tooltips, compact
+  log controls, cached service catalogs, and improved panel update handling.
+- Fixed isolated runtime libraries, Composer and Certbot execution, Nginx
+  configuration validation, PHP session paths, missing service assets, and
+  failed deployment cleanup.
+
+## v0.1.59
+
+- Added Windows-style Cut and Paste file operations, including multi-item
+  moves, overwrite confirmation, and an empty-space context menu for New
+  folder and Paste.
+- Made Drupal deployment match WordPress CMS deployment with required MySQL,
+  administrator credentials, site title, site description, and automatic
+  isolated Drush installation and site setup.
+- Added automatic Composer and WP-CLI installation during application
+  deployment when the selected PHP runtime requires them.
+- Restricted custom website project folders to safe subdirectories under the
+  managed website root and rolled back failed application deployments cleanly.
+- Added isolated Drupal and CMS database validation on both the frontend and
+  backend.
+
+- Added a terminal PHP runtime menu that opens or focuses a dedicated tab for
+  each installed PHP version and scopes `php`, Composer, and WP-CLI to the
+  selected runtime for that terminal session.
+- Added Clang and libclang build dependencies for Stalwart source builds and
+  automatic `LIBCLANG_PATH` detection for RocksDB bindgen compilation.
+
+## v0.1.58
+
+- Isolated reverse-proxy ACME HTTP-01 challenges under
+  `/server-engine/proxies/<domain>` instead of the shared website root.
+- Automatically creates proxy challenge directories and regenerates and
+  validates the active Nginx configuration before certificate issuance.
+- Fixed HTTPS redirect state so disabling HTTPS also removes stale forced-
+  redirect directives from generated proxy configuration.
+- Keep the proxy edit modal open after saving an existing proxy.
+
+## v0.1.57
+
+- Added ACME certificate issuance for reverse proxies, including aliases,
+  HTTP-01 challenge routing, queued job progress, and automatic status refresh.
+- Fixed isolated Certbot detection by invoking its Python package directly when
+  the generated launcher metadata is incomplete.
+- Fixed Docker development Certbot setup to rebuild stale persisted virtual
+  environments when their compiled dependencies do not match the container
+  architecture.
+
+## v0.1.56
+
+- Added the PHP runtime selector and session-aware terminal tabs, including
+  per-runtime command mapping and terminal close/kill controls.
+- Added live Server, Nginx, Shield, Logs, and Terminal status indicators to the
+  panel status bar.
+- Improved reverse-proxy management with provider metadata, reusable IP tags,
+  domain-only creation, canonical redirects, maintenance controls, and proxy
+  log settings matching website log controls.
+- Added proxy and website log configuration with graceful reload behavior and
+  clearer log storage details.
+- Fixed proxy configuration validation, provider log-directory creation, and
+  missing Nginx connector/runtime handling.
+
+- Fixed authenticated GitHub release downloads to fall back to the direct
+  latest-release URL when the API does not expose the asset metadata.
+
 ## v0.1.55
 
 - Fixed the Application Shield Nginx connector flow after installing a new

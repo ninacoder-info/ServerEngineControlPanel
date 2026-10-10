@@ -1711,6 +1711,7 @@ PHP_EXTENSIONS = [
     {"id": "intl", "name": "Internationalization", "description": "Locale and Unicode support."},
     {"id": "bcmath", "name": "BCMath", "description": "Arbitrary precision mathematics."},
     {"id": "fileinfo", "name": "Fileinfo", "description": "File type detection used by Composer, Laravel, and WordPress."},
+    {"id": "tokenizer", "name": "Tokenizer", "description": "PHP syntax tokenization required by Laravel and Composer packages."},
     {"id": "soap", "name": "SOAP", "description": "SOAP web-service client support."},
 ]
 

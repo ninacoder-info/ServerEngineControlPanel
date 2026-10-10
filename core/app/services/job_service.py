@@ -20,6 +20,7 @@ import time
 import uuid
 import zipfile
 from pathlib import Path
+from urllib.parse import quote
 from threading import Event, Thread
 from threading import Lock
 
@@ -28,8 +29,31 @@ from app.models.website import Website, WebsiteUpdateRequest
 from app.models.projects import NodeProject
 from app.services.website_service import website_service
 from app.services.service_catalog import apache_source_for, bind9_source_for, certbot_source_for, caddy_source_for, clamav_source_for, dovecot_source_for, ffmpeg_source_for, git_source_for, haproxy_source_for, imagemagick_source_for, lynis_source_for, mariadb_source_for, memcached_source_for, mongodb_prebuilt_for, mongodb_source_for, mysql_release_for, nginx_source_for, opensearch_source_for, openlitespeed_prebuilt_for, openlitespeed_source_for, openssl_source_for, php_source_for, postfix_source_for, powerdns_source_for, postgresql_source_for, prebuilt_package_for, python_asset_for, python_source_for, rabbitmq_source_for, redis_source_for, refresh_service_versions, rspamd_source_for, ruby_source_for, stalwart_prebuilt_for, stalwart_source_for, supervisor_source_for, unbound_source_for, valkey_source_for, vsftpd_source_for, wpcli_source_for
-from app.services.service_runtime import PHP_BASELINE_MODULES, PHP_REQUIRED_EXTENSIONS, SERVICE_PACKAGES, binary_path, composer_path, enable_php_baseline_extensions, ensure_composer_cache, ensure_nginx_layout, ensure_node_runtime, ensure_php_fpm_layout, ensure_php_runtime_configuration, ensure_php_runtime_launcher, managed_library_environment, nginx_paths, normalize_php_runtime_layout, package_for, php_cli_path, php_fpm_paths, php_runtime_library_path, prepare_mongodb_runtime, prepare_mysql_runtime, prepare_postgresql_runtime, prepare_powerdns_runtime, service_root, startup_enabled, supervisor_paths, version_sort_key
+from app.services.service_runtime import PHP_BASELINE_MODULES, PHP_REQUIRED_EXTENSIONS, SERVICE_PACKAGES, binary_path, composer_path, enable_php_baseline_extensions, ensure_composer_cache, ensure_composer_launcher, ensure_nginx_layout, ensure_node_runtime, ensure_php_fpm_layout, ensure_php_runtime_configuration, ensure_php_runtime_launcher, managed_library_environment, nginx_paths, normalize_php_runtime_layout, package_for, php_cli_path, php_fpm_paths, php_runtime_library_path, prepare_mongodb_runtime, prepare_mysql_runtime, prepare_postgresql_runtime, prepare_powerdns_runtime, service_root, startup_enabled, supervisor_paths, version_sort_key
 from app.services.database_credentials import database_credentials
+
+
+def _certbot_command() -> list[str] | None:
+    """Return a working isolated Certbot invocation, repairing bad launchers by bypassing their metadata entry point."""
+    root = service_root("certbot")
+    python = root / "venv/bin/python"
+    if python.exists():
+        probe = subprocess.run([str(python), "-c", "import certbot; from certbot.main import main"], capture_output=True, text=True, check=False, timeout=30)
+        if probe.returncode == 0:
+            return [str(python), "-c", "from certbot.main import main; main()"]
+    candidates = [root / "venv/bin/certbot", root / "usr/bin/certbot", root / "bin/certbot", Path("/usr/bin/certbot")]
+    for candidate in candidates:
+        if not candidate.exists():
+            continue
+        check = subprocess.run([str(candidate), "--version"], capture_output=True, text=True, check=False, timeout=30)
+        if check.returncode == 0:
+            return [str(candidate)]
+    discovered = shutil.which("certbot")
+    if discovered:
+        check = subprocess.run([discovered, "--version"], capture_output=True, text=True, check=False, timeout=30)
+        if check.returncode == 0:
+            return [discovered]
+    return None
 
 
 class InstallCancelled(Exception):
@@ -209,6 +233,26 @@ class JobStore:
             raise subprocess.CalledProcessError(result.returncode, command, output=output)
         return result
 
+    def _start_tracked_process(self, job_id: str, command, **kwargs) -> subprocess.Popen:
+        """Start a job subprocess in its own group and register it for cancel().
+
+        Source builds often use ``Popen`` directly because their output is
+        streamed line by line.  Those processes must still be registered with
+        the job, otherwise cancelling the UI job only changes its state while
+        make/cargo and their compiler children continue consuming CPU.
+        """
+        kwargs.setdefault("start_new_session", True)
+        process = subprocess.Popen(command, **kwargs)
+        self._track_process(job_id, process)
+        Thread(target=self._wait_and_untrack, args=(job_id, process), daemon=True).start()
+        return process
+
+    def _wait_and_untrack(self, job_id: str, process: subprocess.Popen):
+        try:
+            process.wait()
+        finally:
+            self._untrack_process(job_id, process)
+
     @staticmethod
     def _terminate_process(process: subprocess.Popen):
         """Stop a cancellable job process and its child process group."""
@@ -314,6 +358,83 @@ class JobStore:
         Thread(target=self._run_serialized, args=(self._run_certificate, job_id, website_id, method, email, staging, certificate, private_key, chain), daemon=True).start()
         return job
 
+    def enqueue_proxy_certificate(self, job_id: str, route_id: str, email: str = "", staging: bool = False) -> JobSummary:
+        job = self.create(job_id, f"Issue ACME certificate for proxy {route_id[:8]}")
+        Thread(target=self._run_serialized, args=(self._run_proxy_certificate, job_id, route_id, email, staging), daemon=True).start()
+        return job
+
+    def _run_proxy_certificate(self, job_id: str, route_id: str, email: str, staging: bool):
+        try:
+            from app.services.project_service import project_service
+            route = next((item for item in project_service.list_proxy() if item.id == route_id), None)
+            if route is None:
+                raise RuntimeError("Proxy route not found.")
+            domains = list(dict.fromkeys(domain.strip().lower() for domain in [route.domain, *route.aliases] if domain.strip()))
+            certbot = _certbot_command()
+            if certbot is None:
+                raise RuntimeError("No working isolated Certbot runtime was found. The Certbot Python package or launcher is incomplete; reinstall Certbot from Services and retry.")
+            webroot = project_service.ensure_proxy_acme_webroot(route.domain)
+            if route.server_type != "nginx":
+                raise RuntimeError("Proxy ACME certificates currently require the Nginx provider.")
+            # Existing proxies may still contain the old shared webroot. Rewrite
+            # the provider configuration before Certbot creates its challenge.
+            route.config_path = project_service._write_provider_config(route)
+            nginx = nginx_paths()
+            ensure_nginx_layout(nginx)
+            runtime_env = managed_library_environment(nginx["root"], service_root("modsecurity"))
+            check = subprocess.run(
+                [str(nginx["binary"]), "-p", str(nginx["root"]), "-c", str(nginx["config"]), "-t"],
+                capture_output=True,
+                text=True,
+                check=False,
+                env=runtime_env,
+            )
+            if check.returncode != 0:
+                output = (check.stdout + check.stderr).strip()
+                raise RuntimeError(output.splitlines()[-1] if output else "Nginx configuration validation failed.")
+            if _managed_process_alive(nginx["pid"]):
+                reload_result = subprocess.run(
+                    [str(nginx["binary"]), "-p", str(nginx["root"]), "-c", str(nginx["config"]), "-s", "reload"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    env=runtime_env,
+                )
+                if reload_result.returncode != 0:
+                    output = (reload_result.stdout + reload_result.stderr).strip()
+                    raise RuntimeError(output.splitlines()[-1] if output else "Nginx could not reload the proxy configuration.")
+            state_root = Path(os.getenv("SE_STATE_DIR", "/var/lib/server-engine")) / "proxy-certificates" / "certbot"
+            command = [*certbot, "certonly", "--webroot", "-w", str(webroot), "--config-dir", str(state_root / "config"), "--work-dir", str(state_root / "work"), "--logs-dir", str(state_root / "logs"), "--cert-name", route.domain, "--agree-tos", "--non-interactive", "--keep-until-expiring"]
+            command.extend(["--email", email.strip()] if email.strip() else ["--register-unsafely-without-email"])
+            if staging:
+                command.append("--staging")
+            for domain in domains:
+                command.extend(["-d", domain])
+            self._update(job_id, status="running", progress=5, message=f"Requesting an ACME certificate for {', '.join(domains)}…", log=["Domains: " + ", ".join(domains), "$ " + " ".join(shlex.quote(item) for item in command)])
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, start_new_session=True)
+            self._track_process(job_id, process)
+            assert process.stdout is not None
+            for line in process.stdout:
+                line = line.rstrip()
+                if line:
+                    self._update(job_id, progress=50, message="Validating domain ownership…", log=[line])
+            return_code = process.wait()
+            self._untrack_process(job_id, process)
+            if return_code != 0:
+                raise RuntimeError("ACME certificate issuance failed; see the job output for Certbot details.")
+            lineage = state_root / "config" / "live" / route.domain
+            certificate_path, key_path = lineage / "fullchain.pem", lineage / "privkey.pem"
+            if not certificate_path.is_file() or not key_path.is_file():
+                raise RuntimeError("Certbot completed but did not produce a certificate and private key.")
+            project_service.store_proxy_acme_certificate(route_id, certificate_path.read_text(), key_path.read_text())
+            self._update(job_id, progress=90, message="Certificate issued; reloading the active web server…")
+            self.enqueue_action(f"certificate-reload-proxy-{route_id}-{uuid.uuid4().hex[:8]}", route.server_type, "restart")
+            self._update(job_id, status="succeeded", progress=100, message="ACME certificate issued and the web server reload was queued.")
+        except InstallCancelled:
+            self._update(job_id, status="cancelled", message="Certificate operation cancelled.")
+        except Exception as error:
+            self._update(job_id, status="failed", message=str(error))
+
     def _run_certificate(self, job_id: str, website_id: str, method: str, email: str, staging: bool, certificate: str, private_key: str, chain: str):
         try:
             site = website_service.get(website_id)
@@ -336,32 +457,13 @@ class JobStore:
             domains = list(dict.fromkeys(domain.strip().lower() for domain in [site.domain, *site.aliases] if domain.strip()))
             if not domains:
                 raise RuntimeError("No domains are configured for this website.")
-            certbot_candidates = [
-                service_root("certbot") / "venv/bin/certbot",
-                service_root("certbot") / "usr/bin/certbot",
-                service_root("certbot") / "bin/certbot",
-                Path("/usr/bin/certbot"),
-            ]
-            certbot = None
-            for candidate in certbot_candidates:
-                if not candidate.exists():
-                    continue
-                check = subprocess.run([str(candidate), "--version"], capture_output=True, text=True, check=False, timeout=30)
-                if check.returncode == 0:
-                    certbot = candidate
-                    break
+            certbot = _certbot_command()
             if certbot is None:
-                discovered = shutil.which("certbot")
-                if discovered:
-                    check = subprocess.run([discovered, "--version"], capture_output=True, text=True, check=False, timeout=30)
-                    if check.returncode == 0:
-                        certbot = Path(discovered)
-            if certbot is None:
-                raise RuntimeError("No working Certbot runtime was found. Reinstall Certbot so its Python package and launcher are installed together.")
+                raise RuntimeError("No working isolated Certbot runtime was found. The Certbot Python package or launcher is incomplete; reinstall Certbot from Services and retry.")
             cert_root = website_service.certificate_root / "certbot"
             webroot = Path(site.document_root)
             webroot.mkdir(parents=True, exist_ok=True)
-            command = [str(certbot), "certonly", "--webroot", "-w", str(webroot), "--config-dir", str(cert_root / "config"), "--work-dir", str(cert_root / "work"), "--logs-dir", str(cert_root / "logs"), "--cert-name", site.domain, "--agree-tos", "--non-interactive", "--keep-until-expiring"]
+            command = [*certbot, "certonly", "--webroot", "-w", str(webroot), "--config-dir", str(cert_root / "config"), "--work-dir", str(cert_root / "work"), "--logs-dir", str(cert_root / "logs"), "--cert-name", site.domain, "--agree-tos", "--non-interactive", "--keep-until-expiring"]
             if email.strip():
                 command.extend(["--email", email.strip()])
             else:
@@ -624,9 +726,26 @@ class JobStore:
             except Exception as error:
                 raise RuntimeError(f"ClamAV certificate setup failed: {error}") from error
         freshclam_config = conf / "freshclam.conf"
+
+        def supports_cvd_certs_option(binary: Path) -> bool:
+            try:
+                help_result = subprocess.run(
+                    [str(binary), "--help"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=15,
+                    env=runtime_env,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                return False
+            return "--cvdcertsdir" in (help_result.stdout + help_result.stderr).lower()
+
+        freshclam_supports_certs_option = bool(freshclam and supports_cvd_certs_option(freshclam))
+        scanner_supports_certs_option = supports_cvd_certs_option(scanner)
         freshclam_config.write_text(
             "DatabaseDirectory " + str(database) + "\n"
-            + "CVDCertsDirectory " + str(certs) + "\n"
+            + ("CVDCertsDirectory " + str(certs) + "\n" if freshclam_supports_certs_option else "")
             + "DatabaseMirror database.clamav.net\n"
             + "UpdateLogFile " + str(logs / "freshclam.log") + "\n"
             + "LogTime yes\n"
@@ -640,8 +759,11 @@ class JobStore:
         newest_signature = max((item.stat().st_mtime for item in signature_files), default=0)
         signatures_current = signatures and (time.time() - newest_signature) < 86400
         if freshclam and not signatures_current:
-            self._update(job_id, progress=18, message="Refreshing ClamAV virus signatures…", log=[f"$ {freshclam} --config-file={freshclam_config} --cvdcertsdir={certs}"])
-            update = subprocess.run([str(freshclam), f"--config-file={freshclam_config}", f"--cvdcertsdir={certs}"], capture_output=True, text=True, check=False, timeout=900, env=runtime_env)
+            update_command = [str(freshclam), f"--config-file={freshclam_config}"]
+            if freshclam_supports_certs_option:
+                update_command.extend(["--cvdcertsdir", str(certs)])
+            self._update(job_id, progress=18, message="Refreshing ClamAV virus signatures…", log=[f"$ {' '.join(shlex.quote(item) for item in update_command)}"])
+            update = subprocess.run(update_command, capture_output=True, text=True, check=False, timeout=900, env=runtime_env)
             output = (update.stdout or "") + (update.stderr or "")
             if output.strip():
                 self._update(job_id, log=output.splitlines()[-80:])
@@ -663,7 +785,10 @@ class JobStore:
         total_files = 0
         for current, _directories, files in os.walk(scan_path):
             total_files += len(files)
-        command = [str(scanner), "--database", str(database), "--cvdcertsdir", str(certs), "--recursive", "--infected", "--verbose", f"--log={log_path}", str(scan_path)]
+        command = [str(scanner), "--database", str(database)]
+        if scanner_supports_certs_option:
+            command.extend(["--cvdcertsdir", str(certs)])
+        command.extend(["--recursive", "--infected", "--verbose", f"--log={log_path}", str(scan_path)])
         self._update(job_id, progress=30, message=f"Scanning {scan_path}… {total_files:,} files found", log=[f"Indexed {total_files:,} files under {scan_path}", f"$ {' '.join(shlex.quote(item) for item in command)}"])
         output = []
         scanned_files = 0
@@ -725,9 +850,9 @@ class JobStore:
         message = f"ClamAV scan completed cleanly. Scanned {total_files:,} files." if return_code == 0 else f"ClamAV scan completed and found one or more threats after scanning {total_files:,} files. Review the scan output before quarantine."
         self._update(job_id, status="succeeded", progress=100, message=message, log=[message])
 
-    def enqueue_application_deploy(self, job_id: str, site: Website, template: str, database_engine: str = "", database_password: str = "", wordpress_version: str = "latest", wordpress_admin_user: str = "", wordpress_admin_password: str = "", wordpress_database_prefix: str = "wp_", wordpress_site_title: str = "", laravel_version: str = "") -> JobSummary:
+    def enqueue_application_deploy(self, job_id: str, site: Website, template: str, database_engine: str = "", database_password: str = "", wordpress_version: str = "latest", wordpress_admin_user: str = "", wordpress_admin_password: str = "", wordpress_database_prefix: str = "wp_", wordpress_site_title: str = "", laravel_version: str = "", cleanup_project_on_failure: bool = False) -> JobSummary:
         job = self.create(job_id, f"Deploy {template.title()} · {site.domain}")
-        Thread(target=self._run_serialized, args=(self._run_application_deploy, job_id, site, template, database_engine, database_password, wordpress_version, wordpress_admin_user, wordpress_admin_password, wordpress_database_prefix, wordpress_site_title, laravel_version), daemon=True).start()
+        Thread(target=self._run_serialized, args=(self._run_application_deploy, job_id, site, template, database_engine, database_password, wordpress_version, wordpress_admin_user, wordpress_admin_password, wordpress_database_prefix, wordpress_site_title, laravel_version, cleanup_project_on_failure), daemon=True).start()
         return job
 
     def enqueue_node_project_action(self, job_id: str, project: NodeProject, action: str) -> JobSummary:
@@ -939,6 +1064,8 @@ class JobStore:
         artisan = Path(site.project_path) / "artisan"
         if not artisan.exists():
             raise RuntimeError("Laravel was downloaded, but its artisan file is missing.")
+        if site.php_version:
+            ensure_php_runtime_launcher(site.php_version)
         php = php_cli_path(site.php_version) if site.php_version else None
         if not php or not php.exists():
             raise RuntimeError("Laravel was installed, but the selected PHP CLI runtime is unavailable.")
@@ -962,14 +1089,26 @@ class JobStore:
         if result.returncode != 0:
             raise RuntimeError((result.stderr or result.stdout).strip() or "Laravel could not generate its application key.")
 
+    @staticmethod
+    def _wp_cli_candidates() -> list[Path]:
+        wp_root = service_root("wp-cli") / "versions"
+        return sorted(
+            [*wp_root.glob("*/bin/wp"), *wp_root.glob("*/wp-cli.phar")],
+            key=lambda path: version_sort_key(
+                path.parent.parent.name if path.parent.name == "bin" else path.parent.name
+            ),
+            reverse=True,
+        )
+
     def _install_wordpress_core(self, job_id: str, site: Website, admin_user: str, admin_password: str, site_title: str, credentials: tuple[str, str, str] | None) -> None:
         if not credentials:
             raise RuntimeError("WordPress deployment requires a database before the administrator account can be created.")
+        if site.php_version:
+            ensure_php_runtime_launcher(site.php_version)
         php = php_cli_path(site.php_version) if site.php_version else None
         if not php or not php.exists():
             raise RuntimeError("WordPress was downloaded, but the selected PHP CLI runtime is unavailable.")
-        wp_root = service_root("wp-cli") / "versions"
-        candidates = sorted([*wp_root.glob("*/bin/wp"), *wp_root.glob("*/wp-cli.phar")], key=lambda path: version_sort_key(path.parent.parent.name if path.parent.name == "bin" else path.parent.name), reverse=True)
+        candidates = self._wp_cli_candidates()
         if not candidates:
             raise RuntimeError("Install WP-CLI before deploying WordPress so Server Engine can create the administrator account.")
         wp = candidates[0]
@@ -979,16 +1118,59 @@ class JobStore:
         ensure_php_runtime_configuration(site.php_version)
         display_command = ["--admin_password=********" if item.startswith("--admin_password=") else item for item in command]
         self._update(job_id, progress=96, message="Creating the WordPress administrator account…", log=[f"$ {' '.join(shlex.quote(item) for item in display_command)}"])
-        result = subprocess.run(command, cwd=site.project_path, capture_output=True, text=True, check=False, timeout=120, env={**os.environ, "LD_LIBRARY_PATH": php_runtime_library_path(php_root), "PHP_INI_SCAN_DIR": str(php_root / "conf/conf.d")})
+        result = subprocess.run(command, cwd=site.project_path, capture_output=True, text=True, check=False, timeout=120, env={**os.environ, "LD_LIBRARY_PATH": php_runtime_library_path(php_root), "PHPRC": str(php_root / "conf/php.ini"), "PHP_INI_SCAN_DIR": str(php_root / "conf/conf.d")})
         if result.returncode != 0:
             raise RuntimeError((result.stderr or result.stdout).strip() or "WP-CLI could not complete the WordPress installation.")
         description = site.notes.strip()
         if description:
             description_command = [str(php), str(wp), "option", "update", "blogdescription", description, f"--path={site.project_path}", "--quiet", "--allow-root"]
             self._update(job_id, progress=97, message="Saving the WordPress site description…", log=[f"$ {' '.join(shlex.quote(item) for item in description_command)}"])
-            description_result = subprocess.run(description_command, cwd=site.project_path, capture_output=True, text=True, check=False, timeout=60, env={**os.environ, "LD_LIBRARY_PATH": php_runtime_library_path(php_root), "PHP_INI_SCAN_DIR": str(php_root / "conf/conf.d")})
+            description_result = subprocess.run(description_command, cwd=site.project_path, capture_output=True, text=True, check=False, timeout=60, env={**os.environ, "LD_LIBRARY_PATH": php_runtime_library_path(php_root), "PHPRC": str(php_root / "conf/php.ini"), "PHP_INI_SCAN_DIR": str(php_root / "conf/conf.d")})
             if description_result.returncode != 0:
                 raise RuntimeError((description_result.stderr or description_result.stdout).strip() or "WP-CLI could not save the WordPress site description.")
+
+    def _install_drupal_core(self, job_id: str, site: Website, admin_user: str, admin_password: str, site_title: str, description: str, credentials: tuple[str, str, str] | None) -> None:
+        if not credentials:
+            raise RuntimeError("Drupal deployment requires a database before the administrator account can be created.")
+        php = php_cli_path(site.php_version) if site.php_version else None
+        drush = Path(site.project_path) / "vendor/bin/drush"
+        if not php or not php.exists() or not drush.exists():
+            raise RuntimeError("Drupal was downloaded, but its isolated Drush installer is unavailable.")
+        database_name, database_user, database_password = credentials
+        database_url = f"mysql://{quote(database_user, safe='')}:{quote(database_password, safe='')}@127.0.0.1/{quote(database_name, safe='')}"
+        command = [
+            str(php),
+            str(drush),
+            "site:install",
+            "standard",
+            f"--db-url={database_url}",
+            f"--site-name={site_title.strip() or site.domain}",
+            f"--account-name={admin_user}",
+            f"--account-pass={admin_password}",
+            f"--account-mail=admin@{site.domain}",
+            "--yes",
+        ]
+        php_root = service_root("php", site.php_version)
+        ensure_php_runtime_configuration(site.php_version)
+        display_command = [
+            "--account-pass=********"
+            if item.startswith("--account-pass=")
+            else "--db-url=mysql://********@127.0.0.1/********"
+            if item.startswith("--db-url=")
+            else item
+            for item in command
+        ]
+        self._update(job_id, progress=96, message="Creating the Drupal administrator account…", log=[f"$ {' '.join(shlex.quote(item) for item in display_command)}"])
+        environment = {**os.environ, "LD_LIBRARY_PATH": php_runtime_library_path(php_root), "PHPRC": str(php_root / "conf/php.ini"), "PHP_INI_SCAN_DIR": str(php_root / "conf/conf.d")}
+        result = subprocess.run(command, cwd=site.project_path, capture_output=True, text=True, check=False, timeout=300, env=environment)
+        if result.returncode != 0:
+            raise RuntimeError((result.stderr or result.stdout).strip() or "Drush could not complete the Drupal installation.")
+        if description.strip():
+            description_command = [str(php), str(drush), "config:set", "system.site", "slogan", description.strip(), "--yes"]
+            self._update(job_id, progress=97, message="Saving the Drupal site description…", log=[f"$ {' '.join(shlex.quote(item) for item in description_command)}"])
+            description_result = subprocess.run(description_command, cwd=site.project_path, capture_output=True, text=True, check=False, timeout=60, env=environment)
+            if description_result.returncode != 0:
+                raise RuntimeError((description_result.stderr or description_result.stdout).strip() or "Drush could not save the Drupal site description.")
 
     @staticmethod
     def _verify_application_layout(site: Website, template: str) -> None:
@@ -1008,7 +1190,7 @@ class JobStore:
         if site.web_root != "." and not (project / site.web_root).is_dir():
             raise RuntimeError(f"The configured document root {site.web_root} does not exist.")
 
-    def _run_application_deploy(self, job_id: str, site: Website, template: str, database_engine: str = "", database_password: str = "", wordpress_version: str = "latest", wordpress_admin_user: str = "", wordpress_admin_password: str = "", wordpress_database_prefix: str = "wp_", wordpress_site_title: str = "", laravel_version: str = ""):
+    def _run_application_deploy(self, job_id: str, site: Website, template: str, database_engine: str = "", database_password: str = "", wordpress_version: str = "latest", wordpress_admin_user: str = "", wordpress_admin_password: str = "", wordpress_database_prefix: str = "wp_", wordpress_site_title: str = "", laravel_version: str = "", cleanup_project_on_failure: bool = False):
         project = Path(site.project_path)
         staging = project.parent / f".server-engine-{template}-{job_id}-staging"
         archive = staging / "application.tar.gz"
@@ -1018,6 +1200,23 @@ class JobStore:
             self._update(job_id, status="running", progress=5, message=f"Preparing {template.title()} for {site.domain}…", log=[f"Project: {project}"])
             self._raise_if_cancelled(job_id)
             if template == "wordpress":
+                if not self._wp_cli_candidates():
+                    requested_wp_cli = "2.11.0"
+                    try:
+                        definition, _, _ = refresh_service_versions("wp-cli")
+                        if definition.versions:
+                            requested_wp_cli = definition.versions[0].version
+                    except Exception:
+                        # The official current release remains a safe fallback
+                        # when the version catalog is temporarily unavailable.
+                        pass
+                    self._update(
+                        job_id,
+                        progress=8,
+                        message="WP-CLI is not installed; installing the official runtime before WordPress deployment…",
+                        log=[f"$ install isolated WP-CLI {requested_wp_cli}"],
+                    )
+                    self._run_wpcli_binary(job_id, requested_wp_cli, site.php_version, finalize=False)
                 requested_version = wordpress_version.strip() or "latest"
                 url = "https://wordpress.org/latest.tar.gz" if requested_version.lower() == "latest" else f"https://wordpress.org/wordpress-{requested_version}.tar.gz"
                 self._update(job_id, progress=15, message="Downloading the current WordPress release…", log=[f"$ curl -fL {url} -o {archive}"])
@@ -1033,24 +1232,105 @@ class JobStore:
                         raise RuntimeError(f"The project folder already contains {item.name}; deployment stopped to avoid overwriting it.")
                     shutil.move(str(item), str(target))
             elif template in {"laravel", "drupal", "symfony", "cakephp", "codeigniter4", "yii", "slim", "laminas"}:
+                if site.php_version:
+                    # Composer runs before the Laravel finalization step. Repair
+                    # stale/self-referencing PHP wrappers before create-project
+                    # invokes Composer with the selected runtime.
+                    ensure_php_runtime_launcher(site.php_version)
+                # Composer's shared launcher uses the PHP version selected in
+                # its global settings. That must not override the PHP runtime
+                # selected for this website. Invoke the Composer PHAR through
+                # this site's PHP CLI directly.
+                php = php_cli_path(site.php_version) if site.php_version else None
+                if not php or not php.exists():
+                    raise RuntimeError(f"PHP {site.php_version or 'runtime'} is not installed or its CLI is unavailable.")
                 composer = composer_path()
-                if not composer.exists():
-                    raise RuntimeError("This PHP application requires Composer. Install Composer, then retry.")
+                composer_archive = composer.parent.parent / "composer.phar"
+                if not composer.exists() or not composer_archive.is_file():
+                    requested_composer = "2.10.3"
+                    try:
+                        definition, _, _ = refresh_service_versions("composer")
+                        if definition.versions:
+                            requested_composer = definition.versions[0].version
+                    except Exception:
+                        # The official stable fallback keeps deployment usable
+                        # when the Composer catalog is temporarily unavailable.
+                        pass
+                    self._update(
+                        job_id,
+                        progress=8,
+                        message=f"Composer is not installed; installing Composer {requested_composer} before deployment…",
+                        log=[f"$ install Composer {requested_composer} with PHP {site.php_version}"],
+                    )
+                    self._run_composer_binary(job_id, requested_composer, site.php_version, finalize=False)
+                    composer = composer_path()
+                composer_archive = composer.parent.parent / "composer.phar"
+                if not composer_archive.is_file():
+                    raise RuntimeError("Composer is installed but its PHAR file is missing. Reinstall Composer, then retry.")
+                php_root = service_root("php", site.php_version)
+                ensure_php_runtime_configuration(site.php_version)
                 if any(project.iterdir()):
                     raise RuntimeError(f"{template.title()} deployment requires an empty project folder to protect existing files.")
+                # Composer and all package scripts run in an isolated staging
+                # project first. A failed artisan/package-discover hook must
+                # never leave a half-installed application in the website's
+                # real document root.
+                composer_project = staging / "project"
+                composer_project.mkdir(parents=True, exist_ok=True)
                 packages = {"laravel": "laravel/laravel", "drupal": "drupal/recommended-project", "symfony": "symfony/skeleton", "cakephp": "cakephp/app", "codeigniter4": "codeigniter4/appstarter", "yii": "yiisoft/yii2-app-basic", "slim": "slim/slim-skeleton", "laminas": "laminas/laminas-mvc-skeleton"}
-                command = [str(composer), "create-project", packages[template], str(project)]
+                command = [str(php), str(composer_archive), "create-project", packages[template], str(composer_project)]
                 if template == "laravel" and laravel_version.strip():
                     command.append(laravel_version.strip())
                 command.extend(["--no-interaction", "--prefer-dist"])
                 self._update(job_id, progress=15, message=f"Installing {template.title()} with the managed Composer runtime…", log=[f"$ {' '.join(shlex.quote(item) for item in command)}"])
-                process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env={**os.environ, "COMPOSER_MEMORY_LIMIT": "-1"})
+                process = self._start_tracked_process(
+                    job_id,
+                    command,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    env={
+                        **os.environ,
+                        "COMPOSER_MEMORY_LIMIT": "-1",
+                        "LD_LIBRARY_PATH": php_runtime_library_path(php_root),
+                        "PHPRC": str(php_root / "conf/php.ini"),
+                        "PHP_INI_SCAN_DIR": str(php_root / "conf/conf.d"),
+                    },
+                    cwd=str(composer_project),
+                )
                 output = []
                 for line in process.stdout or []:
                     output.append(line.rstrip())
                     self._update(job_id, progress=min(85, 20 + len(output) // 2), message=f"Installing {template.title()} dependencies…", log=output[-80:])
-                if process.wait() != 0:
+                return_code = process.wait()
+                self._raise_if_cancelled(job_id)
+                if return_code != 0:
                     raise RuntimeError(output[-1] if output else "Composer could not install Laravel.")
+                if template == "drupal":
+                    drush_command = [str(php), str(composer_archive), "require", "drush/drush", "--no-interaction", "--prefer-dist"]
+                    self._update(job_id, progress=86, message="Installing the isolated Drupal installer…", log=[f"$ {' '.join(shlex.quote(item) for item in drush_command)}"])
+                    drush_result = subprocess.run(
+                        drush_command,
+                        cwd=str(composer_project),
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=300,
+                        env={
+                            **os.environ,
+                            "COMPOSER_MEMORY_LIMIT": "-1",
+                            "LD_LIBRARY_PATH": php_runtime_library_path(php_root),
+                            "PHPRC": str(php_root / "conf/php.ini"),
+                            "PHP_INI_SCAN_DIR": str(php_root / "conf/conf.d"),
+                        },
+                    )
+                    if drush_result.returncode != 0:
+                        raise RuntimeError((drush_result.stderr or drush_result.stdout).strip() or "Composer could not install the Drupal installer.")
+                for item in composer_project.iterdir():
+                    target = project / item.name
+                    if target.exists():
+                        raise RuntimeError(f"{template.title()} deployment produced a conflicting file: {item.name}")
+                    shutil.move(str(item), str(target))
                 if template == "laravel":
                     self._write_application_database_config(site, template, None)
                     self._finalize_laravel(job_id, site)
@@ -1067,6 +1347,8 @@ class JobStore:
                 self._write_application_database_config(site, template, credentials, wordpress_database_prefix)
                 if template == "wordpress":
                     self._install_wordpress_core(job_id, site, wordpress_admin_user, wordpress_admin_password, wordpress_site_title, credentials)
+                elif template == "drupal":
+                    self._install_drupal_core(job_id, site, wordpress_admin_user, wordpress_admin_password, wordpress_site_title, site.notes, credentials)
                 self._update(job_id, progress=94, message=f"Database {credentials[0]} is ready and application credentials were saved securely.")
             else:
                 self._update(job_id, progress=90, message="Application files are ready. No database was requested.")
@@ -1076,8 +1358,25 @@ class JobStore:
             self.enqueue_action(f"provider-reload-site-{site.id}-{uuid.uuid4().hex[:8]}", site.server_type, "restart")
             self._update(job_id, status="succeeded", progress=100, message=f"{template.title()} is ready at {project}.", log=["Application deployment completed successfully."])
         except Exception as error:
-            website_service.mark_error(site.id)
-            self._update(job_id, status="failed", message=str(error))
+            rollback_message = ""
+            try:
+                # A deployment owns the newly created website record. Remove
+                # its provider configuration and partial application files so
+                # a failed deployment cannot leave a broken site behind.
+                website_service.delete(site.id, remove_files=cleanup_project_on_failure)
+                from app.services.account_isolation import account_isolation
+                account_isolation.release("website", site.id)
+                self.publish({
+                    "type": "websites-updated",
+                    "action": "deleted",
+                    "website_id": site.id,
+                })
+                rollback_message = " Deployment rolled back."
+            except Exception as rollback_error:
+                rollback_message = f" Deployment cleanup failed: {rollback_error}"
+            if isinstance(error, InstallCancelled):
+                raise
+            self._update(job_id, status="failed", message=f"{error}{rollback_message}")
         finally:
             archive.unlink(missing_ok=True)
             shutil.rmtree(staging, ignore_errors=True)
@@ -3051,7 +3350,7 @@ class JobStore:
                     pass
         return user
 
-    def _ensure_php_package_source(self):
+    def _ensure_php_package_source(self, job_id: str):
         os_release = Path("/etc/os-release").read_text(errors="replace") if Path("/etc/os-release").exists() else ""
         release_info = {}
         for line in os_release.splitlines():
@@ -3791,7 +4090,7 @@ class JobStore:
             # older Ubuntu/Debian releases can be too old. rustup is
             # bootstrapped into Server Engine's toolchain directory instead
             # of installing the conflicting distro rustup package.
-            "stalwart": base | {"cargo", "rustc"},
+            "stalwart": base | {"cargo", "rustc", "clang", "libclang-dev"},
             # MongoDB's source bootstrap imports boto3 even when it falls back
             # to its requests-based downloader. Keep both modules available so
             # the upstream Bazel bootstrap can resolve tool archives.
@@ -4560,7 +4859,7 @@ class JobStore:
                 available = subprocess.run([apt_cache, "show", package], capture_output=True, text=True, check=False)
                 if available.returncode != 0 or "Package:" not in available.stdout:
                     self._update(job_id, message=f"PHP {normalized} is not in the current Debian repositories. Adding the PHP runtime source and retrying…")
-                    self._ensure_php_package_source()
+                    self._ensure_php_package_source(job_id)
             if apt_cache:
                 self._update(job_id, progress=12, message="Resolving required packages and PHP extensions…")
                 pending = list(packages)
@@ -4825,7 +5124,7 @@ class JobStore:
                 package.extractall(staging)
             source = next((item for item in staging.iterdir() if item.is_dir()), staging)
             self._update(job_id, progress=34, message="Building OpenLiteSpeed from source with the upstream build script…", log=["$ ./build.sh"])
-            process = subprocess.Popen(["./build.sh"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=source)
+            process = self._start_tracked_process(job_id, ["./build.sh"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=source)
             assert process.stdout is not None
             for line in process.stdout:
                 line = line.rstrip()
@@ -5012,7 +5311,7 @@ class JobStore:
                 raise RuntimeError("Ruby configuration failed; see the job output for the missing library or compiler error.")
             command = ["make", f"-j{max(2, os.cpu_count() or 2)}"]
             self._update(job_id, progress=48, message="Building Ruby from source…", log=["$ " + " ".join(command)])
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=source)
+            process = self._start_tracked_process(job_id, command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=source)
             assert process.stdout is not None
             for line in process.stdout:
                 line = line.rstrip()
@@ -5096,7 +5395,7 @@ class JobStore:
                 raise RuntimeError("FFmpeg configuration failed; see the job output for the missing library or compiler error.")
             command = ["make", f"-j{max(2, os.cpu_count() or 2)}"]
             self._update(job_id, progress=48, message="Building FFmpeg from source…", log=["$ " + " ".join(command)])
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=source)
+            process = self._start_tracked_process(job_id, command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=source)
             assert process.stdout is not None
             for line in process.stdout:
                 line = line.rstrip()
@@ -5172,7 +5471,7 @@ class JobStore:
                 shutil.rmtree(root)
             command = ["make", f"prefix={root}", "NO_TCLTK=YesPlease", "all"]
             self._update(job_id, progress=34, message="Building Git from source…", log=["$ " + " ".join(command)])
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=source)
+            process = self._start_tracked_process(job_id, command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=source)
             assert process.stdout is not None
             for line in process.stdout:
                 line = line.rstrip()
@@ -5256,7 +5555,7 @@ class JobStore:
                 raise RuntimeError("ImageMagick configuration failed; see the job output for the missing library or compiler error.")
             command = ["make", f"-j{max(2, os.cpu_count() or 2)}"]
             self._update(job_id, progress=48, message="Building ImageMagick from source…", log=["$ " + " ".join(command)])
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=source)
+            process = self._start_tracked_process(job_id, command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=source)
             assert process.stdout is not None
             for line in process.stdout:
                 line = line.rstrip()
@@ -5337,7 +5636,7 @@ class JobStore:
             pip = venv / "bin/pip"
             command = [str(pip), "install", "--disable-pip-version-check", "--no-cache-dir", "--no-binary", ":all:", str(source)]
             self._update(job_id, progress=42, message="Building Certbot and its Python dependencies from source…", log=["$ " + " ".join(shlex.quote(item) for item in command)])
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=staging)
+            process = self._start_tracked_process(job_id, command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=staging)
             output = []
             assert process.stdout is not None
             for line in process.stdout:
@@ -5411,7 +5710,7 @@ class JobStore:
             self._update(job_id, progress=34, message="Building RabbitMQ and its generic UNIX package from source…")
             command = ["make", "package-generic-unix", f"RABBITMQ_VERSION={requested_version}"]
             self._update(job_id, log=["$ " + " ".join(command)])
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=source)
+            process = self._start_tracked_process(job_id, command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=source)
             assert process.stdout is not None
             for line in process.stdout:
                 line = line.rstrip()
@@ -5639,7 +5938,7 @@ class JobStore:
             jobs = str(max(1, min(os.cpu_count() or 1, 4)))
             command = ["make", f"-j{jobs}"]
             self._update(job_id, progress=50, message=f"Building Python {requested_version} from source…", log=[f"$ {' '.join(command)}"])
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=source, env=environment)
+            process = self._start_tracked_process(job_id, command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=source, env=environment)
             output = []
             for line in process.stdout or []:
                 line = line.rstrip()
@@ -5851,7 +6150,7 @@ class JobStore:
                 package.extractall(staging)
             source = next((item for item in staging.iterdir() if item.is_dir()), staging)
             self._update(job_id, progress=48, message=f"Building Redis {requested_version} in the managed service area…")
-            build = subprocess.Popen([make, "-j2", "BUILD_TLS=no"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            build = self._start_tracked_process(job_id, [make, "-j2", "BUILD_TLS=no"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             output = []
             for line in build.stdout or []:
                 if line.strip():
@@ -5936,7 +6235,7 @@ class JobStore:
             configured = subprocess.run([str(source / "configure"), f"--prefix={root}", "--without-readline", "--without-zlib"], cwd=source, capture_output=True, text=True, check=False)
             if configured.returncode != 0:
                 raise RuntimeError((configured.stderr or configured.stdout).strip() or "PostgreSQL configure failed")
-            build = subprocess.Popen([make, "-j2"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            build = self._start_tracked_process(job_id, [make, "-j2"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             output = []
             for line in build.stdout or []:
                 if line.strip():
@@ -6067,7 +6366,7 @@ class JobStore:
             else:
                 command = [go, "run", "github.com/caddyserver/xcaddy/cmd/xcaddy@latest", "build", caddy_build_version, "--with", coraza_module, "--output", str(root / "bin/caddy")]
             self._update(job_id, progress=35, message=f"Building Caddy {requested_version} with the Coraza Application Shield adapter…", log=[f"$ {' '.join(command)}"])
-            build = subprocess.Popen(command, cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            build = self._start_tracked_process(job_id, command, cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
             output = []
             for line in build.stdout or []:
                 if line.strip():
@@ -6130,7 +6429,7 @@ class JobStore:
             if configured.returncode != 0:
                 raise RuntimeError((configured.stdout + configured.stderr).strip()[-2000:] or "MariaDB CMake configuration failed")
             self._update(job_id, progress=45, message=f"Compiling MariaDB {requested_version}…", log=[f"$ {cmake} --build {build_dir} -j2"])
-            build = subprocess.Popen([cmake, "--build", str(build_dir), "-j2"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            build = self._start_tracked_process(job_id, [cmake, "--build", str(build_dir), "-j2"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
             output = []
             for line in build.stdout or []:
                 if line.strip():
@@ -6184,7 +6483,7 @@ class JobStore:
             if configured.returncode != 0:
                 raise RuntimeError((configured.stdout + configured.stderr).strip()[-2000:] or "PowerDNS configure failed")
             self._update(job_id, progress=45, message=f"Compiling PowerDNS {requested_version}…", log=[f"$ {make} -j2"])
-            build = subprocess.Popen([make, "-j2"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            build = self._start_tracked_process(job_id, [make, "-j2"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
             output = []
             for line in build.stdout or []:
                 if line.strip():
@@ -6194,7 +6493,7 @@ class JobStore:
                 raise RuntimeError(output[-1] if output else "PowerDNS source build failed")
             if root.exists():
                 shutil.rmtree(root)
-            install = subprocess.Popen([make, "install"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            install = self._start_tracked_process(job_id, [make, "install"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
             output = []
             for line in install.stdout or []:
                 if line.strip():
@@ -6245,7 +6544,7 @@ class JobStore:
             source = next((item for item in staging.iterdir() if item.is_dir()), staging)
             configure = [make, "-j2", "TARGET=linux-glibc", "USE_OPENSSL=1", "USE_PCRE2=1", "USE_ZLIB=1"]
             self._update(job_id, progress=30, message=f"Compiling HAProxy {requested_version}…", log=[f"$ {' '.join(configure)}"])
-            build = subprocess.Popen(configure, cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            build = self._start_tracked_process(job_id, configure, cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
             output = []
             for line in build.stdout or []:
                 if line.strip():
@@ -6304,7 +6603,7 @@ class JobStore:
             configured = subprocess.run(configure, cwd=source, capture_output=True, text=True, check=False)
             if configured.returncode != 0:
                 raise RuntimeError((configured.stdout + configured.stderr).strip()[-2000:] or "Memcached configure failed")
-            build = subprocess.Popen([make, "-j2"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            build = self._start_tracked_process(job_id, [make, "-j2"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
             output = []
             for line in build.stdout or []:
                 if line.strip():
@@ -6356,7 +6655,7 @@ class JobStore:
                 package.extractall(staging, filter="data")
             source = next((item for item in staging.iterdir() if item.is_dir()), staging)
             self._update(job_id, progress=30, message=f"Compiling Valkey {requested_version}…", log=[f"$ {make} -j2"])
-            build = subprocess.Popen([make, "-j2"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            build = self._start_tracked_process(job_id, [make, "-j2"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
             output = []
             for line in build.stdout or []:
                 if line.strip():
@@ -6408,7 +6707,7 @@ class JobStore:
                 package.extractall(staging, filter="data")
             source = next((item for item in staging.iterdir() if item.is_dir()), staging)
             self._update(job_id, progress=35, message=f"Compiling vsftpd {requested_version}…", log=[f"$ {make} -j2"])
-            build = subprocess.Popen([make, "-j2"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            build = self._start_tracked_process(job_id, [make, "-j2"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
             output = []
             for line in build.stdout or []:
                 if line.strip():
@@ -6515,7 +6814,7 @@ class JobStore:
             if result.returncode != 0: raise RuntimeError((result.stderr or result.stdout).strip() or "Rspamd CMake configuration failed")
             command = [cmake, "--build", str(build_dir), "-j2"]
             self._update(job_id, progress=48, message=f"Compiling Rspamd {requested_version}…", log=[f"$ {' '.join(command)}"])
-            build = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1); output = []
+            build = self._start_tracked_process(job_id, command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1); output = []
             for line in build.stdout or []:
                 if line.strip(): output.append(line.rstrip()); self._update(job_id, progress=60, message=f"Compiling Rspamd {requested_version}…", log=output[-120:])
             if build.wait() != 0: raise RuntimeError("Rspamd source build failed: " + (output[-1] if output else "CMake returned a non-zero exit code"))
@@ -6549,7 +6848,7 @@ class JobStore:
             self._update(job_id, progress=35, message=f"Configuring BIND 9 {requested_version}…", log=[f"$ {' '.join(configure)}"])
             result = subprocess.run(configure, cwd=source, capture_output=True, text=True, check=False)
             if result.returncode != 0: raise RuntimeError((result.stderr or result.stdout).strip() or "BIND 9 configure failed")
-            build = subprocess.Popen([make, "-j2"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1); output = []
+            build = self._start_tracked_process(job_id, [make, "-j2"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1); output = []
             for line in build.stdout or []:
                 if line.strip(): output.append(line.rstrip()); self._update(job_id, progress=60, message=f"Compiling BIND 9 {requested_version}…", log=output[-120:])
             if build.wait() != 0: raise RuntimeError("BIND 9 source build failed: " + (output[-1] if output else "make returned a non-zero exit code"))
@@ -6583,7 +6882,7 @@ class JobStore:
             self._update(job_id, progress=35, message=f"Configuring Unbound {requested_version}…", log=[f"$ {' '.join(configure)}"])
             result = subprocess.run(configure, cwd=source, capture_output=True, text=True, check=False)
             if result.returncode != 0: raise RuntimeError((result.stderr or result.stdout).strip() or "Unbound configure failed")
-            build = subprocess.Popen([make, "-j2"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1); output = []
+            build = self._start_tracked_process(job_id, [make, "-j2"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1); output = []
             for line in build.stdout or []:
                 if line.strip(): output.append(line.rstrip()); self._update(job_id, progress=60, message=f"Compiling Unbound {requested_version}…", log=output[-120:])
             if build.wait() != 0: raise RuntimeError("Unbound source build failed: " + (output[-1] if output else "make returned a non-zero exit code"))
@@ -6619,7 +6918,7 @@ class JobStore:
             if result.returncode != 0: raise RuntimeError((result.stderr or result.stdout).strip() or "ClamAV CMake configuration failed")
             command = [cmake, "--build", str(build_dir), "-j2"]
             self._update(job_id, progress=48, message=f"Compiling ClamAV {requested_version}…", log=[f"$ {' '.join(command)}"])
-            build = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1); output = []
+            build = self._start_tracked_process(job_id, command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1); output = []
             for line in build.stdout or []:
                 if line.strip(): output.append(line.rstrip()); self._update(job_id, progress=60, message=f"Compiling ClamAV {requested_version}…", log=output[-120:])
             if build.wait() != 0: raise RuntimeError("ClamAV source build failed: " + (output[-1] if output else "CMake returned a non-zero exit code"))
@@ -6668,7 +6967,7 @@ class JobStore:
             wrapper.chmod(0o755)
             command = [str(wrapper), f":distribution:archives:{arch_task}:assemble"]
             self._update(job_id, progress=35, message=f"Compiling OpenSearch {requested_version} with Gradle…", log=[f"$ {' '.join(command)}"])
-            build = subprocess.Popen(command, cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            build = self._start_tracked_process(job_id, command, cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
             output = []
             for line in build.stdout or []:
                 if line.strip(): output.append(line.rstrip()); self._update(job_id, progress=45, message=f"Compiling OpenSearch {requested_version}…", log=output[-120:])
@@ -6687,7 +6986,7 @@ class JobStore:
         except Exception as error: self._update(job_id, status="failed", message=str(error))
         finally: archive.unlink(missing_ok=True); shutil.rmtree(staging, ignore_errors=True)
 
-    def _run_wpcli_binary(self, job_id: str, requested_version: str, selected_php_version: str | None = None):
+    def _run_wpcli_binary(self, job_id: str, requested_version: str, selected_php_version: str | None = None, finalize: bool = True):
         """Install the official WP-CLI PHAR without resolving its development repository."""
         versions_root = service_root("php") / "versions"
         php_candidates = []
@@ -6700,8 +6999,11 @@ class JobStore:
         selected_php = php_cli_path(selected_php_version) if selected_php_version else None
         php = selected_php if selected_php and selected_php.is_file() else (max(php_candidates, key=lambda item: item[0])[1] if php_candidates else None)
         if not php:
-            self._update(job_id, status="failed", message="WP-CLI requires an installed PHP CLI runtime. Install PHP first, then retry.")
-            return
+            message = "WP-CLI requires an installed PHP CLI runtime. Install PHP first, then retry."
+            if finalize:
+                self._update(job_id, status="failed", message=message)
+                return
+            raise RuntimeError(message)
 
         root = service_root("wp-cli") / "versions" / requested_version
         staging = root.parent / f".wp-cli-{job_id}-staging"
@@ -6745,6 +7047,7 @@ class JobStore:
                 env={
                     **os.environ,
                     "LD_LIBRARY_PATH": php_runtime_library_path(php_root),
+                    "PHPRC": str(php_root / "conf/php.ini"),
                     "PHP_INI_SCAN_DIR": str(php_root / "conf/conf.d"),
                 },
             )
@@ -6760,6 +7063,8 @@ class JobStore:
                 "#!/bin/sh\n"
                 f'PHP={shlex.quote(str(php))}\n'
                 f'PHAR={shlex.quote(str(root / "wp-cli.phar"))}\n'
+                f'export PHPRC={shlex.quote(str(php_root / "conf/php.ini"))}\n'
+                f'export PHP_INI_SCAN_DIR={shlex.quote(str(php_root / "conf/conf.d"))}\n'
                 'if [ ! -x "$PHP" ]; then\n'
                 f'  for candidate in {shlex.quote(str(versions_root))}/*/usr/bin/php {shlex.quote(str(versions_root))}/*/bin/php; do\n'
                 '    if [ -x "$candidate" ]; then PHP="$candidate"; fi\n'
@@ -6770,9 +7075,15 @@ class JobStore:
             launcher.chmod(0o755)
             (root / ".serverengine-version").write_text(requested_version + "\n")
             (root / ".serverengine-install-method").write_text("official-release\n")
-            self._update(job_id, status="succeeded", progress=100, message=f"WP-CLI {requested_version} is installed in {root}; it uses the latest available PHP CLI runtime.", log=[check.stdout.strip() or "WP-CLI release verified."])
+            if finalize:
+                self._update(job_id, status="succeeded", progress=100, message=f"WP-CLI {requested_version} is installed in {root}; it uses the latest available PHP CLI runtime.", log=[check.stdout.strip() or "WP-CLI release verified."])
+            else:
+                self._update(job_id, progress=12, message=f"WP-CLI {requested_version} installed; continuing WordPress deployment…", log=[check.stdout.strip() or "WP-CLI release verified."])
         except Exception as error:
-            self._update(job_id, status="failed", message=str(error))
+            if finalize:
+                self._update(job_id, status="failed", message=str(error))
+            else:
+                raise
         finally:
             shutil.rmtree(staging, ignore_errors=True)
 
@@ -6798,7 +7109,7 @@ class JobStore:
             self._update(job_id, progress=35, message=f"Preparing Postfix {requested_version} build…", log=[f"$ {' '.join(config)}"])
             result = subprocess.run(config, cwd=source, capture_output=True, text=True, check=False)
             if result.returncode != 0: raise RuntimeError((result.stderr or result.stdout).strip() or "Postfix makefiles failed")
-            build = subprocess.Popen([make, "-j2"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1); output = []
+            build = self._start_tracked_process(job_id, [make, "-j2"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1); output = []
             for line in build.stdout or []:
                 if line.strip(): output.append(line.rstrip()); self._update(job_id, progress=55, message=f"Compiling Postfix {requested_version}…", log=output[-120:])
             if build.wait() != 0: raise RuntimeError("Postfix source build failed: " + (output[-1] if output else "make returned a non-zero exit code"))
@@ -6834,7 +7145,7 @@ class JobStore:
             self._update(job_id, progress=35, message=f"Configuring Dovecot {requested_version}…", log=[f"$ {' '.join(configure)}"])
             configured = subprocess.run(configure, cwd=source, capture_output=True, text=True, check=False)
             if configured.returncode != 0: raise RuntimeError((configured.stderr or configured.stdout).strip() or "Dovecot configure failed")
-            build = subprocess.Popen([make, "-j2"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1); output = []
+            build = self._start_tracked_process(job_id, [make, "-j2"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1); output = []
             for line in build.stdout or []:
                 if line.strip(): output.append(line.rstrip()); self._update(job_id, progress=55, message=f"Compiling Dovecot {requested_version}…", log=output[-120:])
             if build.wait() != 0: raise RuntimeError("Dovecot source build failed: " + (output[-1] if output else "make returned a non-zero exit code"))
@@ -6979,6 +7290,21 @@ class JobStore:
                 package.extractall(staging)
             source = next((item for item in staging.iterdir() if item.is_dir()), staging)
             build_env = os.environ.copy()
+            # bindgen, used by librocksdb-sys, needs the shared libclang
+            # library at build time. Debian/Ubuntu commonly install it under
+            # a versioned LLVM directory rather than a generic linker path.
+            if not build_env.get("LIBCLANG_PATH"):
+                libclang_roots = [
+                    item for item in sorted(Path("/usr/lib").glob("llvm-*/lib"))
+                    if any(item.glob("libclang.so*"))
+                ]
+                if not libclang_roots:
+                    libclang_roots = [
+                        item for item in (Path("/usr/lib/aarch64-linux-gnu"), Path("/usr/lib/x86_64-linux-gnu"))
+                        if any(item.glob("libclang.so*"))
+                    ]
+                if libclang_roots:
+                    build_env["LIBCLANG_PATH"] = str(libclang_roots[-1])
             rust_version = subprocess.run([rustc, "--version"], capture_output=True, text=True, check=False, timeout=10)
             match = re.search(r"rustc (\d+)\.(\d+)", rust_version.stdout or "")
             modern_rust = bool(match and (int(match.group(1)), int(match.group(2))) >= (1, 85))
@@ -7019,7 +7345,7 @@ class JobStore:
             else:
                 command = [cargo, "build", "--release", "--locked", "--bin", "stalwart"]
             self._update(job_id, progress=40, message=f"Compiling Stalwart {requested_version} with Cargo…", log=[f"$ {' '.join(command)}"])
-            build = subprocess.Popen(command, cwd=source, env=build_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            build = self._start_tracked_process(job_id, command, cwd=source, env=build_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
             output = []
             for line in build.stdout or []:
                 if line.strip():
@@ -7202,7 +7528,7 @@ class JobStore:
                 raise RuntimeError("MongoDB Bazel was not available after the source bootstrap")
             command = [bazel, "build", "install-mongod", "--jobs=2"]
             self._update(job_id, progress=40, message=f"Compiling MongoDB {requested_version} with Bazel…", log=[f"$ {' '.join(command)}"])
-            build = subprocess.Popen(command, cwd=source, env=build_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            build = self._start_tracked_process(job_id, command, cwd=source, env=build_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
             output = []
             for line in build.stdout or []:
                 if line.strip():
@@ -7297,7 +7623,7 @@ class JobStore:
                 "--with-http_gzip_static_module", "--with-threads", "--with-stream",
             ]
             self._update(job_id, progress=40, message=f"Preparing Nginx {requested_version} build…", log=[f"$ {' '.join(configure)}"])
-            configured = subprocess.Popen(configure, cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            configured = self._start_tracked_process(job_id, configure, cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
             output = []
             for line in configured.stdout or []:
                 if line.strip():
@@ -7306,7 +7632,7 @@ class JobStore:
             if configured.wait() != 0:
                 raise RuntimeError("Nginx configure failed: " + (output[-1] if output else "configure returned a non-zero exit code"))
             self._update(job_id, progress=50, message=f"Compiling Nginx {requested_version}…", log=[f"$ {make} -j2"])
-            build = subprocess.Popen([make, "-j2"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            build = self._start_tracked_process(job_id, [make, "-j2"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
             output = []
             for line in build.stdout or []:
                 if line.strip():
@@ -7317,7 +7643,7 @@ class JobStore:
             if root.exists():
                 shutil.rmtree(root)
             self._update(job_id, progress=92, message=f"Installing Nginx {requested_version} into the managed directory…", log=[f"$ {make} install"])
-            install = subprocess.Popen([make, "install"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            install = self._start_tracked_process(job_id, [make, "install"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
             output = []
             for line in install.stdout or []:
                 if line.strip():
@@ -7455,7 +7781,7 @@ class JobStore:
             # objects. Modern linkers process archives left-to-right, so add
             # PCRE at the end as well to resolve the final httpd link.
             configure_env["LIBS"] = f"{configure_env.get('LIBS', '').strip()} -lpcre".strip()
-            configured = subprocess.Popen(configure, cwd=source, env=configure_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            configured = self._start_tracked_process(job_id, configure, cwd=source, env=configure_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
             output = []
             for line in configured.stdout or []:
                 if line.strip():
@@ -7465,7 +7791,7 @@ class JobStore:
                 raise RuntimeError("Apache configure failed: " + (output[-1] if output else "configure returned a non-zero exit code"))
             make_jobs = "-j1" if apache_version < (2, 4, 0) else "-j2"
             self._update(job_id, progress=50, message=f"Compiling Apache {requested_version}…", log=[f"$ {make} {make_jobs}"])
-            build = subprocess.Popen([make, make_jobs], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            build = self._start_tracked_process(job_id, [make, make_jobs], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
             output = []
             for line in build.stdout or []:
                 if line.strip():
@@ -7477,7 +7803,7 @@ class JobStore:
             if root.exists():
                 shutil.rmtree(root)
             self._update(job_id, progress=92, message=f"Installing Apache {requested_version} into the managed directory…", log=[f"$ {make} install"])
-            install = subprocess.Popen([make, "install"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            install = self._start_tracked_process(job_id, [make, "install"], cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
             output = []
             for line in install.stdout or []:
                 if line.strip():
@@ -7536,7 +7862,7 @@ class JobStore:
                 raise RuntimeError("ICU configure failed: " + (configured.stderr or configured.stdout).strip()[-1600:])
             make_command = [make, "-j1"]
             self._update(job_id, progress=34, message=f"Compiling isolated ICU {requested_version}…", log=[f"$ {' '.join(make_command)}"])
-            build = subprocess.Popen(make_command, cwd=source, env=build_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            build = self._start_tracked_process(job_id, make_command, cwd=source, env=build_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
             output = []
             for line in build.stdout or []:
                 line = line.rstrip()
@@ -7710,16 +8036,22 @@ class JobStore:
         except Exception as error:
             self._update(job_id, status="failed", message=str(error))
 
-    def _run_composer_binary(self, job_id: str, requested_version: str, selected_php_version: str | None = None):
+    def _run_composer_binary(self, job_id: str, requested_version: str, selected_php_version: str | None = None, finalize: bool = True):
         if os.geteuid() != 0:
-            self._update(job_id, status="failed", message="Composer installation requires privileges to create its managed tool directory.")
-            return
+            message = "Composer installation requires privileges to create its managed tool directory."
+            if finalize:
+                self._update(job_id, status="failed", message=message)
+                return
+            raise RuntimeError(message)
         php_root = service_root("php") / "versions"
         php_versions = sorted((item for item in php_root.iterdir() if item.is_dir()), key=lambda item: version_sort_key(item.name), reverse=True) if php_root.exists() else []
         php_version = selected_php_version if selected_php_version and php_cli_path(selected_php_version).exists() else next((item.name for item in php_versions if php_cli_path(item.name).exists()), None)
         if not php_version:
-            self._update(job_id, status="failed", message="Install a PHP runtime first, then choose it for Composer.")
-            return
+            message = "Install a PHP runtime first, then choose it for Composer."
+            if finalize:
+                self._update(job_id, status="failed", message=message)
+                return
+            raise RuntimeError(message)
         root = service_root("composer") / "versions" / requested_version
         archive = root / "composer.phar"
         try:
@@ -7735,13 +8067,15 @@ class JobStore:
             else:
                 self._update(job_id, status="running", progress=70, message=f"Using the downloaded Composer PHAR with PHP {php_version}…", log=[])
             archive.chmod(0o755)
+            # Repair/refresh the managed PHP launcher before Composer points
+            # at it. This also replaces stale self-referencing wrappers from
+            # older releases.
+            ensure_php_runtime_launcher(php_version)
             php = php_cli_path(php_version)
             ensure_php_fpm_layout(php_version)
             launcher = root / "bin/composer"
             php_root_path = service_root("php", php_version)
-            library_paths = {php_root_path / "lib", php_root_path / "lib64", php_root_path / "usr/lib", php_root_path / "usr/lib64"}
-            library_paths.update(library.parent for library in php_root_path.rglob("*.so*") if library.is_file() or library.is_symlink())
-            libraries = ":".join(str(path) for path in library_paths if path.exists())
+            libraries = php_runtime_library_path(php_root_path)
             extension_dir = next(
                 (
                     candidate
@@ -7758,7 +8092,7 @@ class JobStore:
             php_options = f" -d extension_dir=\"{extension_dir}\" {extension_flags}" if extension_dir else ""
             php_ini = php_root_path / "conf/php.ini"
             composer_home = ensure_composer_cache()
-            launcher.write_text(f"#!/bin/sh\nexport LD_LIBRARY_PATH=\"{libraries}:$LD_LIBRARY_PATH\"\nexport COMPOSER_HOME=\"{composer_home}\"\nexec \"{php}\" -c \"{php_ini}\"{php_options} \"{archive}\" \"$@\"\n")
+            launcher.write_text(f"#!/bin/sh\nexport LD_LIBRARY_PATH=\"{libraries}:$LD_LIBRARY_PATH\"\nexport PHPRC=\"{php_ini}\"\nexport PHP_INI_SCAN_DIR=\"{php_root_path / 'conf/conf.d'}\"\nexport COMPOSER_HOME=\"{composer_home}\"\nexec \"{php}\" -c \"{php_ini}\"{php_options} \"{archive}\" \"$@\"\n")
             launcher.chmod(0o755)
             (root / ".serverengine-version").write_text(requested_version)
             (service_root("composer") / ".serverengine-php-version").write_text(php_version + "\n")
@@ -7766,9 +8100,15 @@ class JobStore:
             if result.returncode != 0:
                 raise RuntimeError((result.stderr or result.stdout).strip() or "Composer could not start with the selected PHP runtime")
             actual = (result.stdout or result.stderr).strip()
-            self._update(job_id, status="succeeded", progress=100, message=f"{actual}. Available as composer in the Server Engine terminal.")
+            if finalize:
+                self._update(job_id, status="succeeded", progress=100, message=f"{actual}. Available as composer in the Server Engine terminal.")
+            else:
+                self._update(job_id, progress=12, message=f"{actual}. Composer is ready; continuing application deployment…")
         except Exception as error:
-            self._update(job_id, status="failed", message=str(error))
+            if finalize:
+                self._update(job_id, status="failed", message=str(error))
+            else:
+                raise
 
     def _run_node_binary(self, job_id: str, requested_version: str):
         if os.geteuid() != 0:

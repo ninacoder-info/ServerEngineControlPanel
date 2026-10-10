@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 
 import ServiceSvgIcon from "../../components/icons/ServiceSvgIcon";
+import { useNavigate } from "react-router-dom";
 
 export default function ServiceCard({
   service,
@@ -20,12 +21,16 @@ export default function ServiceCard({
   onTogglePin,
   installing = false,
 }) {
+  const navigate = useNavigate();
   const active = installed?.status === "running";
   const hostDependency = service.id === "docker";
-  const capability = service.mode !== "service" && !installed && !hostDependency;
+  const capability =
+    service.mode !== "service" && !installed && !hostDependency;
   const supportsMultipleVersions = service.id === "pm2";
   return (
-    <article className={`flex gap-4 rounded-lg border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900 ${pinned ? "ring-1 ring-blue-600 dark:ring-blue-400" : ""}`}>
+    <article
+      className={`flex gap-4 rounded-lg border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900 ${pinned ? "ring-1 ring-blue-600 dark:ring-blue-400" : ""}`}
+    >
       <div className="flex shrink-0 flex-col items-center gap-3">
         <div className="grid h-10 w-10 place-items-center rounded-md bg-neutral-100 text-blue-600 dark:bg-neutral-800 dark:text-blue-400">
           <ServiceSvgIcon serviceId={service.id} size={24} />
@@ -34,8 +39,12 @@ export default function ServiceCard({
       <div className="min-w-0 flex-1">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h3 className="m-0 text-sm font-semibold text-neutral-900 dark:text-neutral-100">{service.name}</h3>
-            <p className="mt-1 text-xs leading-5 text-neutral-500 dark:text-neutral-400">{service.description}</p>
+            <h3 className="m-0 text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+              {service.name}
+            </h3>
+            <p className="mt-1 text-xs leading-5 text-neutral-500 dark:text-neutral-400">
+              {service.description}
+            </p>
             {service.requirements && (
               <p className="mt-2 flex items-center gap-1.5 text-xs font-medium text-neutral-500 dark:text-neutral-400">
                 <Info size={13} />
@@ -65,8 +74,8 @@ export default function ServiceCard({
                   : installed?.status === "installed"
                     ? "Installed"
                     : installed?.status === "stopped"
-                    ? "Stopped"
-                    : "Not installed"}
+                      ? "Stopped"
+                      : "Not installed"}
             </span>
             <button
               className={`inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200 ${pinned ? "text-yellow-500 dark:text-yellow-400" : ""}`}
@@ -98,10 +107,135 @@ export default function ServiceCard({
         <div className="mt-4 flex flex-wrap items-center gap-4">
           {hostDependency && installed ? null : capability ? (
             <a
-              href={service.id === "modsecurity" ? "/application-shield" : service.id === "ddos-protection" ? "/firewall#ddos" : service.id === "cloudflare" ? "/domains#cloudflare" : service.id === "malware-scanner" || service.id === "clamav" ? "/malware-scanner" : service.id === "lynis" ? "/health#lynis" : service.id === "node-exporter" ? "/health#node-exporter" : service.id === "logrotate" ? "/logs#logrotate" : service.id === "rabbitmq" ? "/services#rabbitmq" : service.id === "mongodb" ? "/databases#mongodb" : service.id === "sqlserver" ? "/databases#sqlserver" : service.id === "opensearch" ? "/services#opensearch" : service.id === "docker" ? "/services#docker" : service.id === "git" ? "/services#git" : service.id === "wp-cli" ? "/services#wp-cli" : service.id === "imagemagick" ? "/services#imagemagick" : service.id === "ffmpeg" ? "/services#ffmpeg" : service.id === "supervisor" ? "/services#supervisor" : service.id === "pm2" ? "/services#pm2" : service.id === "postfix" ? "/email#postfix" : service.id === "dovecot" ? "/email#dovecot" : service.id === "rspamd" ? "/email#rspamd" : service.id === "stalwart" ? "/email#stalwart" : service.id === "bind9" ? "/domains#bind" : service.id === "unbound" ? "/domains#unbound" : service.id === "auditd" ? "/logs#auditd" : service.management_path || "/settings"}
+              href={
+                service.id === "modsecurity"
+                  ? "/application-shield"
+                  : service.id === "ddos-protection"
+                    ? "/firewall#ddos"
+                    : service.id === "cloudflare"
+                      ? "/domains#cloudflare"
+                      : service.id === "malware-scanner" ||
+                          service.id === "clamav"
+                        ? "/malware-scanner"
+                        : service.id === "lynis"
+                          ? "/health#lynis"
+                          : service.id === "node-exporter"
+                            ? "/health#node-exporter"
+                            : service.id === "logrotate"
+                              ? "/logs#logrotate"
+                              : service.id === "rabbitmq"
+                                ? "/services#rabbitmq"
+                                : service.id === "mongodb"
+                                  ? "/databases#mongodb"
+                                  : service.id === "sqlserver"
+                                    ? "/databases#sqlserver"
+                                    : service.id === "opensearch"
+                                      ? "/services#opensearch"
+                                      : service.id === "docker"
+                                        ? "/services#docker"
+                                        : service.id === "git"
+                                          ? "/services#git"
+                                          : service.id === "wp-cli"
+                                            ? "/services#wp-cli"
+                                            : service.id === "imagemagick"
+                                              ? "/services#imagemagick"
+                                              : service.id === "ffmpeg"
+                                                ? "/services#ffmpeg"
+                                                : service.id === "supervisor"
+                                                  ? "/services#supervisor"
+                                                  : service.id === "pm2"
+                                                    ? "/services#pm2"
+                                                    : service.id === "postfix"
+                                                      ? "/email#postfix"
+                                                      : service.id === "dovecot"
+                                                        ? "/email#dovecot"
+                                                        : service.id ===
+                                                            "rspamd"
+                                                          ? "/email#rspamd"
+                                                          : service.id ===
+                                                              "stalwart"
+                                                            ? "/email#stalwart"
+                                                            : service.id ===
+                                                                "bind9"
+                                                              ? "/domains#bind"
+                                                              : service.id ===
+                                                                  "unbound"
+                                                                ? "/domains#unbound"
+                                                                : service.id ===
+                                                                    "auditd"
+                                                                  ? "/logs#auditd"
+                                                                  : service.management_path ||
+                                                                    "/settings"
+              }
               className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-semibold text-neutral-700 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white"
+              onClick={(event) => {
+                event.preventDefault();
+                navigate(
+                  service.id === "modsecurity"
+                    ? "/application-shield"
+                    : service.id === "ddos-protection"
+                      ? "/firewall#ddos"
+                      : service.id === "cloudflare"
+                        ? "/domains#cloudflare"
+                        : service.id === "malware-scanner" ||
+                            service.id === "clamav"
+                          ? "/malware-scanner"
+                          : service.id === "lynis"
+                            ? "/health#lynis"
+                            : service.id === "node-exporter"
+                              ? "/health#node-exporter"
+                              : service.id === "logrotate"
+                                ? "/logs#logrotate"
+                                : service.id === "rabbitmq"
+                                  ? "/services#rabbitmq"
+                                  : service.id === "mongodb"
+                                    ? "/databases#mongodb"
+                                    : service.id === "sqlserver"
+                                      ? "/databases#sqlserver"
+                                      : service.id === "opensearch"
+                                        ? "/services#opensearch"
+                                        : service.id === "docker"
+                                          ? "/services#docker"
+                                          : service.id === "git"
+                                            ? "/services#git"
+                                            : service.id === "wp-cli"
+                                              ? "/services#wp-cli"
+                                              : service.id === "imagemagick"
+                                                ? "/services#imagemagick"
+                                                : service.id === "ffmpeg"
+                                                  ? "/services#ffmpeg"
+                                                  : service.id === "supervisor"
+                                                    ? "/services#supervisor"
+                                                    : service.id === "pm2"
+                                                      ? "/services#pm2"
+                                                      : service.id === "postfix"
+                                                        ? "/email#postfix"
+                                                        : service.id ===
+                                                            "dovecot"
+                                                          ? "/email#dovecot"
+                                                          : service.id ===
+                                                              "rspamd"
+                                                            ? "/email#rspamd"
+                                                            : service.id ===
+                                                                "stalwart"
+                                                              ? "/email#stalwart"
+                                                              : service.id ===
+                                                                  "bind9"
+                                                                ? "/domains#bind"
+                                                                : service.id ===
+                                                                    "unbound"
+                                                                  ? "/domains#unbound"
+                                                                  : service.id ===
+                                                                      "auditd"
+                                                                    ? "/logs#auditd"
+                                                                    : service.management_path ||
+                                                                      "/settings",
+                );
+              }}
             >
-              {service.id === "modsecurity" ? "Open Application Shield" : service.management_label || "Open controls"}
+              {service.id === "modsecurity"
+                ? "Open Application Shield"
+                : service.management_label || "Open controls"}
               <ExternalLink size={14} />
             </a>
           ) : (
@@ -121,11 +255,18 @@ export default function ServiceCard({
               ) : installed ? (
                 "Configure service"
               ) : (
-                <><Download size={14} />Install</>
+                <>
+                  <Download size={14} />
+                  Install
+                </>
               )}
             </button>
           )}
-          <a className="inline-flex items-center gap-1.5 text-sm text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white" href="#" onClick={(event) => event.preventDefault()}>
+          <a
+            className="inline-flex items-center gap-1.5 text-sm text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white"
+            href="#"
+            onClick={(event) => event.preventDefault()}
+          >
             <ExternalLink size={14} />
             Documentation
           </a>

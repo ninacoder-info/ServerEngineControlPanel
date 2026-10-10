@@ -1,6 +1,7 @@
 import React from "react";
 import {
   Copy,
+  ClipboardPaste,
   Eraser,
   Eye,
   EyeOff,
@@ -61,25 +62,55 @@ function Button({ label, onClick, children }) {
   );
 }
 function Field({ label, error, children }) {
-  return <FormField label={label} error={error}>{children}</FormField>;
+  return (
+    <FormField label={label} error={error}>
+      {children}
+    </FormField>
+  );
 }
 
-const connectionSchema = z.object({
-  name: z.string().trim().min(1, "Connection name is required."),
-  kind: z.enum(["local", "remote"]),
-  host: z.string().trim(),
-  port: z.coerce.number().int().min(1, "Enter a valid port.").max(65535, "Enter a valid port."),
-  username: z.string().trim(),
-  auth_method: z.enum(["password", "key"]),
-  password: z.string(),
-  private_key: z.string(),
-}).superRefine((value, context) => {
-  if (value.kind !== "remote") return;
-  if (!value.host) context.addIssue({ code: z.ZodIssueCode.custom, path: ["host"], message: "Host or IP address is required." });
-  if (!value.username) context.addIssue({ code: z.ZodIssueCode.custom, path: ["username"], message: "Username is required." });
-  if (value.auth_method === "password" && !value.password.trim()) context.addIssue({ code: z.ZodIssueCode.custom, path: ["password"], message: "Password is required." });
-  if (value.auth_method === "key" && !value.private_key.trim()) context.addIssue({ code: z.ZodIssueCode.custom, path: ["private_key"], message: "Upload or paste a private key." });
-});
+const connectionSchema = z
+  .object({
+    name: z.string().trim().min(1, "Connection name is required."),
+    kind: z.enum(["local", "remote"]),
+    host: z.string().trim(),
+    port: z.coerce
+      .number()
+      .int()
+      .min(1, "Enter a valid port.")
+      .max(65535, "Enter a valid port."),
+    username: z.string().trim(),
+    auth_method: z.enum(["password", "key"]),
+    password: z.string(),
+    private_key: z.string(),
+  })
+  .superRefine((value, context) => {
+    if (value.kind !== "remote") return;
+    if (!value.host)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["host"],
+        message: "Host or IP address is required.",
+      });
+    if (!value.username)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["username"],
+        message: "Username is required.",
+      });
+    if (value.auth_method === "password" && !value.password.trim())
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["password"],
+        message: "Password is required.",
+      });
+    if (value.auth_method === "key" && !value.private_key.trim())
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["private_key"],
+        message: "Upload or paste a private key.",
+      });
+  });
 
 export function TerminalSession({
   profile,
@@ -90,11 +121,15 @@ export function TerminalSession({
   className = "",
   onStatus,
   onControls,
+  onKill = () => {},
 }) {
   const root = React.useRef(null),
+    terminalHost = React.useRef(null),
     term = React.useRef(null),
     socket = React.useRef(null),
     fit = React.useRef(null);
+  const [contextMenu, setContextMenu] = React.useState(null);
+  const command = typeof initialCommand === "string" ? initialCommand : "";
   const open = React.useCallback(() => {
     if (
       !term.current ||
@@ -118,9 +153,10 @@ export function TerminalSession({
           private_key: profile.private_key || "",
           password: profile.password || "",
           container_id: profile.container_id || "",
+          php_version: profile.php_version || "",
         }),
       );
-      if (initialCommand) ws.send(JSON.stringify({ type: "input", data: initialCommand }));
+      if (command) ws.send(JSON.stringify({ type: "input", data: command }));
       term.current?.writeln(`\r\n\x1b[32mConnected to ${profile.name}\x1b[0m`);
       fit.current?.fit();
       term.current?.focus();
@@ -131,11 +167,11 @@ export function TerminalSession({
       onStatus(profile.id, "disconnected");
     };
     ws.onerror = () => onStatus(profile.id, "error");
-  }, [enabled, initialCommand, onStatus, profile]);
+  }, [command, enabled, onStatus, profile]);
   React.useEffect(() => {
-    if (!initialCommand || socket.current?.readyState !== WebSocket.OPEN) return;
-    socket.current.send(JSON.stringify({ type: "input", data: initialCommand }));
-  }, [initialCommand]);
+    if (!command || socket.current?.readyState !== WebSocket.OPEN) return;
+    socket.current.send(JSON.stringify({ type: "input", data: command }));
+  }, [command]);
   const resize = React.useCallback(() => {
     const dimensions = fit.current?.proposeDimensions();
     if (dimensions && socket.current?.readyState === WebSocket.OPEN)
@@ -148,13 +184,19 @@ export function TerminalSession({
       );
   }, []);
   React.useEffect(() => {
+    const closeContextMenu = () => setContextMenu(null);
+    document.addEventListener("pointerdown", closeContextMenu);
+    return () => document.removeEventListener("pointerdown", closeContextMenu);
+  }, []);
+  React.useEffect(() => {
     const darkMode = document.documentElement.classList.contains("dark");
     const surface = darkMode ? "#171717" : "#ffffff";
     const foreground = darkMode ? "#d4d4d4" : "#1f1f1f";
     const terminal = new Terminal({
       cursorBlink: true,
       convertEol: true,
-      fontSize: 14,
+      fontSize: 11,
+      rightClickSelectsWord: true,
       scrollback: 10000,
       fontFamily:
         "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
@@ -166,7 +208,7 @@ export function TerminalSession({
     });
     const addon = new FitAddon();
     terminal.loadAddon(addon);
-    terminal.open(root.current);
+    terminal.open(terminalHost.current);
     term.current = terminal;
     fit.current = addon;
     const applyTheme = () => {
@@ -188,7 +230,7 @@ export function TerminalSession({
       addon.fit();
       resize();
     });
-    observer.observe(root.current);
+    observer.observe(terminalHost.current);
     const inputDisposable = terminal.onData((data) => {
       if (socket.current?.readyState === WebSocket.OPEN)
         socket.current.send(JSON.stringify({ type: "input", data }));
@@ -230,6 +272,41 @@ export function TerminalSession({
       fit.current = null;
     };
   }, [profile.id]);
+  const clearTerminal = React.useCallback(() => {
+    term.current?.clear();
+    setContextMenu(null);
+  }, []);
+  const killTerminal = React.useCallback(() => {
+    setContextMenu(null);
+    socket.current?.close(1000, "Terminal closed by user");
+    onKill(profile.id);
+  }, [onKill, profile.id]);
+  const copySelection = React.useCallback(async () => {
+    const selection =
+      term.current?.getSelection() || contextMenu?.selection || "";
+    if (!selection) return;
+    try {
+      await navigator.clipboard.writeText(selection);
+    } catch {
+      // Keep xterm's native selection available when clipboard permissions are unavailable.
+    }
+    setContextMenu(null);
+  }, [contextMenu?.selection]);
+  const pasteClipboard = React.useCallback(async () => {
+    if (socket.current?.readyState !== WebSocket.OPEN) return;
+    try {
+      const value = await navigator.clipboard.readText();
+      if (value)
+        socket.current.send(JSON.stringify({ type: "input", data: value }));
+    } catch {
+      // Clipboard access can be denied by the browser or an insecure origin.
+    }
+    setContextMenu(null);
+  }, []);
+  const selectAll = React.useCallback(() => {
+    term.current?.selectAll();
+    setContextMenu(null);
+  }, []);
   React.useEffect(() => {
     if (visible) {
       fit.current?.fit();
@@ -249,8 +326,79 @@ export function TerminalSession({
     <div
       ref={root}
       onClick={() => term.current?.focus()}
-      className={`${visible ? "" : "hidden"} box-border min-h-0 w-full select-text overflow-hidden rounded-lg bg-white p-3 dark:bg-neutral-900 ${className || "h-[32rem] max-h-[32rem]"}`}
-    />
+      onContextMenu={(event) => {
+        event.preventDefault();
+        const bounds = root.current?.getBoundingClientRect();
+        if (!bounds) return;
+        setContextMenu({
+          left: Math.min(event.clientX - bounds.left, bounds.width - 180),
+          top: Math.min(event.clientY - bounds.top, bounds.height - 120),
+          selection: term.current?.getSelection() || "",
+        });
+      }}
+      className={`${visible ? "" : "hidden"} relative box-border min-h-0 w-full select-text overflow-hidden rounded-lg bg-white p-3 dark:bg-neutral-900 ${className || "h-[32rem] max-h-[32rem]"}`}
+    >
+      <div ref={terminalHost} className="h-full w-full" />
+      {contextMenu && (
+        <div
+          className="absolute z-50 w-52 overflow-hidden rounded-lg border border-neutral-200 bg-white p-1 text-xs shadow-2xl dark:border-neutral-700 dark:bg-neutral-900"
+          style={{
+            left: Math.max(4, contextMenu.left),
+            top: Math.max(4, contextMenu.top),
+          }}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="flex w-full items-center justify-between rounded-md px-2.5 py-2 text-left text-neutral-800 hover:bg-neutral-100 dark:text-neutral-100 dark:hover:bg-neutral-800"
+            onClick={copySelection}
+          >
+            <span className="flex items-center gap-2">
+              <Copy size={14} />
+              Copy
+            </span>
+            <kbd className="text-[10px] text-neutral-400">⌘C</kbd>
+          </button>
+          <button
+            type="button"
+            className="flex w-full items-center justify-between rounded-md px-2.5 py-2 text-left text-neutral-800 hover:bg-neutral-100 dark:text-neutral-100 dark:hover:bg-neutral-800"
+            onClick={pasteClipboard}
+          >
+            <span className="flex items-center gap-2">
+              <ClipboardPaste size={14} />
+              Paste
+            </span>
+            <kbd className="text-[10px] text-neutral-400">⌘V</kbd>
+          </button>
+          <div className="my-1 border-t border-neutral-100 dark:border-neutral-800" />
+          <button
+            type="button"
+            className="flex w-full items-center justify-between rounded-md px-2.5 py-2 text-left text-neutral-800 hover:bg-neutral-100 dark:text-neutral-100 dark:hover:bg-neutral-800"
+            onClick={selectAll}
+          >
+            <span>Select All</span>
+            <kbd className="text-[10px] text-neutral-400">⌘A</kbd>
+          </button>
+          <div className="my-1 border-t border-neutral-100 dark:border-neutral-800" />
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-neutral-800 hover:bg-neutral-100 dark:text-neutral-100 dark:hover:bg-neutral-800"
+            onClick={clearTerminal}
+          >
+            <Eraser size={14} />
+            Clear terminal
+          </button>
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/30"
+            onClick={killTerminal}
+          >
+            <X size={14} />
+            Kill terminal
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -372,7 +520,14 @@ export default function TerminalPage({ autoConnect = false }) {
   const save = () => {
     const validation = connectionSchema.safeParse(form);
     if (!validation.success) {
-      setErrors(Object.fromEntries(validation.error.issues.map((issue) => [issue.path[0], issue.message])));
+      setErrors(
+        Object.fromEntries(
+          validation.error.issues.map((issue) => [
+            issue.path[0],
+            issue.message,
+          ]),
+        ),
+      );
       return;
     }
     const profile = {
@@ -425,9 +580,19 @@ export default function TerminalPage({ autoConnect = false }) {
     setModal("edit");
   };
   const testConnection = () => {
-    const validation = connectionSchema.safeParse({ ...form, name: form.name || "Connection test" });
+    const validation = connectionSchema.safeParse({
+      ...form,
+      name: form.name || "Connection test",
+    });
     if (!validation.success) {
-      setErrors(Object.fromEntries(validation.error.issues.map((issue) => [issue.path[0], issue.message])));
+      setErrors(
+        Object.fromEntries(
+          validation.error.issues.map((issue) => [
+            issue.path[0],
+            issue.message,
+          ]),
+        ),
+      );
       return;
     }
     testSocket.current?.close();
@@ -693,7 +858,10 @@ export default function TerminalPage({ autoConnect = false }) {
                   Save an SSH profile for one-click access.
                 </p>
               </div>
-              <button onClick={() => setModal(null)} className="text-neutral-400">
+              <button
+                onClick={() => setModal(null)}
+                className="text-neutral-400"
+              >
                 <X size={18} />
               </button>
             </div>

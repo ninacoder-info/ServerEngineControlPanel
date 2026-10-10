@@ -27,16 +27,28 @@ export function useServiceInstallationState(serviceId) {
         apiRequest("/api/v1/services/installed"),
         apiRequest("/api/v1/jobs"),
       ]);
-      if (!response.ok) throw new Error(await readApiError(response, "Unable to check service status."));
+      if (!response.ok)
+        throw new Error(
+          await readApiError(response, "Unable to check service status."),
+        );
       const services = await response.json();
       const jobs = jobsResponse.ok ? await jobsResponse.json() : [];
-      const matchingServices = services.filter((item) => serviceIds.some((id) => isMatchingService(item, id)));
+      const matchingServices = services.filter((item) =>
+        serviceIds.some((id) => isMatchingService(item, id)),
+      );
       const activeJob = jobs.find((job) => {
         const type = String(job.type || "").toLowerCase();
-        return (job.status === "queued" || job.status === "running") && serviceIds.some((id) => type.includes(`install ${id.toLowerCase()}`));
+        return (
+          (job.status === "queued" || job.status === "running") &&
+          serviceIds.some((id) => type.includes(`install ${id.toLowerCase()}`))
+        );
       });
       setInstalled(matchingServices.length > 0);
-      setRunning(matchingServices.some((item) => item.running === true || item.status === "running"));
+      setRunning(
+        matchingServices.some(
+          (item) => item.running === true || item.status === "running",
+        ),
+      );
       setInstallJob(activeJob || null);
     } catch (statusError) {
       setInstalled(false);
@@ -52,9 +64,16 @@ export function useServiceInstallationState(serviceId) {
     loadStatus();
     const updateFromSocket = (event) => {
       const detail = event.detail || {};
-      if (!serviceIds.some((id) => detail.serviceId === id || detail.serviceId?.startsWith(`${id}@`))) return;
+      if (
+        !serviceIds.some(
+          (id) =>
+            detail.serviceId === id || detail.serviceId?.startsWith(`${id}@`),
+        )
+      )
+        return;
       if (["queued", "running"].includes(detail.status)) {
-        if (detail.action === "install") setInstallJob(detail.job || { status: detail.status });
+        if (detail.action === "install")
+          setInstallJob(detail.job || { status: detail.status });
         return;
       }
       if (detail.status !== "succeeded") return;
@@ -63,7 +82,9 @@ export function useServiceInstallationState(serviceId) {
         setRunning(false);
         setInstallJob(null);
       } else if (detail.action === "uninstall") {
-        setInstalled(false);
+        // A versioned runtime uninstall must not make the whole service
+        // appear absent. The owning runtime page removes that version.
+        if (!detail.version) setInstalled(false);
         setRunning(false);
         setInstallJob(null);
       } else if (["stop", "start", "restart"].includes(detail.action)) {
@@ -72,7 +93,11 @@ export function useServiceInstallationState(serviceId) {
       }
     };
     window.addEventListener("serverengine:service-status", updateFromSocket);
-    return () => window.removeEventListener("serverengine:service-status", updateFromSocket);
+    return () =>
+      window.removeEventListener(
+        "serverengine:service-status",
+        updateFromSocket,
+      );
   }, [loadStatus]);
 
   const openInstaller = React.useCallback(async () => {
@@ -81,13 +106,21 @@ export function useServiceInstallationState(serviceId) {
     setError("");
     try {
       const response = await apiRequest("/api/v1/services/catalog");
-      if (!response.ok) throw new Error(await readApiError(response, "Unable to load the service installer."));
+      if (!response.ok)
+        throw new Error(
+          await readApiError(response, "Unable to load the service installer."),
+        );
       const services = await response.json();
       const catalogService = services.find((item) => item.id === installerId);
-      if (!catalogService) throw new Error(`${installerId} is not available in the service catalog.`);
+      if (!catalogService)
+        throw new Error(
+          `${installerId} is not available in the service catalog.`,
+        );
       setService(catalogService);
     } catch (installerError) {
-      setError(installerError.message || "Unable to load the service installer.");
+      setError(
+        installerError.message || "Unable to load the service installer.",
+      );
     } finally {
       setOpeningInstaller(false);
     }

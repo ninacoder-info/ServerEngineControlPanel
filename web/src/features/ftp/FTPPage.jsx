@@ -33,14 +33,28 @@ const field =
 const card =
   "rounded-xl border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900";
 
-const ftpAccountSchema = (editing) => z.object({
-  username: z.string().trim().min(3, "Username must be at least 3 characters.").max(32, "Username cannot exceed 32 characters.").regex(/^[a-z][a-z0-9_-]*$/, "Username format is invalid."),
-  password: editing ? z.string().max(256, "Password is too long.") : z.string().min(8, "Password is too short.").max(256, "Password is too long."),
-  root: z.string().trim().min(1, "Choose an account root folder."),
-  access: z.enum(["read-write", "read-only"]),
-  quota_mb: z.union([z.literal(""), z.coerce.number().int().positive("Quota must be greater than zero.")]),
-  enabled: z.boolean(),
-});
+const ftpAccountSchema = (editing) =>
+  z.object({
+    username: z
+      .string()
+      .trim()
+      .min(3, "Username must be at least 3 characters.")
+      .max(32, "Username cannot exceed 32 characters.")
+      .regex(/^[a-z][a-z0-9_-]*$/, "Username format is invalid."),
+    password: editing
+      ? z.string().max(256, "Password is too long.")
+      : z
+          .string()
+          .min(8, "Password is too short.")
+          .max(256, "Password is too long."),
+    root: z.string().trim().min(1, "Choose an account root folder."),
+    access: z.enum(["read-write", "read-only"]),
+    quota_mb: z.union([
+      z.literal(""),
+      z.coerce.number().int().positive("Quota must be greater than zero."),
+    ]),
+    enabled: z.boolean(),
+  });
 
 export function VsftpdConfigModal({
   service,
@@ -51,13 +65,16 @@ export function VsftpdConfigModal({
 }) {
   const installed = service.status !== "not-installed";
   const statusLabel = installed
-    ? (service.status === "running" ? "running" : "stopped")
+    ? service.status === "running"
+      ? "running"
+      : "stopped"
     : "not installed";
-  const statusClass = service.status === "running"
-    ? "text-emerald-600 dark:text-emerald-400"
-    : service.status === "not-installed"
-      ? "text-neutral-500 dark:text-neutral-400"
-      : "text-amber-600 dark:text-amber-400";
+  const statusClass =
+    service.status === "running"
+      ? "text-emerald-600 dark:text-emerald-400"
+      : service.status === "not-installed"
+        ? "text-neutral-500 dark:text-neutral-400"
+        : "text-amber-600 dark:text-amber-400";
   const [form, setForm] = React.useState({
     control_port: settings.control_port || 21,
     passive_min: settings.passive_min || 40000,
@@ -141,11 +158,7 @@ export function VsftpdConfigModal({
               vsftpd configuration
             </h2>
             <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
-              <span
-                className={statusClass}
-              >
-                {statusLabel}
-              </span>
+              <span className={statusClass}>{statusLabel}</span>
               {" · "}v{service.version || "3.0.5"}
             </p>
             <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
@@ -342,39 +355,42 @@ export function VsftpdConfigModal({
             </div>
             {!installed ? (
               <div className="rounded-md border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-600 dark:border-neutral-800 dark:bg-neutral-950 dark:text-neutral-400">
-                Install vsftpd from the Services page before starting it or managing its runtime.
+                Install vsftpd from the Services page before starting it or
+                managing its runtime.
               </div>
-            ) : <div className="flex flex-wrap gap-3">
-              {service.status === "running" ? (
-                <button
-                  type="button"
-                  disabled={actionBusy}
-                  onClick={() => runAction("stop")}
-                  className="inline-flex items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
-                >
-                  <Square size={14} /> Stop
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  disabled={actionBusy}
-                  onClick={() => runAction("start")}
-                  className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
-                >
-                  <Play size={14} /> Start
-                </button>
-              )}
-              {service.status === "running" && (
-                <button
-                  type="button"
-                  disabled={actionBusy}
-                  onClick={() => runAction("restart")}
-                  className="inline-flex items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
-                >
-                  <RotateCw size={14} /> Restart
-                </button>
-              )}
-            </div>}
+            ) : (
+              <div className="flex flex-wrap gap-3">
+                {service.status === "running" ? (
+                  <button
+                    type="button"
+                    disabled={actionBusy}
+                    onClick={() => runAction("stop")}
+                    className="inline-flex items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+                  >
+                    <Square size={14} /> Stop
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={actionBusy}
+                    onClick={() => runAction("start")}
+                    className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    <Play size={14} /> Start
+                  </button>
+                )}
+                {service.status === "running" && (
+                  <button
+                    type="button"
+                    disabled={actionBusy}
+                    onClick={() => runAction("restart")}
+                    className="inline-flex items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+                  >
+                    <RotateCw size={14} /> Restart
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         )}
         {tab === "error-log" && (
@@ -552,7 +568,9 @@ function AccountModal({ account, onClose, onSaved }) {
     event.preventDefault();
     const validation = ftpAccountSchema(editing).safeParse(form);
     if (!validation.success) {
-      const nextErrors = Object.fromEntries(validation.error.issues.map((issue) => [issue.path[0], issue.message]));
+      const nextErrors = Object.fromEntries(
+        validation.error.issues.map((issue) => [issue.path[0], issue.message]),
+      );
       setFieldErrors(nextErrors);
       setError("");
       return;
@@ -600,30 +618,53 @@ function AccountModal({ account, onClose, onSaved }) {
           </button>
         </div>
         <div className="mt-6 grid gap-5 md:grid-cols-2">
-          <FormField label="Username" tooltip="Use lowercase letters, numbers, underscores, or hyphens only." error={fieldErrors.username} showError={false}>
+          <FormField
+            label="Username"
+            tooltip="Use lowercase letters, numbers, underscores, or hyphens only."
+            error={fieldErrors.username}
+            showError={false}
+          >
             <input
               className={field}
               value={form.username}
               disabled={editing}
               onChange={(event) => {
-                setForm({ ...form, username: event.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, "") });
-                setFieldErrors((current) => ({ ...current, username: undefined }));
+                setForm({
+                  ...form,
+                  username: event.target.value
+                    .toLowerCase()
+                    .replace(/[^a-z0-9_-]/g, ""),
+                });
+                setFieldErrors((current) => ({
+                  ...current,
+                  username: undefined,
+                }));
               }}
               placeholder="website_deploy"
             />
           </FormField>
-          <FormField label={editing ? "New password (optional)" : "Password"} tooltip="Use at least 8 characters." error={fieldErrors.password} showError={false}>
+          <FormField
+            label={editing ? "New password (optional)" : "Password"}
+            tooltip="Use at least 8 characters."
+            error={fieldErrors.password}
+            showError={false}
+          >
             <SecurePasswordInput
               className={field}
               value={form.password}
               onChange={(event) => {
                 setForm({ ...form, password: event.target.value });
-                setFieldErrors((current) => ({ ...current, password: undefined }));
+                setFieldErrors((current) => ({
+                  ...current,
+                  password: undefined,
+                }));
               }}
               placeholder="At least 8 characters"
             />
           </FormField>
-          <label className={`text-sm font-medium md:col-span-2 ${fieldErrors.root ? "text-rose-600 dark:text-rose-400" : "text-neutral-800 dark:text-neutral-200"}`}>
+          <label
+            className={`text-sm font-medium md:col-span-2 ${fieldErrors.root ? "text-rose-600 dark:text-rose-400" : "text-neutral-800 dark:text-neutral-200"}`}
+          >
             Account root folder
             <div className="mt-2 flex gap-2">
               <div className="relative min-w-0 flex-1">
@@ -648,12 +689,19 @@ function AccountModal({ account, onClose, onSaved }) {
               </button>
             </div>
             <span className="group/root relative mt-1 inline-flex cursor-help items-center text-neutral-400 dark:text-neutral-500">
-              <Info size={14} aria-label="FTP account root folder information" />
+              <Info
+                size={14}
+                aria-label="FTP account root folder information"
+              />
               <span className="pointer-events-none absolute left-0 top-full z-20 mt-1 w-64 rounded-md bg-neutral-900 px-2.5 py-2 text-xs font-normal leading-5 text-white opacity-0 shadow-lg transition-opacity group-hover/root:opacity-100 dark:bg-white dark:text-neutral-900">
                 The FTP account cannot browse above this directory.
               </span>
             </span>
-            {fieldErrors.root && <span className="mt-1 block text-xs font-normal text-rose-600 dark:text-rose-400">{fieldErrors.root}</span>}
+            {fieldErrors.root && (
+              <span className="mt-1 block text-xs font-normal text-rose-600 dark:text-rose-400">
+                {fieldErrors.root}
+              </span>
+            )}
           </label>
           <label className="text-sm font-medium text-neutral-800 dark:text-neutral-200">
             Access
@@ -668,20 +716,33 @@ function AccountModal({ account, onClose, onSaved }) {
               <option value="read-only">Read only</option>
             </select>
           </label>
-          <label className={`text-sm font-medium ${fieldErrors.quota_mb ? "text-rose-600 dark:text-rose-400" : "text-neutral-800 dark:text-neutral-200"}`}>
+          <label
+            className={`text-sm font-medium ${fieldErrors.quota_mb ? "text-rose-600 dark:text-rose-400" : "text-neutral-800 dark:text-neutral-200"}`}
+          >
             Storage quota (MB)
             <input
-              className={fieldErrors.quota_mb ? `${field} border-rose-500 focus:border-rose-500 focus:ring-rose-500` : field}
+              className={
+                fieldErrors.quota_mb
+                  ? `${field} border-rose-500 focus:border-rose-500 focus:ring-rose-500`
+                  : field
+              }
               type="number"
               min="1"
               value={form.quota_mb}
               onChange={(event) => {
                 setForm({ ...form, quota_mb: event.target.value });
-                setFieldErrors((current) => ({ ...current, quota_mb: undefined }));
+                setFieldErrors((current) => ({
+                  ...current,
+                  quota_mb: undefined,
+                }));
               }}
               placeholder="Unlimited"
             />
-            {fieldErrors.quota_mb && <span className="mt-1 block text-xs font-normal text-rose-600 dark:text-rose-400">{fieldErrors.quota_mb}</span>}
+            {fieldErrors.quota_mb && (
+              <span className="mt-1 block text-xs font-normal text-rose-600 dark:text-rose-400">
+                {fieldErrors.quota_mb}
+              </span>
+            )}
           </label>
           <label className="flex items-center gap-3 text-sm font-medium text-neutral-800 dark:text-neutral-200 md:col-span-2">
             <input
@@ -770,11 +831,19 @@ function FTPPageSkeleton() {
         </div>
         <div className="mt-5 overflow-hidden">
           <div className="grid grid-cols-6 gap-4 border-b border-neutral-200 px-3 py-3 dark:border-neutral-800">
-            {Array.from({ length: 6 }).map((_, index) => <div key={index} className="h-3 rounded bg-neutral-100 dark:bg-neutral-800/70" />)}
+            {Array.from({ length: 6 }).map((_, index) => (
+              <div
+                key={index}
+                className="h-3 rounded bg-neutral-100 dark:bg-neutral-800/70"
+              />
+            ))}
           </div>
           <div className="divide-y divide-neutral-100 dark:divide-neutral-800">
             {Array.from({ length: 5 }).map((_, index) => (
-              <div key={index} className="grid grid-cols-6 items-center gap-4 px-3 py-5">
+              <div
+                key={index}
+                className="grid grid-cols-6 items-center gap-4 px-3 py-5"
+              >
                 <div className="h-4 w-24 rounded bg-neutral-200 dark:bg-neutral-800" />
                 <div className="h-3 w-40 rounded bg-neutral-100 dark:bg-neutral-800/70" />
                 <div className="h-3 w-16 rounded bg-neutral-100 dark:bg-neutral-800/70" />
@@ -804,19 +873,20 @@ export default function FTPPage() {
   const load = React.useCallback(() => {
     setLoading(true);
     return apiRequest("/api/v1/ftp")
-        .then((response) => {
-          if (!response.ok) throw new Error("Unable to load FTP configuration.");
-          return response.json();
-        })
-        .then(setData)
-        .catch(() => setNotice("Unable to load FTP configuration."))
-        .finally(() => setLoading(false));
+      .then((response) => {
+        if (!response.ok) throw new Error("Unable to load FTP configuration.");
+        return response.json();
+      })
+      .then(setData)
+      .catch(() => setNotice("Unable to load FTP configuration."))
+      .finally(() => setLoading(false));
   }, []);
   React.useEffect(() => {
     load();
     const refresh = () => load();
     window.addEventListener("serverengine:jobs-updated", refresh);
-    return () => window.removeEventListener("serverengine:jobs-updated", refresh);
+    return () =>
+      window.removeEventListener("serverengine:jobs-updated", refresh);
   }, [load]);
 
   const updateSettings = async (key, value) => {
@@ -884,7 +954,16 @@ export default function FTPPage() {
     return <FTPPageSkeleton />;
   }
   if (!installed) {
-    return <ServiceNotInstalledState state={vsftpdState} icon={Server} eyebrow="FTP Accounts" title="vsftpd is not installed" description="Install vsftpd to create restricted FTP accounts, configure FTPS, and manage passive transfer ports." installLabel="Install vsftpd" />;
+    return (
+      <ServiceNotInstalledState
+        state={vsftpdState}
+        icon={Server}
+        eyebrow="FTP Accounts"
+        title="vsftpd is not installed"
+        description="Install vsftpd to create restricted FTP accounts, configure FTPS, and manage passive transfer ports."
+        installLabel="Install vsftpd"
+      />
+    );
   }
   return (
     <div className="space-y-7">
@@ -1058,7 +1137,9 @@ export default function FTPPage() {
         </div>
       </section>
       {notice && (
-        <p className="text-sm text-neutral-600 dark:text-neutral-300">{notice}</p>
+        <p className="text-sm text-neutral-600 dark:text-neutral-300">
+          {notice}
+        </p>
       )}
       {modal !== null && (
         <AccountModal

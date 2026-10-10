@@ -59,6 +59,8 @@ function PanelApp() {
 }
 
 export default function App() {
-  const webmailMode = import.meta.env.VITE_APP_MODE === "webmail" || window.location.pathname.startsWith("/webmail");
+  const webmailMode =
+    import.meta.env.VITE_APP_MODE === "webmail" ||
+    window.location.pathname.startsWith("/webmail");
   return webmailMode ? <WebmailPage /> : <PanelApp />;
 }

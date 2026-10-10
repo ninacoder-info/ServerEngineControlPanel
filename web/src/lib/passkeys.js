@@ -10,7 +10,10 @@ function toBase64Url(value) {
   bytes.forEach((byte) => {
     binary += String.fromCharCode(byte);
   });
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
 }
 
 function browserCredential(credential) {
@@ -28,7 +31,9 @@ function browserCredential(credential) {
         : {
             authenticatorData: toBase64Url(response.authenticatorData),
             signature: toBase64Url(response.signature),
-            userHandle: response.userHandle ? toBase64Url(response.userHandle) : null,
+            userHandle: response.userHandle
+              ? toBase64Url(response.userHandle)
+              : null,
           }),
     },
     type: credential.type,
@@ -38,16 +43,31 @@ function browserCredential(credential) {
 }
 
 export function passkeyAvailability() {
-  if (typeof window === "undefined" || !window.PublicKeyCredential || !navigator.credentials) {
-    return { available: false, reason: "This browser does not support passkeys." };
+  if (
+    typeof window === "undefined" ||
+    !window.PublicKeyCredential ||
+    !navigator.credentials
+  ) {
+    return {
+      available: false,
+      reason: "This browser does not support passkeys.",
+    };
   }
   const hostname = window.location.hostname;
-  const isIpAddress = /^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname) || hostname.includes(":");
+  const isIpAddress =
+    /^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname) || hostname.includes(":");
   if (isIpAddress) {
-    return { available: false, reason: "Passkeys become available after this panel has a hostname and HTTPS." };
+    return {
+      available: false,
+      reason:
+        "Passkeys become available after this panel has a hostname and HTTPS.",
+    };
   }
   if (!window.isSecureContext && hostname !== "localhost") {
-    return { available: false, reason: "Passkeys require HTTPS outside localhost." };
+    return {
+      available: false,
+      reason: "Passkeys require HTTPS outside localhost.",
+    };
   }
   return { available: true, reason: "" };
 }

@@ -2,7 +2,11 @@ import React from "react";
 import { apiRequest, readApiError } from "../../lib/api";
 import Toast from "../../components/Toast";
 
-export default function StartupPolicyToggle({ serviceId, version, label = "Start with operating system" }) {
+export default function StartupPolicyToggle({
+  serviceId,
+  version,
+  label = "Start with operating system",
+}) {
   const [enabled, setEnabled] = React.useState(false);
   const [loaded, setLoaded] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
@@ -24,10 +28,16 @@ export default function StartupPolicyToggle({ serviceId, version, label = "Start
     const next = event.target.checked;
     setEnabled(next);
     setBusy(true);
-    const response = await apiRequest(`/api/v1/services/${serviceId}/startup${query}`, {
-      method: "PUT",
-      body: JSON.stringify({ enabled: next, ...(version ? { version } : {}) }),
-    });
+    const response = await apiRequest(
+      `/api/v1/services/${serviceId}/startup${query}`,
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          enabled: next,
+          ...(version ? { version } : {}),
+        }),
+      },
+    );
     if (!response.ok) {
       setEnabled(!next);
       setToast({ type: "error", message: await readApiError(response) });
@@ -52,7 +62,9 @@ export default function StartupPolicyToggle({ serviceId, version, label = "Start
           className="mt-0.5 h-4 w-4 cursor-pointer rounded border-neutral-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500/20 disabled:cursor-wait disabled:opacity-60 dark:border-neutral-600 dark:bg-neutral-800"
         />
         <span>
-          <span className="block font-medium text-neutral-900 dark:text-neutral-100">{label}</span>
+          <span className="block font-medium text-neutral-900 dark:text-neutral-100">
+            {label}
+          </span>
           <span className="mt-0.5 block text-xs text-neutral-500 dark:text-neutral-400">
             Starts this service automatically when Server Engine starts.
           </span>

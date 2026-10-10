@@ -47,11 +47,6 @@ def save_content(path: str, payload: FileContentRequest, user=Depends(require_us
     return _file_service(user).write_file(path, payload.content).model_dump()
 
 
-@router.post("/restore")
-def restore_content(payload: FileOperationRequest, user=Depends(require_user)):
-    return _file_service(user).restore_file(payload.path).model_dump()
-
-
 @router.post("/folders")
 def create_folder(payload: FileOperationRequest, user=Depends(require_user)):
     _check_disk(user)
@@ -78,6 +73,21 @@ def permissions(payload: FilePermissionRequest, user=Depends(require_user)):
 def copy(payload: FileBulkRequest, user=Depends(require_user)):
     _check_disk(user)
     return {"entries": [item.model_dump() for item in _file_service(user).copy(payload.paths, payload.destination)]}
+
+
+@router.post("/copy/check")
+def copy_check(payload: FileBulkRequest, user=Depends(require_user)):
+    return {"conflicts": _file_service(user).copy_conflicts(payload.paths, payload.destination)}
+
+
+@router.post("/move")
+def move(payload: FileBulkRequest, user=Depends(require_user)):
+    return {"entries": [item.model_dump() for item in _file_service(user).move(payload.paths, payload.destination, payload.overwrite)]}
+
+
+@router.post("/move/check")
+def move_check(payload: FileBulkRequest, user=Depends(require_user)):
+    return {"conflicts": _file_service(user).copy_conflicts(payload.paths, payload.destination)}
 
 
 @router.post("/archive")

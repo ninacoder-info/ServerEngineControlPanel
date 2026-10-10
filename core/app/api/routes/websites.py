@@ -2,6 +2,8 @@ import uuid
 import re
 import json
 import time
+import os
+import subprocess
 import urllib.request
 from pathlib import Path
 
@@ -10,14 +12,15 @@ from pydantic import BaseModel, Field
 
 from app.api.dependencies import require_user
 from app.services.account_isolation import account_isolation
-from app.models.website import WebsiteActionRequest, WebsiteCreateRequest, WebsiteDeployRequest, WebsiteDirectoryRequest, WebsiteUpdateRequest
+from app.models.website import WebsiteActionRequest, WebsiteCreateRequest, WebsiteDeployRequest, WebsiteDirectoryRequest, WebsiteDomainCheckRequest, WebsiteUpdateRequest
 from app.services.job_service import job_store
-from app.services.service_runtime import composer_path, php_cli_path
+from app.services.service_runtime import composer_path, ensure_composer_launcher, php_cli_path, php_runtime_library_path, service_root
 from app.services.website_service import website_service
 
 router = APIRouter(prefix="/api/v1/websites", tags=["websites"])
 _wordpress_versions: tuple[float, list[str]] = (0, [])
 _laravel_versions: tuple[float, list[str]] = (0, [])
+_WEBSITE_ROOT = Path(os.getenv("SE_WEBSITE_ROOT", "/server-engine/www")).resolve()
 
 
 def _require_site(website_id: str, user):
@@ -36,6 +39,35 @@ def _account_path_allowed(path: str, user) -> None:
         Path(path).expanduser().resolve().relative_to(Path(account["home_path"]).resolve())
     except ValueError as error:
         raise HTTPException(status_code=403, detail="This path is outside the hosting account home") from error
+
+
+def _website_project_path_allowed(path: str, user) -> None:
+    try:
+        resolved = Path(path).expanduser().resolve()
+        resolved.relative_to(_WEBSITE_ROOT)
+    except ValueError as error:
+        raise HTTPException(status_code=403, detail=f"Website project folders must be inside {_WEBSITE_ROOT}") from error
+    if resolved == _WEBSITE_ROOT:
+        raise HTTPException(status_code=400, detail=f"Choose a project subfolder inside {_WEBSITE_ROOT}; the website root itself cannot be used.")
+    _account_path_allowed(path, user)
+
+
+def _php_runtime_release(version: str) -> str:
+    """Return the actual PHP release string, including beta/RC suffixes."""
+    cli = php_cli_path(version)
+    root = service_root("php", version)
+    try:
+        result = subprocess.run(
+            [str(cli), "-n", "-r", "echo PHP_VERSION;"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+            env={**os.environ, "LD_LIBRARY_PATH": php_runtime_library_path(root)},
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return (result.stdout or "").strip()
 
 
 def _queue_provider_reload(site):
@@ -82,6 +114,12 @@ def list_directories(path: str | None = None, recursive: bool = False, user=Depe
 def project_directory_status(path: str, user=Depends(require_user)):
     _account_path_allowed(path, user)
     return website_service.project_path_status(path)
+
+
+@router.post("/check-domain")
+def check_website_domain(payload: WebsiteDomainCheckRequest, user=Depends(require_user)):
+    website_service.check_domains(payload.domain, payload.aliases)
+    return {"available": True}
 
 
 @router.post("/directories", status_code=status.HTTP_201_CREATED)
@@ -188,7 +226,7 @@ def request_website_certificate(website_id: str, payload: WebsiteCertificateRequ
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create_website(payload: WebsiteCreateRequest, user=Depends(require_user)):
     account_isolation.assert_quota(user, "website")
-    _account_path_allowed(payload.project_path, user)
+    _website_project_path_allowed(payload.project_path, user)
     site = website_service.create(payload)
     account_isolation.claim(user, "website", site.id, check_quota=False)
     _queue_provider_reload(site)
@@ -201,19 +239,29 @@ def deploy_website(payload: WebsiteDeployRequest, user=Depends(require_user)):
     """Create the website profile, then deploy the selected application serially."""
     if not payload.php_version or not php_cli_path(payload.php_version).exists():
         raise HTTPException(400, "Install a PHP runtime and select it before deploying this application.")
-    if payload.application_template == "wordpress":
+    if payload.application_template == "laravel":
+        runtime_release = _php_runtime_release(payload.php_version)
+        if re.search(r"(?:alpha|beta|rc)\d*", runtime_release, re.IGNORECASE):
+            raise HTTPException(
+                400,
+                f"Laravel dependencies require a stable PHP runtime. PHP {runtime_release or payload.php_version} is a prerelease; choose PHP 8.5.x or another stable version.",
+            )
+    database_required = payload.application_template in {"wordpress", "drupal"}
+    if database_required:
         payload.database_enabled = True
         if payload.database_engine != "mysql":
-            raise HTTPException(400, "WordPress requires a running MySQL service. Start MySQL and select it before deploying.")
+            raise HTTPException(400, f"{payload.application_template.title()} requires a running MySQL service. Start MySQL and select it before deploying.")
         if not payload.database_name.strip():
-            raise HTTPException(400, "A WordPress database name is required.")
+            raise HTTPException(400, f"A {payload.application_template.title()} database name is required.")
         if not payload.database_user.strip():
-            raise HTTPException(400, "A WordPress database owner is required.")
+            raise HTTPException(400, f"A {payload.application_template.title()} database owner is required.")
     account_isolation.assert_quota(user, "website")
-    _account_path_allowed(payload.project_path, user)
+    _website_project_path_allowed(payload.project_path, user)
     project_status = website_service.project_path_status(payload.project_path)
     if project_status["exists"] and (not project_status["is_directory"] or not project_status["is_empty"]):
         raise HTTPException(400, "Project folder is not empty. Choose a new domain or project folder before deploying.")
+    if payload.application_template != "wordpress":
+        ensure_composer_launcher()
     if payload.application_template != "wordpress" and not composer_path().exists():
         raise HTTPException(400, "Install Composer before deploying this PHP application.")
     if payload.database_enabled and payload.database_engine != "mysql":
@@ -228,11 +276,17 @@ def deploy_website(payload: WebsiteDeployRequest, user=Depends(require_user)):
         payload.framework = "laravel"
     if payload.application_template == "laravel" and payload.laravel_version and not re.fullmatch(r"[0-9A-Za-z.*^~_-]+", payload.laravel_version):
         raise HTTPException(400, "The Laravel version is invalid.")
-    if payload.application_template == "wordpress":
+    if payload.application_template in {"wordpress", "drupal"}:
+        application_name = payload.application_template.title()
         if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", payload.wordpress_admin_user.strip()):
-            raise HTTPException(400, "WordPress admin username must start with a letter and use only letters, numbers, hyphens, and underscores.")
+            raise HTTPException(400, f"{application_name} admin username must start with a letter and use only letters, numbers, hyphens, and underscores.")
         if len(payload.wordpress_admin_password) < 10:
-            raise HTTPException(400, "WordPress admin password must contain at least 10 characters.")
+            raise HTTPException(400, f"{application_name} admin password must contain at least 10 characters.")
+        if not payload.wordpress_site_title.strip():
+            raise HTTPException(400, f"{application_name} site title is required.")
+        if not payload.notes.strip():
+            raise HTTPException(400, f"{application_name} site description is required.")
+    if payload.application_template == "wordpress":
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,31}", payload.wordpress_database_prefix.strip()):
             raise HTTPException(400, "WordPress database prefix is invalid.")
     site = website_service.create(payload)
@@ -249,6 +303,7 @@ def deploy_website(payload: WebsiteDeployRequest, user=Depends(require_user)):
         payload.wordpress_database_prefix,
         payload.wordpress_site_title,
         payload.laravel_version,
+        cleanup_project_on_failure=not project_status["exists"] or project_status["is_empty"],
     )
     return {"website": site, "job": job}
 
@@ -257,7 +312,7 @@ def deploy_website(payload: WebsiteDeployRequest, user=Depends(require_user)):
 def update_website(website_id: str, payload: WebsiteUpdateRequest, user=Depends(require_user)):
     _require_site(website_id, user)
     if getattr(payload, "project_path", None):
-        _account_path_allowed(payload.project_path, user)
+        _website_project_path_allowed(payload.project_path, user)
     site = website_service.update(website_id, payload)
     # Configuration changes, including maintenance mode, must be loaded by
     # the active provider immediately. The action is serialized with other

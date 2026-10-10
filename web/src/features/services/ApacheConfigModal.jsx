@@ -189,7 +189,9 @@ function Overview({ config, onSave, busy, message }) {
         />
       </div>
       {message && (
-        <p className="text-sm text-neutral-600 dark:text-neutral-300">{message}</p>
+        <p className="text-sm text-neutral-600 dark:text-neutral-300">
+          {message}
+        </p>
       )}
       <div className="flex justify-end">
         <button
@@ -356,7 +358,9 @@ function Performance({ busy, message, onSave }) {
         ThreadsPerChild.
       </p>
       {message && (
-        <p className="text-sm text-neutral-600 dark:text-neutral-300">{message}</p>
+        <p className="text-sm text-neutral-600 dark:text-neutral-300">
+          {message}
+        </p>
       )}
       <div className="flex justify-end">
         <button
@@ -510,7 +514,8 @@ function Modules() {
           >
             <div>
               <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
-                {name} <code className="ml-1 text-xs text-neutral-500">{id}</code>
+                {name}{" "}
+                <code className="ml-1 text-xs text-neutral-500">{id}</code>
               </p>
               <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
                 {description}
@@ -576,7 +581,9 @@ function VirtualHosts({ message, setMessage }) {
         </div>
       </div>
       {message && (
-        <p className="text-sm text-neutral-600 dark:text-neutral-300">{message}</p>
+        <p className="text-sm text-neutral-600 dark:text-neutral-300">
+          {message}
+        </p>
       )}
     </div>
   );
@@ -614,14 +621,17 @@ export default function ApacheConfigModal({ service, installed, onClose }) {
       }
       if (!["succeeded", "failed", "cancelled"].includes(detail.status)) return;
       if (detail.status === "succeeded") {
-        setRuntimeStatus(["start", "restart"].includes(detail.action) ? "running" : "stopped");
+        setRuntimeStatus(
+          ["start", "restart"].includes(detail.action) ? "running" : "stopped",
+        );
       } else if (detail.job?.message) {
         setMessage(detail.job.message);
       }
       setAction("");
     };
     window.addEventListener("serverengine:service-status", update);
-    return () => window.removeEventListener("serverengine:service-status", update);
+    return () =>
+      window.removeEventListener("serverengine:service-status", update);
   }, []);
   const [apacheVersions, setApacheVersions] = React.useState([]);
   const [activeApacheVersion, setActiveApacheVersion] = React.useState("");
@@ -652,7 +662,9 @@ export default function ApacheConfigModal({ service, installed, onClose }) {
       method: "PUT",
       body: JSON.stringify({ version }),
     });
-    const body = response.ok ? await response.json() : { message: await readApiError(response) };
+    const body = response.ok
+      ? await response.json()
+      : { message: await readApiError(response) };
     setMessage(body.message || "Unable to change the Apache default version.");
     if (response.ok) loadApacheVersions();
   }
@@ -797,7 +809,8 @@ export default function ApacheConfigModal({ service, installed, onClose }) {
                     Apache versions
                   </h3>
                   <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
-                    Each release has its own configuration, modules, logs, and runtime directory. Only the selected default runs.
+                    Each release has its own configuration, modules, logs, and
+                    runtime directory. Only the selected default runs.
                   </p>
                 </div>
                 <button
@@ -810,24 +823,47 @@ export default function ApacheConfigModal({ service, installed, onClose }) {
                 </button>
               </div>
               <div className="divide-y divide-neutral-200 border-y border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
-                {apacheVersions.length ? apacheVersions.map((item) => (
-                  <div key={`${item.version}-${item.path}`} className="flex items-center justify-between gap-4 py-4">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="font-medium text-neutral-900 dark:text-neutral-100">Apache {item.version}</p>
-                        {item.active && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">Default</span>}
-                        <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">{item.install_method === "source" ? "Build from source" : "Prebuilt package"}</span>
+                {apacheVersions.length ? (
+                  apacheVersions.map((item) => (
+                    <div
+                      key={`${item.version}-${item.path}`}
+                      className="flex items-center justify-between gap-4 py-4"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="font-medium text-neutral-900 dark:text-neutral-100">
+                            Apache {item.version}
+                          </p>
+                          {item.active && (
+                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+                              Default
+                            </span>
+                          )}
+                          <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
+                            {item.install_method === "source"
+                              ? "Build from source"
+                              : "Prebuilt package"}
+                          </span>
+                        </div>
+                        <p className="mt-1 truncate text-xs text-neutral-500 dark:text-neutral-400">
+                          {item.path}
+                        </p>
                       </div>
-                      <p className="mt-1 truncate text-xs text-neutral-500 dark:text-neutral-400">{item.path}</p>
+                      {!item.active && (
+                        <button
+                          type="button"
+                          className="shrink-0 cursor-pointer text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400"
+                          onClick={() => makeDefault(item.version)}
+                        >
+                          Make default
+                        </button>
+                      )}
                     </div>
-                    {!item.active && (
-                      <button type="button" className="shrink-0 cursor-pointer text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400" onClick={() => makeDefault(item.version)}>
-                        Make default
-                      </button>
-                    )}
-                  </div>
-                )) : (
-                  <p className="py-6 text-sm text-neutral-500 dark:text-neutral-400">No managed Apache versions are available yet.</p>
+                  ))
+                ) : (
+                  <p className="py-6 text-sm text-neutral-500 dark:text-neutral-400">
+                    No managed Apache versions are available yet.
+                  </p>
                 )}
               </div>
             </div>

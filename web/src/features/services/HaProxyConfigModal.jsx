@@ -189,7 +189,11 @@ export default function HaProxyConfigModal({ installed, onClose }) {
   const [busy, setBusy] = React.useState(false);
   const [toast, setToast] = React.useState(null);
   const [logs, setLogs] = React.useState(null);
-  const { status: runtimeStatus, action, setAction } = useServiceSocketStatus("haproxy", current?.status);
+  const {
+    status: runtimeStatus,
+    action,
+    setAction,
+  } = useServiceSocketStatus("haproxy", current?.status);
   const loadConfig = React.useCallback(
     () =>
       apiRequest("/api/v1/services/haproxy/configuration")

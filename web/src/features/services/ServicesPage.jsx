@@ -1,4 +1,5 @@
 import React from "react";
+import { useNavigate } from "react-router-dom";
 import { Search, Server } from "lucide-react";
 import { apiRequest, readApiError } from "../../lib/api";
 import InstallServiceModal from "./InstallServiceModal";
@@ -31,6 +32,7 @@ const HIDDEN_SERVICE_IDS = new Set([
 ]);
 
 export default function ServicesPage() {
+  const navigate = useNavigate();
   const [catalog, setCatalog] = React.useState([]);
   const [installed, setInstalled] = React.useState([]);
   const [jobs, setJobs] = React.useState([]);
@@ -87,16 +89,26 @@ export default function ServicesPage() {
         if (detail.status !== "succeeded") return current;
         if (detail.action === "install") {
           const existing = current.find(
-            (item) => item.id === detail.serviceId || item.id.startsWith(`${detail.serviceId}@`),
+            (item) =>
+              item.id === detail.serviceId ||
+              item.id.startsWith(`${detail.serviceId}@`),
           );
           if (existing) {
             return current.map((item) =>
               item.id === existing.id
-                ? { ...item, installed: true, running: false, status: "stopped", version: detail.version || item.version }
+                ? {
+                    ...item,
+                    installed: true,
+                    running: false,
+                    status: "stopped",
+                    version: detail.version || item.version,
+                  }
                 : item,
             );
           }
-          const definition = catalogRef.current.find((item) => item.id === detail.serviceId);
+          const definition = catalogRef.current.find(
+            (item) => item.id === detail.serviceId,
+          );
           if (!definition) return current;
           return [
             ...current,
@@ -113,34 +125,60 @@ export default function ServicesPage() {
         }
         if (detail.action === "uninstall") {
           return current.filter(
-            (item) => item.id !== detail.serviceId && !item.id.startsWith(`${detail.serviceId}@`),
+            (item) =>
+              item.id !== detail.serviceId &&
+              !item.id.startsWith(`${detail.serviceId}@`),
           );
         }
         return current.map((item) => {
-          if (item.id !== detail.serviceId && !item.id.startsWith(`${detail.serviceId}@`)) return item;
+          if (
+            item.id !== detail.serviceId &&
+            !item.id.startsWith(`${detail.serviceId}@`)
+          )
+            return item;
           if (["start", "restart", "stop"].includes(detail.action)) {
             const running = detail.action !== "stop";
-            return { ...item, running, status: running ? "running" : "stopped" };
+            return {
+              ...item,
+              running,
+              status: running ? "running" : "stopped",
+            };
           }
           return item;
         });
       });
-      if (detail.job) setJobs((current) => [detail.job, ...current.filter((job) => job.id !== detail.job.id)]);
+      if (detail.job)
+        setJobs((current) => [
+          detail.job,
+          ...current.filter((job) => job.id !== detail.job.id),
+        ]);
     };
     window.addEventListener("serverengine:service-status", updateFromSocket);
     const updateJobsFromSocket = (event) => setJobs(event.detail?.jobs || []);
     const updateJobFromSocket = (event) => {
       const job = event.detail?.job;
       if (!job) return;
-      setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)]);
+      setJobs((current) => [
+        job,
+        ...current.filter((item) => item.id !== job.id),
+      ]);
     };
     window.addEventListener("serverengine:jobs-snapshot", updateJobsFromSocket);
     window.addEventListener("serverengine:jobs-updated", updateJobFromSocket);
     return () => {
       alive = false;
-      window.removeEventListener("serverengine:service-status", updateFromSocket);
-      window.removeEventListener("serverengine:jobs-snapshot", updateJobsFromSocket);
-      window.removeEventListener("serverengine:jobs-updated", updateJobFromSocket);
+      window.removeEventListener(
+        "serverengine:service-status",
+        updateFromSocket,
+      );
+      window.removeEventListener(
+        "serverengine:jobs-snapshot",
+        updateJobsFromSocket,
+      );
+      window.removeEventListener(
+        "serverengine:jobs-updated",
+        updateJobFromSocket,
+      );
     };
   }, []);
   React.useEffect(() => {
@@ -154,7 +192,8 @@ export default function ServicesPage() {
       if (window.location.hash !== "#auditd" || selected) return;
       const auditd = catalog.find((service) => service.id === "auditd");
       const alreadyInstalled = installed.some(
-        (service) => service.id === "auditd" || service.id.startsWith("auditd@"),
+        (service) =>
+          service.id === "auditd" || service.id.startsWith("auditd@"),
       );
       if (auditd && !alreadyInstalled) setSelected({ service: auditd });
     };
@@ -165,18 +204,22 @@ export default function ServicesPage() {
 
   React.useEffect(() => {
     const openDatabaseServiceConfig = () => {
-      const match = window.location.hash.match(/^#(mysql|postgresql|mongodb|redis|sqlserver)-config$/);
+      const match = window.location.hash.match(
+        /^#(mysql|postgresql|mongodb|redis|sqlserver)-config$/,
+      );
       if (!match || manage) return;
       const service = catalog.find((item) => item.id === match[1]);
       if (!service) return;
       const versions = installed.filter(
-        (item) => item.id === service.id || item.id.startsWith(`${service.id}@`),
+        (item) =>
+          item.id === service.id || item.id.startsWith(`${service.id}@`),
       );
       setManage({ service, versions });
     };
     openDatabaseServiceConfig();
     window.addEventListener("hashchange", openDatabaseServiceConfig);
-    return () => window.removeEventListener("hashchange", openDatabaseServiceConfig);
+    return () =>
+      window.removeEventListener("hashchange", openDatabaseServiceConfig);
   }, [catalog, installed, manage]);
 
   const togglePin = (serviceId) =>
@@ -206,16 +249,33 @@ export default function ServicesPage() {
     installed.filter(
       (item) => item.id === service.id || item.id.startsWith(`${service.id}@`),
     );
-  const installingFor = (service) => jobs.some((job) => {
-    const type = String(job.type || "").toLowerCase();
-    const matchesBundle = service.id === "modsecurity" && type.includes("install application shield bundle");
-    return (job.status === "queued" || job.status === "running") && (matchesBundle || type.includes(`install ${service.id.toLowerCase()}`));
-  });
+  const installingFor = (service) =>
+    jobs.some((job) => {
+      const type = String(job.type || "").toLowerCase();
+      const matchesBundle =
+        service.id === "modsecurity" &&
+        type.includes("install application shield bundle");
+      return (
+        (job.status === "queued" || job.status === "running") &&
+        (matchesBundle || type.includes(`install ${service.id.toLowerCase()}`))
+      );
+    });
   const installApplicationShield = async () => {
-    const response = await apiRequest("/api/v1/application-shield/install", { method: "POST" });
+    const response = await apiRequest("/api/v1/application-shield/install", {
+      method: "POST",
+    });
     if (response.ok) {
       const result = await response.json();
-      setJobs((current) => [...current, { id: result.job_id, type: "Install Application Shield bundle", status: "queued", message: result.message, progress: 0 }]);
+      setJobs((current) => [
+        ...current,
+        {
+          id: result.job_id,
+          type: "Install Application Shield bundle",
+          status: "queued",
+          message: result.message,
+          progress: 0,
+        },
+      ]);
       window.dispatchEvent(new CustomEvent("serverengine:jobs-updated"));
     }
   };
@@ -224,7 +284,9 @@ export default function ServicesPage() {
     <div className="space-y-7">
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
         <div>
-          <p className="text-sm text-neutral-500 dark:text-neutral-400">Infrastructure</p>
+          <p className="text-sm text-neutral-500 dark:text-neutral-400">
+            Infrastructure
+          </p>
           <h2 className="mt-1 text-3xl font-semibold tracking-tight">
             Services
           </h2>
@@ -235,11 +297,16 @@ export default function ServicesPage() {
         <div className="inline-flex items-center gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-600 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300">
           <Server size={17} />
           <span>
-            {loading ? "Loading…" : installed.filter((item) => item.status === "running").length}{" "}
+            {loading
+              ? "Loading…"
+              : installed.filter((item) => item.status === "running")
+                  .length}{" "}
             {loading ? "" : "running"}
           </span>
           <span>·</span>
-          <span>{loading ? "Checking services…" : `${installed.length} detected`}</span>
+          <span>
+            {loading ? "Checking services…" : `${installed.length} detected`}
+          </span>
         </div>
       </div>
       <div className="flex flex-wrap gap-3">
@@ -267,13 +334,23 @@ export default function ServicesPage() {
       {window.location.hash === "#docker" && <DockerWorkspace />}
       {window.location.hash === "#wp-cli" && <WpCliWorkspace />}
       {loading ? (
-        <div className="grid gap-4 md:grid-cols-2" aria-label="Loading services" aria-busy="true">
+        <div
+          className="grid gap-4 md:grid-cols-2"
+          aria-label="Loading services"
+          aria-busy="true"
+        >
           {[1, 2, 3, 4, 5, 6].map((item) => (
-            <div key={item} className="animate-pulse rounded-xl border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
+            <div
+              key={item}
+              className="animate-pulse rounded-xl border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900"
+            >
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <div className="h-10 w-10 rounded-lg bg-neutral-200 dark:bg-neutral-800" />
-                  <div className="space-y-2"><div className="h-4 w-32 rounded bg-neutral-200 dark:bg-neutral-800" /><div className="h-3 w-20 rounded bg-neutral-200 dark:bg-neutral-800" /></div>
+                  <div className="space-y-2">
+                    <div className="h-4 w-32 rounded bg-neutral-200 dark:bg-neutral-800" />
+                    <div className="h-3 w-20 rounded bg-neutral-200 dark:bg-neutral-800" />
+                  </div>
                 </div>
                 <div className="h-8 w-8 rounded-full bg-neutral-200 dark:bg-neutral-800" />
               </div>
@@ -283,66 +360,74 @@ export default function ServicesPage() {
             </div>
           ))}
         </div>
-      ) : <div className="grid gap-4 md:grid-cols-2">
-        {visible.map((service) => {
-          const matches = matchesFor(service);
-          if (service.id === "php")
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2">
+          {visible.map((service) => {
+            const matches = matchesFor(service);
+            if (service.id === "php")
+              return (
+                <PhpOverviewCard
+                  key={service.id}
+                  service={service}
+                  installed={matches}
+                  pinned={pinned.includes(service.id)}
+                  onTogglePin={togglePin}
+                  onInstall={(item) => setSelected({ service: item })}
+                  installing={installingFor(service)}
+                />
+              );
+            if (service.id === "nodejs")
+              return (
+                <NodeOverviewCard
+                  key={service.id}
+                  service={service}
+                  installed={matches}
+                  pinned={pinned.includes(service.id)}
+                  onTogglePin={togglePin}
+                  onInstall={(item) => setSelected({ service: item })}
+                  onOpenRuntimes={() => setNodeRuntimesOpen(true)}
+                  installing={installingFor(service)}
+                />
+              );
+            if (service.id === "pm2")
+              return (
+                <Pm2OverviewCard
+                  key={service.id}
+                  service={service}
+                  installed={matches}
+                  pinned={pinned.includes(service.id)}
+                  onTogglePin={togglePin}
+                  onInstall={(item) => setSelected({ service: item })}
+                  onOpenWorkspace={() => {
+                    window.location.hash = "pm2";
+                  }}
+                  installing={installingFor(service)}
+                />
+              );
             return (
-              <PhpOverviewCard
+              <ServiceCard
                 key={service.id}
                 service={service}
-                installed={matches}
+                installed={matches[0]}
+                installedVersions={matches}
                 pinned={pinned.includes(service.id)}
                 onTogglePin={togglePin}
-                onInstall={(item) => setSelected({ service: item })}
+                onInstall={(item) =>
+                  item.id === "modsecurity"
+                    ? installApplicationShield()
+                    : setSelected({ service: item })
+                }
+                onManage={(item, versions) =>
+                  item.id === "modsecurity"
+                    ? navigate("/application-shield")
+                    : setManage({ service: item, versions })
+                }
                 installing={installingFor(service)}
               />
             );
-          if (service.id === "nodejs")
-            return (
-              <NodeOverviewCard
-                key={service.id}
-                service={service}
-                installed={matches}
-                pinned={pinned.includes(service.id)}
-                onTogglePin={togglePin}
-                onInstall={(item) => setSelected({ service: item })}
-                onOpenRuntimes={() => setNodeRuntimesOpen(true)}
-                installing={installingFor(service)}
-              />
-            );
-          if (service.id === "pm2")
-            return (
-              <Pm2OverviewCard
-                key={service.id}
-                service={service}
-                installed={matches}
-                pinned={pinned.includes(service.id)}
-                onTogglePin={togglePin}
-                onInstall={(item) => setSelected({ service: item })}
-                onOpenWorkspace={() => {
-                  window.location.hash = "pm2";
-                }}
-                installing={installingFor(service)}
-              />
-            );
-          return (
-            <ServiceCard
-              key={service.id}
-              service={service}
-              installed={matches[0]}
-              installedVersions={matches}
-              pinned={pinned.includes(service.id)}
-              onTogglePin={togglePin}
-              onInstall={(item) => item.id === "modsecurity" ? installApplicationShield() : setSelected({ service: item })}
-              onManage={(item, versions) => item.id === "modsecurity"
-                ? window.location.assign("/application-shield")
-                : setManage({ service: item, versions })}
-              installing={installingFor(service)}
-            />
-          );
-        })}
-      </div>}
+          })}
+        </div>
+      )}
       {selected && (
         <InstallServiceModal
           service={selected.service}
@@ -352,7 +437,11 @@ export default function ServicesPage() {
       )}{" "}
       {manage &&
         (manage.service.id === "composer" ? (
-          <ComposerConfigModal service={manage.service} installed={manage.versions} onClose={() => setManage(null)} />
+          <ComposerConfigModal
+            service={manage.service}
+            installed={manage.versions}
+            onClose={() => setManage(null)}
+          />
         ) : manage.service.id === "apache" ? (
           <ApacheConfigModal
             service={manage.service}

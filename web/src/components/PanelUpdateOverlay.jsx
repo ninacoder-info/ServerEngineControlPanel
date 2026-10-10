@@ -40,7 +40,11 @@ export default function PanelUpdateOverlay() {
       <div className="w-full max-w-md rounded-xl border border-neutral-700 bg-neutral-900 p-6 text-neutral-100 shadow-2xl">
         <div className="flex items-start gap-4">
           <div className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-neutral-800 text-blue-400">
-            {disconnected ? <WifiOff size={22} /> : <LoaderCircle className="animate-spin" size={22} />}
+            {disconnected ? (
+              <WifiOff size={22} />
+            ) : (
+              <LoaderCircle className="animate-spin" size={22} />
+            )}
           </div>
           <div className="min-w-0">
             <h2 className="text-base font-semibold">Updating Server Engine</h2>
@@ -53,7 +57,9 @@ export default function PanelUpdateOverlay() {
         </div>
         <div className="mt-5 flex items-center gap-2 border-t border-neutral-800 pt-4 text-xs text-neutral-400">
           {disconnected ? <WifiOff size={14} /> : <Wifi size={14} />}
-          {disconnected ? "Reconnecting to Server Engine" : "Waiting for the update process"}
+          {disconnected
+            ? "Reconnecting to Server Engine"
+            : "Waiting for the update process"}
         </div>
       </div>
     </div>

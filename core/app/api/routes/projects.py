@@ -97,6 +97,13 @@ def proxy_route_certificate(route_id: str, user=Depends(require_user)):
 
 @router.post("/proxy/{route_id}/certificate")
 def install_proxy_certificate(route_id: str, payload: ProxyCertificateRequest, user=Depends(require_user)):
+    route = next((item for item in project_service.list_proxy() if item.id == route_id), None)
+    if route is None:
+        raise HTTPException(404, "Proxy route not found")
+    if payload.method == "acme":
+        return {"job": job_store.enqueue_proxy_certificate(f"proxy-certificate-{uuid.uuid4().hex}", route_id, payload.email, payload.staging).model_dump(mode="json")}
+    if not payload.certificate.strip() or not payload.private_key.strip():
+        raise HTTPException(400, "Certificate and private key are required for upload.")
     route = project_service.store_proxy_certificate(route_id, payload.certificate, payload.private_key)
     job = job_store.enqueue_action(f"certificate-reload-proxy-{route.id}-{uuid.uuid4().hex[:8]}", route.server_type, "restart")
     return {"route": route, "job": job}

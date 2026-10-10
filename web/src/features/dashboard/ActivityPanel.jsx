@@ -5,7 +5,9 @@ import { apiRequest } from "../../lib/api";
 function Event({ event }) {
   return (
     <div className="flex items-center justify-between gap-4 border-b border-neutral-200 pb-4 last:border-0 last:pb-0 dark:border-neutral-800">
-      <span className="min-w-0 truncate text-sm text-neutral-700 dark:text-neutral-300">{event.type || event.detail}</span>
+      <span className="min-w-0 truncate text-sm text-neutral-700 dark:text-neutral-300">
+        {event.type || event.detail}
+      </span>
       <span className="shrink-0 text-xs text-neutral-500 dark:text-neutral-500">
         {event.time ? new Date(event.time).toLocaleString() : "—"}
       </span>
@@ -31,7 +33,12 @@ export default function ActivityPanel() {
     load();
     const onActivity = (event) => {
       if (!event.detail) return;
-      setEvents((current) => [event.detail, ...current.filter((item) => item.id !== event.detail.id)].slice(0, 3));
+      setEvents((current) =>
+        [
+          event.detail,
+          ...current.filter((item) => item.id !== event.detail.id),
+        ].slice(0, 3),
+      );
     };
     const onJobs = () => load();
     window.addEventListener("serverengine:activity", onActivity);
@@ -49,19 +56,26 @@ export default function ActivityPanel() {
           <TerminalSquare size={18} />
         </div>
         <div>
-          <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Activity</h3>
-          <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">Recent control-plane events</p>
+          <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+            Activity
+          </h3>
+          <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+            Recent control-plane events
+          </p>
         </div>
       </div>
       <div className="mt-7 space-y-5">
         {loading ? (
           <div className="flex items-center gap-2 py-3 text-sm text-neutral-500 dark:text-neutral-400">
-            <ActivityIcon size={15} className="animate-pulse" /> Loading activity…
+            <ActivityIcon size={15} className="animate-pulse" /> Loading
+            activity…
           </div>
         ) : events.length ? (
           events.map((event) => <Event key={event.id} event={event} />)
         ) : (
-          <p className="py-3 text-sm text-neutral-500 dark:text-neutral-400">No recent activity.</p>
+          <p className="py-3 text-sm text-neutral-500 dark:text-neutral-400">
+            No recent activity.
+          </p>
         )}
       </div>
     </div>

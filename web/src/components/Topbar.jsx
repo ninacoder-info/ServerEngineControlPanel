@@ -10,6 +10,8 @@ import {
   LogOut,
   Menu,
   Moon,
+  PanelLeftClose,
+  PanelLeftOpen,
   Settings2,
   Sun,
   Terminal,
@@ -46,6 +48,8 @@ export default function Topbar({
   onThemeToggle,
   onLogout,
   onMenu,
+  onSidebarToggle,
+  sidebarCollapsed,
   onNavigate,
 }) {
   const [jobs, setJobs] = React.useState([]);
@@ -89,7 +93,11 @@ export default function Topbar({
       if (event.detail?.language) setLanguage(event.detail.language);
     };
     window.addEventListener("serverengine:language-change", updateLanguage);
-    return () => window.removeEventListener("serverengine:language-change", updateLanguage);
+    return () =>
+      window.removeEventListener(
+        "serverengine:language-change",
+        updateLanguage,
+      );
   }, []);
   React.useEffect(() => {
     let alive = true;
@@ -97,7 +105,9 @@ export default function Topbar({
     let reconnectTimer;
     const applySnapshot = (items) => {
       if (!alive) return;
-      previousJobStatuses.current = new Map(items.map((job) => [job.id, job.status]));
+      previousJobStatuses.current = new Map(
+        items.map((job) => [job.id, job.status]),
+      );
       previousJobSnapshots.current = new Map(items.map((job) => [job.id, job]));
       activeJobsRef.current = items.filter(
         (job) => job.status === "queued" || job.status === "running",
@@ -106,21 +116,26 @@ export default function Topbar({
       jobsInitialized.current = true;
       setJobs(items);
       window.dispatchEvent(
-        new CustomEvent("serverengine:jobs-snapshot", { detail: { jobs: items } }),
+        new CustomEvent("serverengine:jobs-snapshot", {
+          detail: { jobs: items },
+        }),
       );
     };
     const applyJob = (job) => {
       if (!alive) return;
       const previous = previousJobStatuses.current.get(job.id);
       const previousSnapshot = previousJobSnapshots.current.get(job.id);
-      const finished = ["succeeded", "failed", "cancelled"].includes(job.status);
+      const finished = ["succeeded", "failed", "cancelled"].includes(
+        job.status,
+      );
       const statusChanged = previous !== job.status;
-      const jobChanged = !previousSnapshot
-        || previousSnapshot.status !== job.status
-        || previousSnapshot.progress !== job.progress
-        || previousSnapshot.message !== job.message
-        || previousSnapshot.updated_at !== job.updated_at
-        || (previousSnapshot.log || []).length !== (job.log || []).length;
+      const jobChanged =
+        !previousSnapshot ||
+        previousSnapshot.status !== job.status ||
+        previousSnapshot.progress !== job.progress ||
+        previousSnapshot.message !== job.message ||
+        previousSnapshot.updated_at !== job.updated_at ||
+        (previousSnapshot.log || []).length !== (job.log || []).length;
       const nextStatuses = new Map(previousJobStatuses.current);
       nextStatuses.set(job.id, job.status);
       activeJobsRef.current = [...nextStatuses.values()].filter(
@@ -149,10 +164,14 @@ export default function Topbar({
         return next;
       });
       if (jobsInitialized.current && jobChanged) {
-        window.dispatchEvent(new CustomEvent("serverengine:jobs-updated", { detail: { job } }));
+        window.dispatchEvent(
+          new CustomEvent("serverengine:jobs-updated", { detail: { job } }),
+        );
       }
       if (statusChanged) {
-        const actionMatch = String(job.type || "").match(/^(Start|Stop|Restart|Install|Uninstall)\s+([^\s·]+)(?:\s+([^\s·]+))?/i);
+        const actionMatch = String(job.type || "").match(
+          /^(Start|Stop|Restart|Install|Uninstall)\s+([^\s·]+)(?:\s+([^\s·]+))?/i,
+        );
         if (actionMatch) {
           const action = actionMatch[1].toLowerCase();
           const serviceId = actionMatch[2].toLowerCase();
@@ -163,7 +182,9 @@ export default function Topbar({
                 action,
                 version: actionMatch[3] || null,
                 status: job.status,
-                running: job.status === "succeeded" && ["start", "restart"].includes(action),
+                running:
+                  job.status === "succeeded" &&
+                  ["start", "restart"].includes(action),
                 installed: job.status === "succeeded" && action === "install",
                 job,
               },
@@ -176,11 +197,15 @@ export default function Topbar({
     const connect = () => {
       if (!alive) return;
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      socket = new WebSocket(`${protocol}//${window.location.host}/api/v1/jobs/ws`);
+      socket = new WebSocket(
+        `${protocol}//${window.location.host}/api/v1/jobs/ws`,
+      );
       socket.onopen = () => {
-        window.dispatchEvent(new CustomEvent("serverengine:socket-status", {
-          detail: { status: "connected" },
-        }));
+        window.dispatchEvent(
+          new CustomEvent("serverengine:socket-status", {
+            detail: { status: "connected" },
+          }),
+        );
       };
       socket.onmessage = (event) => {
         try {
@@ -223,38 +248,84 @@ export default function Topbar({
             );
           }
           if (message.type === "users") {
-            window.dispatchEvent(new CustomEvent("serverengine:users", { detail: message }));
+            window.dispatchEvent(
+              new CustomEvent("serverengine:users", { detail: message }),
+            );
           }
           if (message.type === "roles") {
-            window.dispatchEvent(new CustomEvent("serverengine:roles", { detail: message }));
+            window.dispatchEvent(
+              new CustomEvent("serverengine:roles", { detail: message }),
+            );
           }
-        if (message.type === "activity" && message.event) {
-          window.dispatchEvent(new CustomEvent("serverengine:activity", { detail: message.event }));
-        }
-        if (message.type === "plans") {
-          window.dispatchEvent(new CustomEvent("serverengine:plans", { detail: message }));
-        }
+          if (message.type === "activity" && message.event) {
+            window.dispatchEvent(
+              new CustomEvent("serverengine:activity", {
+                detail: message.event,
+              }),
+            );
+          }
+          if (message.type === "plans") {
+            window.dispatchEvent(
+              new CustomEvent("serverengine:plans", { detail: message }),
+            );
+          }
           if (message.type === "hosting-accounts") {
-            window.dispatchEvent(new CustomEvent("serverengine:hosting-accounts", { detail: message }));
+            window.dispatchEvent(
+              new CustomEvent("serverengine:hosting-accounts", {
+                detail: message,
+              }),
+            );
           }
           if (message.type === "metrics" && message.metrics) {
-            window.dispatchEvent(new CustomEvent("serverengine:metrics-updated", { detail: message.metrics }));
+            window.dispatchEvent(
+              new CustomEvent("serverengine:metrics-updated", {
+                detail: message.metrics,
+              }),
+            );
           }
           if (message.type === "health-thresholds") {
-            window.dispatchEvent(new CustomEvent("serverengine:health-thresholds", { detail: message.thresholds }));
+            window.dispatchEvent(
+              new CustomEvent("serverengine:health-thresholds", {
+                detail: message.thresholds,
+              }),
+            );
           }
           if (message.type === "email-updated") {
-            window.dispatchEvent(new CustomEvent("serverengine:email-updated", { detail: message }));
+            window.dispatchEvent(
+              new CustomEvent("serverengine:email-updated", {
+                detail: message,
+              }),
+            );
           }
           if (message.type === "email-domain-updated") {
-            window.dispatchEvent(new CustomEvent("serverengine:email-domain-updated", { detail: message }));
+            window.dispatchEvent(
+              new CustomEvent("serverengine:email-domain-updated", {
+                detail: message,
+              }),
+            );
+          }
+          if (message.type === "application-shield-policy" && message.policy) {
+            window.dispatchEvent(
+              new CustomEvent("serverengine:application-shield-policy", {
+                detail: message.policy,
+              }),
+            );
+          }
+          if (message.type === "firewall-updated") {
+            window.dispatchEvent(
+              new CustomEvent("serverengine:firewall-updated", {
+                detail: message,
+              }),
+            );
           }
         } catch {}
       };
       socket.onclose = () => {
-        window.dispatchEvent(new CustomEvent("serverengine:socket-status", {
-          detail: { status: "disconnected" },
-        }));
+        window.dispatchEvent(
+          new CustomEvent("serverengine:socket-status", {
+            detail: { status: "disconnected" },
+          }),
+        );
         if (alive) reconnectTimer = window.setTimeout(connect, 2000);
       };
     };
@@ -294,13 +365,22 @@ export default function Topbar({
       `${job.status} · started ${formatPanelDate(job.created_at)}`,
       job.message,
       ...(job.log || []),
-    ].filter(Boolean).join("\n");
+    ]
+      .filter(Boolean)
+      .join("\n");
     try {
       await navigator.clipboard.writeText(details);
       setCopiedJobId(job.id);
-      window.setTimeout(() => setCopiedJobId((current) => current === job.id ? null : current), 1800);
+      window.setTimeout(
+        () =>
+          setCopiedJobId((current) => (current === job.id ? null : current)),
+        1800,
+      );
     } catch {
-      setOperationToast({ type: "error", message: "Unable to copy the job output." });
+      setOperationToast({
+        type: "error",
+        message: "Unable to copy the job output.",
+      });
     }
   };
   React.useEffect(() => {
@@ -313,17 +393,43 @@ export default function Topbar({
   }, [selectedJob?.log?.length]);
   const username = user?.username || "Administrator";
   const initial = username[0]?.toUpperCase() || "A";
-  const selectedLanguage = languages.find((item) => item.id === language) || languages[0];
+  const selectedLanguage =
+    languages.find((item) => item.id === language) || languages[0];
   const changeLanguage = (next) => {
     setLanguage(next);
     localStorage.setItem("server-engine-language", next);
     document.documentElement.lang = next;
-    window.dispatchEvent(new CustomEvent("serverengine:language-change", { detail: { language: next } }));
+    window.dispatchEvent(
+      new CustomEvent("serverengine:language-change", {
+        detail: { language: next },
+      }),
+    );
     setLanguageOpen(false);
   };
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-neutral-200 bg-white px-5 dark:border-dark-border dark:bg-dark">
-      <button className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 dark:text-neutral-400 dark:hover:bg-dark-hover dark:hover:text-neutral-100 md:hidden" onClick={onMenu}>
+      <button
+        type="button"
+        className="file-toolbar-button hidden h-9 w-9 cursor-pointer items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 md:inline-flex dark:text-neutral-400 dark:hover:bg-dark-hover dark:hover:text-neutral-100"
+        data-tooltip={
+          sidebarCollapsed ? "Expand navigation" : "Collapse navigation"
+        }
+        aria-label={
+          sidebarCollapsed ? "Expand navigation" : "Collapse navigation"
+        }
+        aria-pressed={sidebarCollapsed}
+        onClick={onSidebarToggle}
+      >
+        {sidebarCollapsed ? (
+          <PanelLeftOpen size={18} />
+        ) : (
+          <PanelLeftClose size={18} />
+        )}
+      </button>
+      <button
+        className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 dark:text-neutral-400 dark:hover:bg-dark-hover dark:hover:text-neutral-100 md:hidden"
+        onClick={onMenu}
+      >
         <Menu size={22} />
       </button>
       <div className="ml-auto flex items-center gap-2">
@@ -364,7 +470,9 @@ export default function Topbar({
             <div className="absolute right-0 top-11 z-50 w-96 max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-xl dark:border-dark-border dark:bg-dark">
               <div className="flex items-start justify-between gap-3 border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
                 <div>
-                  <strong className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Operations</strong>
+                  <strong className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                    Operations
+                  </strong>
                   <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
                     {activeJobs
                       ? `${activeJobs} active job${activeJobs === 1 ? "" : "s"}`
@@ -403,12 +511,16 @@ export default function Topbar({
                         }
                       }}
                     >
-                      <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-full ${job.status === "succeeded" ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" : job.status === "failed" ? "bg-rose-500/15 text-rose-600 dark:text-rose-400" : job.status === "running" || job.status === "queued" ? "bg-blue-500/15 text-blue-600 dark:text-blue-400" : "bg-neutral-500/15 text-neutral-500"}`}>
+                      <span
+                        className={`grid h-7 w-7 shrink-0 place-items-center rounded-full ${job.status === "succeeded" ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" : job.status === "failed" ? "bg-rose-500/15 text-rose-600 dark:text-rose-400" : job.status === "running" || job.status === "queued" ? "bg-blue-500/15 text-blue-600 dark:text-blue-400" : "bg-neutral-500/15 text-neutral-500"}`}
+                      >
                         <JobIcon status={job.status} />
                       </span>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-3">
-                            <strong className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{job.type}</strong>
+                          <strong className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                            {job.type}
+                          </strong>
                           {(job.status === "running" ||
                             job.status === "queued") && (
                             <button
@@ -423,8 +535,7 @@ export default function Topbar({
                           )}
                         </div>
                         <p className="mt-1 text-xs capitalize text-neutral-500 dark:text-neutral-400">
-                          {job.status} ·{" "}
-                          {formatPanelDate(job.created_at)}
+                          {job.status} · {formatPanelDate(job.created_at)}
                         </p>
                         {job.progress != null &&
                           (job.status === "running" ||
@@ -441,7 +552,11 @@ export default function Topbar({
                               </span>
                             </div>
                           )}
-                        {job.message && <small className="mt-1 block text-xs text-neutral-500 dark:text-neutral-400">{job.message}</small>}
+                        {job.message && (
+                          <small className="mt-1 block text-xs text-neutral-500 dark:text-neutral-400">
+                            {job.message}
+                          </small>
+                        )}
                         {job.log?.length > 0 && (
                           <pre className="mt-2 max-h-24 overflow-auto whitespace-pre-wrap break-words text-[11px] leading-4 text-neutral-600 dark:text-neutral-300">
                             {job.log.slice(-6).join("\n")}
@@ -456,7 +571,7 @@ export default function Topbar({
           )}
         </div>
         <button
-            className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 dark:text-neutral-400 dark:hover:bg-dark-hover dark:hover:text-neutral-100"
+          className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 dark:text-neutral-400 dark:hover:bg-dark-hover dark:hover:text-neutral-100"
           aria-label="Toggle theme"
           onClick={onThemeToggle}
         >
@@ -474,11 +589,17 @@ export default function Topbar({
               setJobsOpen(false);
             }}
           >
-            <img src={selectedLanguage.flag} alt="" className="h-4 w-6 rounded-sm object-cover" />
+            <img
+              src={selectedLanguage.flag}
+              alt=""
+              className="h-4 w-6 rounded-sm object-cover"
+            />
           </button>
           {languageOpen && (
             <div className="absolute right-0 top-11 z-50 w-48 overflow-hidden rounded-xl border border-neutral-200 bg-white p-1 shadow-lg dark:border-dark-border dark:bg-dark">
-              <p className="px-3 py-2 text-xs font-semibold text-neutral-500 dark:text-neutral-400">Language</p>
+              <p className="px-3 py-2 text-xs font-semibold text-neutral-500 dark:text-neutral-400">
+                Language
+              </p>
               {languages.map((item) => (
                 <button
                   type="button"
@@ -486,9 +607,15 @@ export default function Topbar({
                   className={`flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm ${language === item.id ? "bg-neutral-100 font-semibold text-neutral-900 dark:bg-dark-hover dark:text-neutral-100" : "text-neutral-700 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-dark-hover"}`}
                   onClick={() => changeLanguage(item.id)}
                 >
-                  <img src={item.flag} alt="" className="h-4 w-6 rounded-sm object-cover" />
+                  <img
+                    src={item.flag}
+                    alt=""
+                    className="h-4 w-6 rounded-sm object-cover"
+                  />
                   <span>{item.label}</span>
-                  {language === item.id && <span className="ml-auto text-blue-600">✓</span>}
+                  {language === item.id && (
+                    <span className="ml-auto text-blue-600">✓</span>
+                  )}
                 </button>
               ))}
             </div>
@@ -603,13 +730,20 @@ export default function Topbar({
             <div className="flex items-start justify-between gap-4 border-b border-neutral-200 px-5 py-4 dark:border-neutral-800">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <Terminal size={17} className="text-blue-600 dark:text-blue-400" />
-                  <h2 id="job-log-title" className="truncate text-base font-semibold text-neutral-900 dark:text-neutral-100">
+                  <Terminal
+                    size={17}
+                    className="text-blue-600 dark:text-blue-400"
+                  />
+                  <h2
+                    id="job-log-title"
+                    className="truncate text-base font-semibold text-neutral-900 dark:text-neutral-100"
+                  >
                     {selectedJob.type}
                   </h2>
                 </div>
                 <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
-                  {selectedJob.status} · started {formatPanelDate(selectedJob.created_at)}
+                  {selectedJob.status} · started{" "}
+                  {formatPanelDate(selectedJob.created_at)}
                 </p>
               </div>
               <button
@@ -653,7 +787,11 @@ export default function Topbar({
                     title="Copy job output"
                     onClick={() => copyJobOutput(selectedJob)}
                   >
-                    {copiedJobId === selectedJob.id ? <Check size={15} /> : <Copy size={15} />}
+                    {copiedJobId === selectedJob.id ? (
+                      <Check size={15} />
+                    ) : (
+                      <Copy size={15} />
+                    )}
                   </button>
                 </div>
                 <pre
@@ -661,7 +799,9 @@ export default function Topbar({
                   onScroll={(event) => {
                     const output = event.currentTarget;
                     const distanceFromBottom =
-                      output.scrollHeight - output.scrollTop - output.clientHeight;
+                      output.scrollHeight -
+                      output.scrollTop -
+                      output.clientHeight;
                     jobOutputFollowRef.current = distanceFromBottom <= 24;
                   }}
                   className="max-h-[60vh] min-h-56 overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-xs leading-5 text-neutral-300"
@@ -671,7 +811,8 @@ export default function Topbar({
                     : "Waiting for job output…"}
                 </pre>
               </div>
-              {(selectedJob.status === "running" || selectedJob.status === "queued") && (
+              {(selectedJob.status === "running" ||
+                selectedJob.status === "queued") && (
                 <div className="flex justify-end">
                   <button
                     type="button"

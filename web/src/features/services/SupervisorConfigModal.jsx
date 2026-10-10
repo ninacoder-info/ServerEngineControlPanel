@@ -29,7 +29,10 @@ export default function SupervisorConfigModal({
   const [tab, setTab] = React.useState("runtime");
   const [busy, setBusy] = React.useState(false);
   const [message, setMessage] = React.useState("");
-  const { status, action: liveAction } = useServiceSocketStatus("supervisor", item.status || "stopped");
+  const { status, action: liveAction } = useServiceSocketStatus(
+    "supervisor",
+    item.status || "stopped",
+  );
   const installedState = status !== "not-installed";
   const statusText = installedState
     ? status === "running"

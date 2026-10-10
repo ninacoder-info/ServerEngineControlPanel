@@ -83,6 +83,11 @@ def summary(user=Depends(require_user)):
     return {"path": str(root), "size": _size(root), "files": sum(1 for path in root.rglob("*.log") if path.is_file()) if root.is_dir() else 0}
 
 
+def _summary_payload() -> dict:
+    root = _root()
+    return {"path": str(root), "size": _size(root), "files": sum(1 for path in root.rglob("*.log") if path.is_file()) if root.is_dir() else 0}
+
+
 @router.post("/clean")
 def clean(payload: dict = Body(default={}), user=Depends(require_user)):
     if payload.get("confirmed") is not True:
@@ -100,6 +105,7 @@ def clean(payload: dict = Body(default={}), user=Depends(require_user)):
                 failed.append(f"{path}: {exc}")
     if failed:
         raise HTTPException(status_code=500, detail=f"Cleared {cleared} log files, but could not clear {len(failed)} files")
+    job_store.publish({"type": "logs-updated", "action": "cleaned", "summary": _summary_payload()})
     return {"cleared": cleared, "size": _size(root)}
 
 
@@ -150,7 +156,7 @@ def clear_source(source_id: str, user=Depends(require_user)):
         path.write_bytes(b"")
     except OSError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    job_store.publish({"type": "logs-updated", "action": "cleared", "id": source_id})
+    job_store.publish({"type": "logs-updated", "action": "cleared", "id": source_id, "summary": _summary_payload()})
     return {"id": source_id, "cleared": True, "size": 0}
 
 
@@ -161,5 +167,5 @@ def delete_source(source_id: str, user=Depends(require_user)):
         path.unlink()
     except OSError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    job_store.publish({"type": "logs-updated", "action": "deleted", "id": source_id})
+    job_store.publish({"type": "logs-updated", "action": "deleted", "id": source_id, "summary": _summary_payload()})
     return {"id": source_id, "deleted": True}

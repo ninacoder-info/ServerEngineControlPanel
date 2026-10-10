@@ -17,14 +17,26 @@ export default function Pm2OverviewCard({
     >
       <div className="flex shrink-0 flex-col items-center gap-3">
         <div className="grid h-10 w-10 place-items-center rounded-md bg-neutral-100 text-blue-600 dark:bg-neutral-800 dark:text-blue-400">
-          <img src={new URL("../../components/icons/pm2.svg", import.meta.url).href} width="24" height="24" alt="" aria-hidden="true" />
+          <img
+            src={
+              new URL("../../components/icons/pm2.svg", import.meta.url).href
+            }
+            width="24"
+            height="24"
+            alt=""
+            aria-hidden="true"
+          />
         </div>
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{service.name}</h3>
-            <p className="mt-1 text-xs leading-5 text-neutral-500 dark:text-neutral-400">{service.description}</p>
+            <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+              {service.name}
+            </h3>
+            <p className="mt-1 text-xs leading-5 text-neutral-500 dark:text-neutral-400">
+              {service.description}
+            </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-2 py-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
@@ -51,27 +63,40 @@ export default function Pm2OverviewCard({
         <div className="mt-3 flex flex-wrap gap-2">
           {installed.length ? (
             installed.slice(0, 5).map((item) => (
-              <span key={`${item.id}-${item.version}`} className="inline-flex items-center gap-1 rounded-full border border-emerald-500/40 px-2 py-1 text-[11px] text-emerald-700 dark:text-emerald-400">
+              <span
+                key={`${item.id}-${item.version}`}
+                className="inline-flex items-center gap-1 rounded-full border border-emerald-500/40 px-2 py-1 text-[11px] text-emerald-700 dark:text-emerald-400"
+              >
                 PM2 {item.version}
               </span>
             ))
           ) : (
-            <span className="text-xs text-neutral-500 dark:text-neutral-400">No PM2 version installed yet</span>
+            <span className="text-xs text-neutral-500 dark:text-neutral-400">
+              No PM2 version installed yet
+            </span>
           )}
         </div>
-        <div className="mt-4 flex flex-wrap items-center gap-3" onClick={(event) => event.stopPropagation()}>
+        <div
+          className="mt-4 flex flex-wrap items-center gap-3"
+          onClick={(event) => event.stopPropagation()}
+        >
           <button
             className="inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
             type="button"
             disabled={installing}
-            onClick={() => installed.length > 0 ? onOpenWorkspace?.() : onInstall(service)}
+            onClick={() =>
+              installed.length > 0 ? onOpenWorkspace?.() : onInstall(service)
+            }
           >
             {installing ? (
               "Installing…"
             ) : installed.length > 0 ? (
               "Configure service"
             ) : (
-              <><Download size={14} />Install</>
+              <>
+                <Download size={14} />
+                Install
+              </>
             )}
           </button>
           {installed.length > 0 && (

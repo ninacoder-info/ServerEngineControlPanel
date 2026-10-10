@@ -77,11 +77,21 @@ function Row({ label, value, hint }) {
 }
 
 function nginxDirective(content, directive, fallback) {
-  const match = String(content || "").match(new RegExp(`^\\s*${directive}\\s+([^;#\\r\\n]+)`, "mi"));
+  const match = String(content || "").match(
+    new RegExp(`^\\s*${directive}\\s+([^;#\\r\\n]+)`, "mi"),
+  );
   return match ? match[1].trim() : fallback;
 }
 
-function Settings({ config, busy, message, httpPort, defaultWebsiteId, websites, onSave }) {
+function Settings({
+  config,
+  busy,
+  message,
+  httpPort,
+  defaultWebsiteId,
+  websites,
+  onSave,
+}) {
   const [values, setValues] = React.useState({
     listen: "80",
     defaultWebsiteId: "",
@@ -121,7 +131,9 @@ function Settings({ config, busy, message, httpPort, defaultWebsiteId, websites,
           />
         </Field>
         <Field label="Default website root">
-          <p className="mt-1.5 rounded-md border border-neutral-200 px-3 py-2 text-sm text-neutral-600 dark:border-neutral-800 dark:text-neutral-300">{values.root}</p>
+          <p className="mt-1.5 rounded-md border border-neutral-200 px-3 py-2 text-sm text-neutral-600 dark:border-neutral-800 dark:text-neutral-300">
+            {values.root}
+          </p>
         </Field>
         <Field label="Default website for unmatched hosts">
           <select
@@ -131,21 +143,30 @@ function Settings({ config, busy, message, httpPort, defaultWebsiteId, websites,
           >
             <option value="">Reject unmatched domains (recommended)</option>
             {(websites || []).map((website) => (
-              <option key={website.id} value={website.id}>{website.domain}</option>
+              <option key={website.id} value={website.id}>
+                {website.domain}
+              </option>
             ))}
           </select>
           <span className="mt-1 block text-xs font-normal leading-5 text-neutral-500 dark:text-neutral-400">
-            Direct IP requests and unknown Host headers will return 404 unless a website is selected.
+            Direct IP requests and unknown Host headers will return 404 unless a
+            website is selected.
           </span>
         </Field>
         <Field label="Index files">
-          <p className="mt-1.5 rounded-md border border-neutral-200 px-3 py-2 text-sm text-neutral-600 dark:border-neutral-800 dark:text-neutral-300">Managed per website</p>
+          <p className="mt-1.5 rounded-md border border-neutral-200 px-3 py-2 text-sm text-neutral-600 dark:border-neutral-800 dark:text-neutral-300">
+            Managed per website
+          </p>
         </Field>
         <Field label="PHP-FPM routing">
-          <p className="mt-1.5 rounded-md border border-neutral-200 px-3 py-2 text-sm text-neutral-600 dark:border-neutral-800 dark:text-neutral-300">Managed per website</p>
+          <p className="mt-1.5 rounded-md border border-neutral-200 px-3 py-2 text-sm text-neutral-600 dark:border-neutral-800 dark:text-neutral-300">
+            Managed per website
+          </p>
         </Field>
         <Field label="Reverse proxy support">
-          <p className="mt-1.5 rounded-md border border-neutral-200 px-3 py-2 text-sm text-neutral-600 dark:border-neutral-800 dark:text-neutral-300">Managed per project</p>
+          <p className="mt-1.5 rounded-md border border-neutral-200 px-3 py-2 text-sm text-neutral-600 dark:border-neutral-800 dark:text-neutral-300">
+            Managed per project
+          </p>
         </Field>
       </div>
       <div className="border-t border-neutral-200 pt-2 dark:border-neutral-800">
@@ -195,12 +216,27 @@ function Performance({ config, busy, message, onSave }) {
     setValues((current) => ({
       ...current,
       workers: nginxDirective(content, "worker_processes", current.workers),
-      connections: nginxDirective(content, "worker_connections", current.connections),
-      keepalive: nginxDirective(content, "keepalive_timeout", current.keepalive),
+      connections: nginxDirective(
+        content,
+        "worker_connections",
+        current.connections,
+      ),
+      keepalive: nginxDirective(
+        content,
+        "keepalive_timeout",
+        current.keepalive,
+      ),
       upload: nginxDirective(content, "client_max_body_size", current.upload),
-      proxy: nginxDirective(content, "proxy_read_timeout", `${current.proxy}s`).replace(/s$/, ""),
-      gzip: nginxDirective(content, "gzip", current.gzip ? "on" : "off") === "on",
-      sendfile: nginxDirective(content, "sendfile", current.sendfile ? "on" : "off") === "on",
+      proxy: nginxDirective(
+        content,
+        "proxy_read_timeout",
+        `${current.proxy}s`,
+      ).replace(/s$/, ""),
+      gzip:
+        nginxDirective(content, "gzip", current.gzip ? "on" : "off") === "on",
+      sendfile:
+        nginxDirective(content, "sendfile", current.sendfile ? "on" : "off") ===
+        "on",
     }));
   }, [config?.content]);
   return (
@@ -295,8 +331,16 @@ function Performance({ config, busy, message, onSave }) {
 
 function Security({ config }) {
   const content = config?.content || "";
-  const serverTokens = nginxDirective(content, "server_tokens", "not configured");
-  const bodyLimit = nginxDirective(content, "client_max_body_size", "not configured");
+  const serverTokens = nginxDirective(
+    content,
+    "server_tokens",
+    "not configured",
+  );
+  const bodyLimit = nginxDirective(
+    content,
+    "client_max_body_size",
+    "not configured",
+  );
   const sendfile = nginxDirective(content, "sendfile", "not configured");
   return (
     <div className="space-y-5">
@@ -313,7 +357,10 @@ function Security({ config }) {
         <Row label="Server version header" value={serverTokens} />
         <Row label="Maximum request body" value={bodyLimit} />
         <Row label="Sendfile" value={sendfile} />
-        <Row label="Response security headers" value="Managed per website or Application Shield" />
+        <Row
+          label="Response security headers"
+          value="Managed per website or Application Shield"
+        />
         <Row label="TLS policy" value="Managed per TLS-enabled website" />
         <Row label="Directory listing" value="Managed per website" />
       </div>
@@ -397,14 +444,17 @@ export default function NginxConfigModal({ service, installed, onClose }) {
       }
       if (!["succeeded", "failed", "cancelled"].includes(detail.status)) return;
       if (detail.status === "succeeded") {
-        setRuntimeStatus(["start", "restart"].includes(detail.action) ? "running" : "stopped");
+        setRuntimeStatus(
+          ["start", "restart"].includes(detail.action) ? "running" : "stopped",
+        );
       } else if (detail.job?.message) {
         setToast({ type: "error", message: detail.job.message });
       }
       setAction("");
     };
     window.addEventListener("serverengine:service-status", update);
-    return () => window.removeEventListener("serverengine:service-status", update);
+    return () =>
+      window.removeEventListener("serverengine:service-status", update);
   }, []);
   const loadNginxVersions = React.useCallback(() => {
     apiRequest("/api/v1/services/nginx/versions")
@@ -524,7 +574,10 @@ export default function NginxConfigModal({ service, installed, onClose }) {
       ? await response.json()
       : { message: await readApiError(response) };
     if (!response.ok || !body.job_id) {
-      setToast({ type: "error", message: body.message || "Nginx action failed." });
+      setToast({
+        type: "error",
+        message: body.message || "Nginx action failed.",
+      });
       setAction("");
       return;
     }
@@ -591,7 +644,8 @@ export default function NginxConfigModal({ service, installed, onClose }) {
                     Nginx versions
                   </h3>
                   <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
-                    Each release has its own configuration, modules, logs, and runtime directory. Only the selected default runs.
+                    Each release has its own configuration, modules, logs, and
+                    runtime directory. Only the selected default runs.
                   </p>
                 </div>
                 <button
@@ -604,24 +658,47 @@ export default function NginxConfigModal({ service, installed, onClose }) {
                 </button>
               </div>
               <div className="divide-y divide-neutral-200 border-y border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
-                {nginxVersions.length ? nginxVersions.map((item) => (
-                  <div key={`${item.version}-${item.path}`} className="flex items-center justify-between gap-4 py-4">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="font-medium text-neutral-900 dark:text-neutral-100">Nginx {item.version}</p>
-                        {item.active && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">Default</span>}
-                        <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">{item.install_method === "source" ? "Build from source" : "Prebuilt package"}</span>
+                {nginxVersions.length ? (
+                  nginxVersions.map((item) => (
+                    <div
+                      key={`${item.version}-${item.path}`}
+                      className="flex items-center justify-between gap-4 py-4"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="font-medium text-neutral-900 dark:text-neutral-100">
+                            Nginx {item.version}
+                          </p>
+                          {item.active && (
+                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+                              Default
+                            </span>
+                          )}
+                          <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
+                            {item.install_method === "source"
+                              ? "Build from source"
+                              : "Prebuilt package"}
+                          </span>
+                        </div>
+                        <p className="mt-1 truncate text-xs text-neutral-500 dark:text-neutral-400">
+                          {item.path}
+                        </p>
                       </div>
-                      <p className="mt-1 truncate text-xs text-neutral-500 dark:text-neutral-400">{item.path}</p>
+                      {!item.active && (
+                        <button
+                          type="button"
+                          className="shrink-0 cursor-pointer text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400"
+                          onClick={() => makeDefault(item.version)}
+                        >
+                          Make default
+                        </button>
+                      )}
                     </div>
-                    {!item.active && (
-                      <button type="button" className="shrink-0 cursor-pointer text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400" onClick={() => makeDefault(item.version)}>
-                        Make default
-                      </button>
-                    )}
-                  </div>
-                )) : (
-                  <p className="py-6 text-sm text-neutral-500 dark:text-neutral-400">No managed Nginx versions are available yet.</p>
+                  ))
+                ) : (
+                  <p className="py-6 text-sm text-neutral-500 dark:text-neutral-400">
+                    No managed Nginx versions are available yet.
+                  </p>
                 )}
               </div>
             </div>
@@ -734,7 +811,11 @@ export default function NginxConfigModal({ service, installed, onClose }) {
           }}
         />
       )}
-      <Toast message={toast?.message} type={toast?.type} onClose={() => setToast(null)} />
+      <Toast
+        message={toast?.message}
+        type={toast?.type}
+        onClose={() => setToast(null)}
+      />
     </div>
   );
 }

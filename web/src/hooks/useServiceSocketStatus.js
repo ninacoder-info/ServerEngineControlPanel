@@ -5,7 +5,10 @@ import React from "react";
  * socket. The command itself is still sent by the caller; this hook owns the
  * live status and action state after the command is queued.
  */
-export default function useServiceSocketStatus(serviceId, initialStatus = "stopped") {
+export default function useServiceSocketStatus(
+  serviceId,
+  initialStatus = "stopped",
+) {
   const [status, setStatus] = React.useState(initialStatus || "stopped");
   const [action, setAction] = React.useState("");
 
@@ -32,7 +35,8 @@ export default function useServiceSocketStatus(serviceId, initialStatus = "stopp
     };
 
     window.addEventListener("serverengine:service-status", update);
-    return () => window.removeEventListener("serverengine:service-status", update);
+    return () =>
+      window.removeEventListener("serverengine:service-status", update);
   }, [serviceId]);
 
   return { status, action, setAction };

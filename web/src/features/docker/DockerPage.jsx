@@ -120,7 +120,8 @@ function Stat({
   valueClassName = "text-2xl",
 }) {
   const tones = {
-    slate: "bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300",
+    slate:
+      "bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300",
     blue: "bg-blue-50 text-blue-600 dark:bg-blue-950/30 dark:text-blue-400",
     emerald:
       "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-400",
@@ -309,7 +310,9 @@ export function ContainerInspectModal({
         `/api/v1/services/docker/containers/${encodeURIComponent(container.id)}`,
       );
       if (!response.ok) {
-        setLoadError(`Unable to load Docker container details (${response.status}).`);
+        setLoadError(
+          `Unable to load Docker container details (${response.status}).`,
+        );
         return;
       }
       setDetails(await response.json());
@@ -877,9 +880,39 @@ function ResourcesTab({
                     </Link>
                   ) : (
                     <div className="flex items-center justify-end gap-1">
-                      {onInspect && <button type="button" title="Inspect" aria-label={`Inspect ${row[0]}`} className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/30" onClick={() => onInspect(row)}><Settings2 size={15} /></button>}
-                      {onClone && <button type="button" title="Clone volume" aria-label={`Clone ${row[0]}`} className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800" onClick={() => onClone(row)}><Copy size={15} /></button>}
-                      {onDelete && <button type="button" title="Delete volume" aria-label={`Delete ${row[0]}`} className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/30" onClick={() => onDelete(row)}><Trash2 size={15} /></button>}
+                      {onInspect && (
+                        <button
+                          type="button"
+                          title="Inspect"
+                          aria-label={`Inspect ${row[0]}`}
+                          className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/30"
+                          onClick={() => onInspect(row)}
+                        >
+                          <Settings2 size={15} />
+                        </button>
+                      )}
+                      {onClone && (
+                        <button
+                          type="button"
+                          title="Clone volume"
+                          aria-label={`Clone ${row[0]}`}
+                          className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
+                          onClick={() => onClone(row)}
+                        >
+                          <Copy size={15} />
+                        </button>
+                      )}
+                      {onDelete && (
+                        <button
+                          type="button"
+                          title="Delete volume"
+                          aria-label={`Delete ${row[0]}`}
+                          className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/30"
+                          onClick={() => onDelete(row)}
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      )}
                     </div>
                   )}
                 </td>
@@ -905,7 +938,8 @@ function DockerResourceInspectModal({ resource, onClose }) {
     const endpoint = `/api/v1/services/docker/${resource.kind}s/${encodeURIComponent(resource.name)}`;
     apiRequest(endpoint)
       .then(async (response) => {
-        if (!response.ok) throw new Error("Unable to inspect this Docker resource.");
+        if (!response.ok)
+          throw new Error("Unable to inspect this Docker resource.");
         const value = await response.json();
         if (active) setDetails(value);
       })
@@ -943,21 +977,55 @@ function DockerResourceInspectModal({ resource, onClose }) {
               {resource.name}
             </h2>
           </div>
-          <button type="button" aria-label="Close inspection" title="Close" className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200" onClick={onClose}>
+          <button
+            type="button"
+            aria-label="Close inspection"
+            title="Close"
+            className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+            onClick={onClose}
+          >
             <X size={17} />
           </button>
         </div>
         <div className="space-y-5 p-5">
-          {error && <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-300">{error}</p>}
-          {!details && !error ? <div className="flex h-32 items-center justify-center text-neutral-400"><LoaderCircle className="animate-spin" /></div> : details && <>
-            <div className="grid gap-3 sm:grid-cols-3">
-              {facts.map(([label, value]) => <div key={label} className="rounded-lg border border-neutral-200 p-3 dark:border-neutral-800"><p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">{label}</p><p className="mt-1 break-words text-sm font-semibold text-neutral-900 dark:text-neutral-100">{value ?? "—"}</p></div>)}
+          {error && (
+            <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-300">
+              {error}
+            </p>
+          )}
+          {!details && !error ? (
+            <div className="flex h-32 items-center justify-center text-neutral-400">
+              <LoaderCircle className="animate-spin" />
             </div>
-            <div>
-              <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Docker inspect</h3>
-              <pre className="mt-2 max-h-[28rem] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-neutral-100 p-4 font-mono text-xs leading-5 text-neutral-800 dark:bg-neutral-950 dark:text-neutral-200">{JSON.stringify(details.inspect, null, 2)}</pre>
-            </div>
-          </>}
+          ) : (
+            details && (
+              <>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {facts.map(([label, value]) => (
+                    <div
+                      key={label}
+                      className="rounded-lg border border-neutral-200 p-3 dark:border-neutral-800"
+                    >
+                      <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                        {label}
+                      </p>
+                      <p className="mt-1 break-words text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                        {value ?? "—"}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                    Docker inspect
+                  </h3>
+                  <pre className="mt-2 max-h-[28rem] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-neutral-100 p-4 font-mono text-xs leading-5 text-neutral-800 dark:bg-neutral-950 dark:text-neutral-200">
+                    {JSON.stringify(details.inspect, null, 2)}
+                  </pre>
+                </div>
+              </>
+            )
+          )}
         </div>
       </section>
     </div>
@@ -969,8 +1037,66 @@ function DockerVolumeCloneModal({ volume, onClose, onSubmit }) {
   return (
     <div className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8">
       <section className="w-full max-w-md rounded-xl bg-white shadow-xl dark:bg-neutral-900">
-        <div className="flex items-start justify-between gap-4 border-b border-neutral-200 px-5 py-4 dark:border-neutral-800"><div><p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Docker volume</p><h2 className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">Clone volume</h2></div><button type="button" title="Close" aria-label="Close clone volume" className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800" onClick={onClose}><X size={17} /></button></div>
-        <form className="space-y-4 p-5" onSubmit={(event) => { event.preventDefault(); onSubmit(name); }}><p className="text-sm text-neutral-500 dark:text-neutral-400">Copy all files from <strong className="text-neutral-700 dark:text-neutral-200">{volume.name}</strong> into a new Docker volume.</p><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">New volume name<input autoFocus required pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" value={name} onChange={(event) => setName(event.target.value)} className={input} /></label><div className="flex justify-end gap-2"><button type="button" className="cursor-pointer rounded-md px-3 py-2 text-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800" onClick={onClose}>Cancel</button><button type="submit" className="cursor-pointer rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700">Clone volume</button></div></form>
+        <div className="flex items-start justify-between gap-4 border-b border-neutral-200 px-5 py-4 dark:border-neutral-800">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">
+              Docker volume
+            </p>
+            <h2 className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">
+              Clone volume
+            </h2>
+          </div>
+          <button
+            type="button"
+            title="Close"
+            aria-label="Close clone volume"
+            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+            onClick={onClose}
+          >
+            <X size={17} />
+          </button>
+        </div>
+        <form
+          className="space-y-4 p-5"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onSubmit(name);
+          }}
+        >
+          <p className="text-sm text-neutral-500 dark:text-neutral-400">
+            Copy all files from{" "}
+            <strong className="text-neutral-700 dark:text-neutral-200">
+              {volume.name}
+            </strong>{" "}
+            into a new Docker volume.
+          </p>
+          <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+            New volume name
+            <input
+              autoFocus
+              required
+              pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              className={input}
+            />
+          </label>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              className="cursor-pointer rounded-md px-3 py-2 text-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800"
+              onClick={onClose}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="cursor-pointer rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+            >
+              Clone volume
+            </button>
+          </div>
+        </form>
       </section>
     </div>
   );
@@ -1488,7 +1614,9 @@ volumes:
 };
 
 function ComposeStarterModal({ onClose, onCreate }) {
-  const [template, setTemplate] = React.useState(Object.keys(composeTemplates)[0]);
+  const [template, setTemplate] = React.useState(
+    Object.keys(composeTemplates)[0],
+  );
   const [fileName, setFileName] = React.useState("compose.yml");
   const [projectName, setProjectName] = React.useState("");
   const [copied, setCopied] = React.useState(false);
@@ -1501,8 +1629,123 @@ function ComposeStarterModal({ onClose, onCreate }) {
   return (
     <div className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8">
       <section className="w-full max-w-3xl rounded-xl bg-white shadow-xl dark:bg-neutral-900">
-        <div className="flex items-start justify-between gap-4 border-b border-neutral-200 px-5 py-4 dark:border-neutral-800"><div><p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Docker Compose</p><h2 className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">Compose starter</h2><p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">Choose a starting definition, then save it as compose.yml in your project folder.</p></div><button type="button" title="Close" aria-label="Close Compose starter" className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800" onClick={onClose}><X size={17} /></button></div>
-        <form className="space-y-4 p-5" onSubmit={(event) => { event.preventDefault(); onCreate(projectName, fileName, content); }}><div className="grid gap-4 sm:grid-cols-3"><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Project name<input required pattern="[A-Za-z0-9]{1,64}" className={input} value={projectName} onChange={(event) => setProjectName(event.target.value.replace(/[^A-Za-z0-9]/g, ""))} placeholder="myapp" /><span className="mt-1 block text-xs font-normal text-neutral-500 dark:text-neutral-400">Letters and numbers only.</span></label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 sm:col-span-2">Starter template<select className={input} value={template} onChange={(event) => setTemplate(event.target.value)}>{Object.keys(composeTemplates).map((name) => <option key={name}>{name}</option>)}</select></label></div><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Compose filename<select className={input} value={fileName} onChange={(event) => setFileName(event.target.value)}><option>compose.yml</option><option>compose.yaml</option><option>docker-compose.yml</option><option>docker-compose.yaml</option></select></label><pre className="max-h-[28rem] overflow-auto whitespace-pre-wrap rounded-lg bg-neutral-100 p-4 font-mono text-xs leading-5 text-neutral-800 dark:bg-neutral-950 dark:text-neutral-200">{content}</pre><div className="rounded-md bg-blue-50 px-3 py-2 text-xs leading-5 text-blue-800 dark:bg-blue-950/30 dark:text-blue-200">Server Engine creates <code className="font-mono">/server-engine/compose/{projectName || "project-name"}/{fileName}</code> and runs <code className="font-mono">docker compose -f {fileName} up -d</code>. The selected starter contains everything needed to start its declared containers.</div><div className="flex items-center justify-between gap-3"><button type="button" className="inline-flex cursor-pointer items-center gap-1.5 text-sm font-semibold text-neutral-600 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white" onClick={copy}><Copy size={15} />{copied ? "Copied" : `Copy ${fileName}`}</button><div className="flex gap-2"><button type="button" className="cursor-pointer rounded-md px-3 py-2 text-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800" onClick={onClose}>Cancel</button><button type="submit" className="inline-flex cursor-pointer items-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"><Play size={15} />Create and start</button></div></div></form>
+        <div className="flex items-start justify-between gap-4 border-b border-neutral-200 px-5 py-4 dark:border-neutral-800">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">
+              Docker Compose
+            </p>
+            <h2 className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">
+              Compose starter
+            </h2>
+            <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+              Choose a starting definition, then save it as compose.yml in your
+              project folder.
+            </p>
+          </div>
+          <button
+            type="button"
+            title="Close"
+            aria-label="Close Compose starter"
+            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+            onClick={onClose}
+          >
+            <X size={17} />
+          </button>
+        </div>
+        <form
+          className="space-y-4 p-5"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onCreate(projectName, fileName, content);
+          }}
+        >
+          <div className="grid gap-4 sm:grid-cols-3">
+            <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+              Project name
+              <input
+                required
+                pattern="[A-Za-z0-9]{1,64}"
+                className={input}
+                value={projectName}
+                onChange={(event) =>
+                  setProjectName(
+                    event.target.value.replace(/[^A-Za-z0-9]/g, ""),
+                  )
+                }
+                placeholder="myapp"
+              />
+              <span className="mt-1 block text-xs font-normal text-neutral-500 dark:text-neutral-400">
+                Letters and numbers only.
+              </span>
+            </label>
+            <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 sm:col-span-2">
+              Starter template
+              <select
+                className={input}
+                value={template}
+                onChange={(event) => setTemplate(event.target.value)}
+              >
+                {Object.keys(composeTemplates).map((name) => (
+                  <option key={name}>{name}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+            Compose filename
+            <select
+              className={input}
+              value={fileName}
+              onChange={(event) => setFileName(event.target.value)}
+            >
+              <option>compose.yml</option>
+              <option>compose.yaml</option>
+              <option>docker-compose.yml</option>
+              <option>docker-compose.yaml</option>
+            </select>
+          </label>
+          <pre className="max-h-[28rem] overflow-auto whitespace-pre-wrap rounded-lg bg-neutral-100 p-4 font-mono text-xs leading-5 text-neutral-800 dark:bg-neutral-950 dark:text-neutral-200">
+            {content}
+          </pre>
+          <div className="rounded-md bg-blue-50 px-3 py-2 text-xs leading-5 text-blue-800 dark:bg-blue-950/30 dark:text-blue-200">
+            Server Engine creates{" "}
+            <code className="font-mono">
+              /server-engine/compose/{projectName || "project-name"}/{fileName}
+            </code>{" "}
+            and runs{" "}
+            <code className="font-mono">
+              docker compose -f {fileName} up -d
+            </code>
+            . The selected starter contains everything needed to start its
+            declared containers.
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <button
+              type="button"
+              className="inline-flex cursor-pointer items-center gap-1.5 text-sm font-semibold text-neutral-600 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white"
+              onClick={copy}
+            >
+              <Copy size={15} />
+              {copied ? "Copied" : `Copy ${fileName}`}
+            </button>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="cursor-pointer rounded-md px-3 py-2 text-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800"
+                onClick={onClose}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+              >
+                <Play size={15} />
+                Create and start
+              </button>
+            </div>
+          </div>
+        </form>
       </section>
     </div>
   );
@@ -1611,7 +1854,9 @@ export default function DockerPage() {
   };
   const setTab = (nextTab) => {
     setTabState(nextTab);
-    setSearchParams(nextTab === "containers" ? {} : { tab: nextTab }, { replace: true });
+    setSearchParams(nextTab === "containers" ? {} : { tab: nextTab }, {
+      replace: true,
+    });
   };
   React.useEffect(() => {
     if (tabs.some(([id]) => id === requestedTab)) {
@@ -1760,9 +2005,21 @@ export default function DockerPage() {
         headers={["Volume", "Driver", "Scope", "Created", "Size"]}
         rows={volumeRows}
         icon={Database}
-        onInspect={(row) => setResourceInspect({ kind: "volume", name: row[0] })}
+        onInspect={(row) =>
+          setResourceInspect({ kind: "volume", name: row[0] })
+        }
         onClone={(row) => setCloneVolume({ name: row[0] })}
-        onDelete={(row) => setResourceDialog({ kind: "confirm", resourceKind: "volume", name: row[0], title: "Delete Docker volume?", message: `This will permanently delete ${row[0]} and its stored data.`, submitLabel: "Delete volume", tone: "danger" })}
+        onDelete={(row) =>
+          setResourceDialog({
+            kind: "confirm",
+            resourceKind: "volume",
+            name: row[0],
+            title: "Delete Docker volume?",
+            message: `This will permanently delete ${row[0]} and its stored data.`,
+            submitLabel: "Delete volume",
+            tone: "danger",
+          })
+        }
       />
     ),
     networks: (
@@ -1772,14 +2029,25 @@ export default function DockerPage() {
         headers={["Network", "Driver", "Scope", "Network ID"]}
         rows={networkRows}
         icon={Network}
-        onInspect={(row) => setResourceInspect({ kind: "network", name: row[0] })}
+        onInspect={(row) =>
+          setResourceInspect({ kind: "network", name: row[0] })
+        }
       />
     ),
     compose: (
       <Section
         title="Compose apps"
         description="Manage multi-container applications from live Docker Compose projects."
-        actions={<button type="button" className="inline-flex cursor-pointer items-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700" onClick={() => setComposeStarter(true)}><Plus size={15} />Compose starter</button>}
+        actions={
+          <button
+            type="button"
+            className="inline-flex cursor-pointer items-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+            onClick={() => setComposeStarter(true)}
+          >
+            <Plus size={15} />
+            Compose starter
+          </button>
+        }
       >
         <div className="overflow-x-auto">
           <table className="w-full min-w-[680px] text-left">
@@ -1812,8 +2080,40 @@ export default function DockerPage() {
         </div>
         {!composeRows.length && (
           <div className="grid gap-4 border-t border-neutral-200 py-8 dark:border-neutral-800 md:grid-cols-2">
-            <div className="rounded-lg bg-neutral-50 p-5 dark:bg-neutral-950"><div className="flex items-start gap-3"><FileCode2 className="mt-0.5 text-blue-600 dark:text-blue-400" size={20} /><div><h4 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">No Compose apps detected</h4><p className="mt-1 text-sm leading-6 text-neutral-500 dark:text-neutral-400">This list only shows projects known to the Docker daemon. Put a compose.yml in a project folder and run it once to make it appear here.</p></div></div></div>
-            <div className="rounded-lg border border-dashed border-neutral-300 p-5 dark:border-neutral-700"><h4 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Start with a template</h4><p className="mt-1 text-sm leading-6 text-neutral-500 dark:text-neutral-400">Generate a clean starter file for PHP, Node.js, Redis, MySQL, or a static Nginx site.</p><button type="button" className="mt-4 inline-flex cursor-pointer items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400" onClick={() => setComposeStarter(true)}>Choose a starter <ArrowLeft className="rotate-180" size={15} /></button></div>
+            <div className="rounded-lg bg-neutral-50 p-5 dark:bg-neutral-950">
+              <div className="flex items-start gap-3">
+                <FileCode2
+                  className="mt-0.5 text-blue-600 dark:text-blue-400"
+                  size={20}
+                />
+                <div>
+                  <h4 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                    No Compose apps detected
+                  </h4>
+                  <p className="mt-1 text-sm leading-6 text-neutral-500 dark:text-neutral-400">
+                    This list only shows projects known to the Docker daemon.
+                    Put a compose.yml in a project folder and run it once to
+                    make it appear here.
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="rounded-lg border border-dashed border-neutral-300 p-5 dark:border-neutral-700">
+              <h4 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                Start with a template
+              </h4>
+              <p className="mt-1 text-sm leading-6 text-neutral-500 dark:text-neutral-400">
+                Generate a clean starter file for PHP, Node.js, Redis, MySQL, or
+                a static Nginx site.
+              </p>
+              <button
+                type="button"
+                className="mt-4 inline-flex cursor-pointer items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400"
+                onClick={() => setComposeStarter(true)}
+              >
+                Choose a starter <ArrowLeft className="rotate-180" size={15} />
+              </button>
+            </div>
           </div>
         )}
       </Section>
@@ -1889,9 +2189,63 @@ export default function DockerPage() {
           onClose={() => setResourceInspect(null)}
         />
       )}
-      {cloneVolume && <DockerVolumeCloneModal volume={cloneVolume} onClose={() => setCloneVolume(null)} onSubmit={async (name) => { const response = await apiRequest(`/api/v1/services/docker/volumes/${encodeURIComponent(cloneVolume.name)}/action`, { method: "POST", body: JSON.stringify({ action: "clone", clone_name: name }) }); if (response.ok) { setCloneVolume(null); await load(); } }} />}
-      <ActionDialog dialog={resourceDialog} onClose={() => setResourceDialog(null)} onSubmit={async () => { if (!resourceDialog) return; const response = await apiRequest(`/api/v1/services/docker/volumes/${encodeURIComponent(resourceDialog.name)}/action`, { method: "POST", body: JSON.stringify({ action: "delete" }) }); if (response.ok) { setResourceDialog(null); await load(); } }} />
-      {composeStarter && <ComposeStarterModal onClose={() => setComposeStarter(false)} onCreate={async (projectName, filename, content) => { const response = await apiRequest("/api/v1/services/docker/compose", { method: "POST", body: JSON.stringify({ project_name: projectName, filename, content }) }); if (response.ok) { setComposeStarter(false); setTab("compose"); await load(); } }} />}
+      {cloneVolume && (
+        <DockerVolumeCloneModal
+          volume={cloneVolume}
+          onClose={() => setCloneVolume(null)}
+          onSubmit={async (name) => {
+            const response = await apiRequest(
+              `/api/v1/services/docker/volumes/${encodeURIComponent(cloneVolume.name)}/action`,
+              {
+                method: "POST",
+                body: JSON.stringify({ action: "clone", clone_name: name }),
+              },
+            );
+            if (response.ok) {
+              setCloneVolume(null);
+              await load();
+            }
+          }}
+        />
+      )}
+      <ActionDialog
+        dialog={resourceDialog}
+        onClose={() => setResourceDialog(null)}
+        onSubmit={async () => {
+          if (!resourceDialog) return;
+          const response = await apiRequest(
+            `/api/v1/services/docker/volumes/${encodeURIComponent(resourceDialog.name)}/action`,
+            { method: "POST", body: JSON.stringify({ action: "delete" }) },
+          );
+          if (response.ok) {
+            setResourceDialog(null);
+            await load();
+          }
+        }}
+      />
+      {composeStarter && (
+        <ComposeStarterModal
+          onClose={() => setComposeStarter(false)}
+          onCreate={async (projectName, filename, content) => {
+            const response = await apiRequest(
+              "/api/v1/services/docker/compose",
+              {
+                method: "POST",
+                body: JSON.stringify({
+                  project_name: projectName,
+                  filename,
+                  content,
+                }),
+              },
+            );
+            if (response.ok) {
+              setComposeStarter(false);
+              setTab("compose");
+              await load();
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

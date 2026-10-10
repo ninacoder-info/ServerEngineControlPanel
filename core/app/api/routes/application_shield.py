@@ -23,7 +23,12 @@ def overview(user=Depends(require_user)):
 @router.patch("/policy")
 def update_policy(payload: ApplicationShieldPolicyUpdate, user=Depends(require_user)):
     try:
-        return application_shield_service.update_policy(payload)
+        updated = application_shield_service.update_policy(payload)
+        job_store.publish({
+            "type": "application-shield-policy",
+            "policy": updated.model_dump(mode="json"),
+        })
+        return updated
     except RuntimeError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 

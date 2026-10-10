@@ -1,5 +1,78 @@
 # Server Engine development rules
 
+## Frontend formatting
+
+All JavaScript-related source files must use readable, consistently formatted
+code. This includes `.js`, `.jsx`, `.ts`, `.tsx`, `.css`, `.scss`, and related
+frontend files.
+
+- Use normal multiline formatting for components, functions, objects, arrays,
+  conditionals, and JSX.
+- Do not write entire React components, render trees, handlers, or CSS rules on
+  one line to save space.
+- Keep nested JSX indented so its structure is immediately understandable.
+- Use one logical statement or CSS declaration per line.
+- Preserve readable spacing between related sections and avoid dense chained
+  expressions when a named variable or helper improves clarity.
+- Run the project formatter or frontend build checks before handing off a UI
+  change.
+
+## Server response feedback
+
+- Success or error responses from API requests, jobs, service actions, saves,
+  deletes, uploads, and other server operations must use the shared Toast
+  component.
+- Do not show server-operation success or error messages as inline page text,
+  banners, or modal body lines.
+- Inline messages are reserved for form and field validation, such as an
+  invalid domain, missing required value, or malformed IP address.
+- Keep the response message concise and use the correct success or error Toast
+  variant.
+
+## Shared UI components
+
+- Prefer the shared components in `web/src/components/ui` whenever they fit the
+  requirement, especially for forms, labels, inputs, buttons, dialogs, and
+  common feedback patterns.
+- Check the shared UI directory before creating a new primitive or duplicating
+  an existing control style.
+- If a shared component is missing a required capability, extend it or add the
+  capability there before creating a one-off implementation in a feature page.
+- New shared components must be reusable, consistently formatted, accessible,
+  and documented by their props and expected behavior.
+
+## CSS tooltips
+
+- Use the shared CSS tooltip pattern for hover information: a `css-tooltip`
+  element with its message in `data-tooltip`.
+- Do not use native `title` attributes for interactive or informational UI
+  tooltips when a CSS tooltip can provide the same information.
+- Keep tooltip content concise, accessible, and positioned without changing
+  the layout of the surrounding control or row.
+
+## Frontend forms and validation
+
+- Use `react-hook-form` for React form state, submission handling, touched and
+  dirty state, and field registration.
+- Use `zod` schemas for form validation instead of scattered ad-hoc checks in
+  event handlers or submit functions.
+- Connect schemas through the React Hook Form resolver so validation behavior
+  is consistent for submit, field errors, and future server-side validation.
+- Display field and form validation errors inline beside the relevant field;
+  use Toast only for server-operation success or failure responses.
+- Reuse existing schemas, field components, and validation helpers before
+  creating feature-specific duplicates.
+
+## Configuration modals
+
+- Configuration modals for services and infrastructure must reuse the visual
+  structure and interaction style of the existing service configuration
+  modals: consistent header, tabs or sections, spacing, footer actions, close
+  behavior, loading states, and dark-mode treatment.
+- Keep configuration modals open after a successful save unless the user is
+  completing a one-time creation flow. Show server-operation results with the
+  shared Toast component.
+
 ## Live state communication
 
 All live UI state must communicate through the shared authenticated WebSocket
@@ -29,3 +102,22 @@ Event handlers must use IDs from the same source as the page’s catalog and mus
 not reference undefined duplicate constants. Treat queued/running and terminal
 job states separately, and keep the UI disabled/loading state synchronized with
 the event stream.
+
+## Release process
+
+- Never create, publish, replace, or upload a release unless the user has
+  explicitly requested the release in the current task.
+- Before releasing, update `CHANGELOG.md` with the exact release version and
+  concise notes for the changes included in that release.
+- Run `git diff --check`, backend Python compilation checks, and the frontend
+  production build before building the release artifact.
+- Build the release with `scripts/build-release.sh` or the repository release
+  script so the bundled frontend, backend version, `VERSION` file, and
+  `CHANGELOG.md` are synchronized.
+- Verify the artifact was created successfully and publish it with the
+  repository release script. Confirm the final GitHub release URL and version
+  after upload.
+- Do not restart Docker, panel services, Nginx, PHP-FPM, or other managed
+  services as part of a release unless the user explicitly requests it.
+- Do not silently publish unrelated dirty-worktree changes; preserve them and
+  mention any release-scope limitations before handoff.

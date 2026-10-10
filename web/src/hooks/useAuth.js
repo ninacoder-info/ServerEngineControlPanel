@@ -7,7 +7,9 @@ const EXPLICIT_LOGOUT_KEY = "serverengine:explicit-logout";
 export function useAuth() {
   const [user, setUser] = React.useState(() => {
     try {
-      return window.sessionStorage.getItem(EXPLICIT_LOGOUT_KEY) === "true" ? null : undefined;
+      return window.sessionStorage.getItem(EXPLICIT_LOGOUT_KEY) === "true"
+        ? null
+        : undefined;
     } catch {
       return undefined;
     }
@@ -15,7 +17,8 @@ export function useAuth() {
   const [error, setError] = React.useState("");
   React.useEffect(() => {
     try {
-      if (window.sessionStorage.getItem(EXPLICIT_LOGOUT_KEY) === "true") return undefined;
+      if (window.sessionStorage.getItem(EXPLICIT_LOGOUT_KEY) === "true")
+        return undefined;
     } catch {
       // Continue with the server session check when sessionStorage is unavailable.
     }
@@ -41,9 +44,15 @@ export function useAuth() {
       });
       if (!r.ok) {
         const body = await r.json().catch(() => ({}));
-        const message = body.message || body.detail || "Invalid username or password";
+        const message =
+          body.message || body.detail || "Invalid username or password";
         setError(message);
-        return { ok: false, message, errors: body.errors || {}, retryAfter: Number(r.headers.get("retry-after") || 0) };
+        return {
+          ok: false,
+          message,
+          errors: body.errors || {},
+          retryAfter: Number(r.headers.get("retry-after") || 0),
+        };
       }
       try {
         window.sessionStorage.removeItem(EXPLICIT_LOGOUT_KEY);
@@ -69,14 +78,26 @@ export function useAuth() {
   async function passkeyLogin() {
     setError("");
     try {
-      const optionsResponse = await apiRequest("/api/v1/auth/passkey/login/options", { method: "POST" });
-      if (!optionsResponse.ok) throw new Error(await readApiError(optionsResponse, "Passkey sign-in is unavailable."));
+      const optionsResponse = await apiRequest(
+        "/api/v1/auth/passkey/login/options",
+        { method: "POST" },
+      );
+      if (!optionsResponse.ok)
+        throw new Error(
+          await readApiError(
+            optionsResponse,
+            "Passkey sign-in is unavailable.",
+          ),
+        );
       const credential = await getPasskey(await optionsResponse.json());
       const response = await apiRequest("/api/v1/auth/passkey/login/verify", {
         method: "POST",
         body: JSON.stringify({ credential }),
       });
-      if (!response.ok) throw new Error(await readApiError(response, "Passkey sign-in failed."));
+      if (!response.ok)
+        throw new Error(
+          await readApiError(response, "Passkey sign-in failed."),
+        );
       try {
         window.sessionStorage.removeItem(EXPLICIT_LOGOUT_KEY);
       } catch {
@@ -89,5 +110,12 @@ export function useAuth() {
       return false;
     }
   }
-  return { user, loading: user === undefined, error, login, passkeyLogin, logout };
+  return {
+    user,
+    loading: user === undefined,
+    error,
+    login,
+    passkeyLogin,
+    logout,
+  };
 }

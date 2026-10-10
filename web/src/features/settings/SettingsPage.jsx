@@ -15,7 +15,6 @@ import {
   Palette,
   RotateCcw,
   Save,
-  Search,
   ShieldCheck,
   SlidersHorizontal,
   Upload,
@@ -36,15 +35,16 @@ const groups = [
     SlidersHorizontal,
     "Identity, language, and regional behavior.",
   ],
+  ["appearance", "Appearance", Palette, "Theme and accent color."],
   [
     "storage",
-    "Web & storage",
+    "Storage",
     FolderCog,
     "Website roots, uploads, and backup policy.",
   ],
   [
     "security",
-    "Security & access",
+    "Security",
     LockKeyhole,
     "Authentication, network, and browser security.",
   ],
@@ -79,8 +79,7 @@ const fields = {
 const input =
   "mt-2 block min-h-11 w-full rounded-md border border-neutral-300 bg-white px-3 py-2.5 text-sm text-neutral-900 shadow-sm outline-none placeholder:text-neutral-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100";
 const card = "w-full";
-const row =
-  "grid gap-5 py-5 md:grid-cols-[minmax(0,1fr)_minmax(18rem,28rem)] md:items-center";
+const row = "grid gap-5 py-5 md:grid-cols-[2fr_3fr] md:items-center";
 const panelValues = (values) => ({
   panel_name: values.panel_name || "",
   language: values.language || "en",
@@ -104,47 +103,113 @@ const panelSchema = z.object({
   panel_accent: z.string().min(1, "Choose an accent color."),
   panel_landing: z.enum(["overview", "websites", "services"]),
   panel_date_format: z.enum(["local", "iso", "relative"]),
-  session_timeout_minutes: z.coerce.number().int().min(1, "Session timeout must be at least 1 minute."),
+  session_timeout_minutes: z.coerce
+    .number()
+    .int()
+    .min(1, "Session timeout must be at least 1 minute."),
 });
 const storageSchema = z.object({
   default_site_root: z.string().trim().min(1, "Website root is required."),
   default_backup_root: z.string().trim().min(1, "Backup root is required."),
-  storage_upload_limit_mb: z.coerce.number().int().min(1, "Upload limit must be at least 1 MB."),
-  storage_required_free_mb: z.coerce.number().int().min(0, "Required free space cannot be negative."),
+  storage_upload_limit_mb: z.coerce
+    .number()
+    .int()
+    .min(1, "Upload limit must be at least 1 MB."),
+  storage_required_free_mb: z.coerce
+    .number()
+    .int()
+    .min(0, "Required free space cannot be negative."),
 });
 const securitySchema = z.object({
-  session_timeout_minutes: z.coerce.number().int().min(1, "Session timeout must be at least 1 minute."),
-  security_panel_port: z.coerce.number().int().min(1, "Port must be between 1 and 65535.").max(65535, "Port must be between 1 and 65535."),
-  security_max_failed_attempts: z.coerce.number().int().min(1, "Attempts must be at least 1."),
-  security_lockout_minutes: z.coerce.number().int().min(1, "Lockout must be at least 1 minute."),
+  session_timeout_minutes: z.coerce
+    .number()
+    .int()
+    .min(1, "Session timeout must be at least 1 minute."),
+  security_panel_port: z.coerce
+    .number()
+    .int()
+    .min(1, "Port must be between 1 and 65535.")
+    .max(65535, "Port must be between 1 and 65535."),
+  security_max_failed_attempts: z.coerce
+    .number()
+    .int()
+    .min(1, "Attempts must be at least 1."),
+  security_lockout_minutes: z.coerce
+    .number()
+    .int()
+    .min(1, "Lockout must be at least 1 minute."),
 });
 const apiSchema = z.object({
-  api_rate_limit: z.coerce.number().int().min(1, "Rate limit must be at least 1."),
+  api_rate_limit: z.coerce
+    .number()
+    .int()
+    .min(1, "Rate limit must be at least 1."),
   api_burst: z.coerce.number().int().min(1, "Burst must be at least 1."),
-  api_max_page_size: z.coerce.number().int().min(1, "Page size must be at least 1."),
-  api_token_expiry_days: z.coerce.number().int().min(1, "Token expiry must be at least 1 day."),
+  api_max_page_size: z.coerce
+    .number()
+    .int()
+    .min(1, "Page size must be at least 1."),
+  api_token_expiry_days: z.coerce
+    .number()
+    .int()
+    .min(1, "Token expiry must be at least 1 day."),
 });
 const notificationSchema = z.object({
-  notification_email: z.string().email("Enter a valid notification email.").or(z.literal("")),
-  notification_history_days: z.coerce.number().int().min(1, "History must be at least 1 day."),
+  notification_email: z
+    .string()
+    .email("Enter a valid notification email.")
+    .or(z.literal("")),
+  notification_history_days: z.coerce
+    .number()
+    .int()
+    .min(1, "History must be at least 1 day."),
 });
 const certificateSchema = z.object({
-  certbot_account_email: z.string().email("Enter a valid ACME account email.").or(z.literal("")),
-  certbot_renew_window_days: z.coerce.number().int().min(1, "Renewal window must be at least 1 day."),
-  certbot_expiry_notify_days: z.coerce.number().int().min(1, "Expiry notice must be at least 1 day."),
-  certbot_config_dir: z.string().trim().min(1, "Certificate directory is required."),
+  certbot_account_email: z
+    .string()
+    .email("Enter a valid ACME account email.")
+    .or(z.literal("")),
+  certbot_renew_window_days: z.coerce
+    .number()
+    .int()
+    .min(1, "Renewal window must be at least 1 day."),
+  certbot_expiry_notify_days: z.coerce
+    .number()
+    .int()
+    .min(1, "Expiry notice must be at least 1 day."),
+  certbot_config_dir: z
+    .string()
+    .trim()
+    .min(1, "Certificate directory is required."),
 });
 const maintenanceSchema = z.object({
-  job_retention_days: z.coerce.number().int().min(1, "Job retention must be at least 1 day."),
-  log_retention_days: z.coerce.number().int().min(1, "Log retention must be at least 1 day."),
-  maintenance_stale_job_hours: z.coerce.number().int().min(1, "Stale job threshold must be at least 1 hour."),
-  log_rotation_max_size_mb: z.coerce.number().int().min(1, "Maximum log size must be at least 1 MB."),
-  log_rotation_retention_count: z.coerce.number().int().min(1, "Retention count must be at least 1."),
+  job_retention_days: z.coerce
+    .number()
+    .int()
+    .min(1, "Job retention must be at least 1 day."),
+  log_retention_days: z.coerce
+    .number()
+    .int()
+    .min(1, "Log retention must be at least 1 day."),
+  maintenance_stale_job_hours: z.coerce
+    .number()
+    .int()
+    .min(1, "Stale job threshold must be at least 1 hour."),
+  log_rotation_max_size_mb: z.coerce
+    .number()
+    .int()
+    .min(1, "Maximum log size must be at least 1 MB."),
+  log_rotation_retention_count: z.coerce
+    .number()
+    .int()
+    .min(1, "Retention count must be at least 1."),
 });
 const validationErrors = (schema, values) => {
   const result = schema.safeParse(values);
   if (result.success) return {};
-  return Object.fromEntries(result.error.issues.map((issue) => [issue.path[0], issue.message]));
+  return Object.fromEntries(
+    result.error.issues.map((issue) => [issue.path[0], issue.message]),
+  );
 };
 const apiSettingsValues = (values) => ({
   api_enabled: values.api_enabled !== false,
@@ -204,7 +269,9 @@ const securityValues = (values) => ({
   security_lockout_minutes: values.security_lockout_minutes ?? 15,
   security_audit_events: values.security_audit_events !== false,
   security_auth_alerts: values.security_auth_alerts !== false,
-  ...(values.security_github_token ? { security_github_token: values.security_github_token } : {}),
+  ...(values.security_github_token
+    ? { security_github_token: values.security_github_token }
+    : {}),
 });
 const notificationSettingsValues = (values) => ({
   notifications_enabled: values.notifications_enabled !== false,
@@ -219,8 +286,10 @@ const notificationSettingsValues = (values) => ({
   notification_quiet_end: values.notification_quiet_end || "07:00",
   notification_failed_jobs: values.notification_failed_jobs !== false,
   notification_security_events: values.notification_security_events !== false,
-  notification_certificate_expiry: values.notification_certificate_expiry !== false,
-  notification_resource_thresholds: values.notification_resource_thresholds !== false,
+  notification_certificate_expiry:
+    values.notification_certificate_expiry !== false,
+  notification_resource_thresholds:
+    values.notification_resource_thresholds !== false,
   notification_service_health: values.notification_service_health !== false,
   notification_backup_events: values.notification_backup_events !== false,
   notification_history_days: values.notification_history_days ?? 30,
@@ -237,7 +306,8 @@ const certificateSettingsValues = (values) => ({
   certbot_renew_window_days: values.certbot_renew_window_days ?? 30,
   certbot_renewal_time: values.certbot_renewal_time || "03:00",
   certbot_expiry_notify_days: values.certbot_expiry_notify_days ?? 14,
-  certbot_config_dir: values.certbot_config_dir || "/var/lib/server-engine/letsencrypt",
+  certbot_config_dir:
+    values.certbot_config_dir || "/var/lib/server-engine/letsencrypt",
 });
 const maintenanceSettingsValues = (values) => ({
   job_retention_days: values.job_retention_days ?? 30,
@@ -249,7 +319,8 @@ const maintenanceSettingsValues = (values) => ({
   maintenance_update_policy: values.maintenance_update_policy || "security",
   maintenance_health_checks: values.maintenance_health_checks !== false,
   maintenance_verify_backups: values.maintenance_verify_backups !== false,
-  maintenance_notify_failed_jobs: values.maintenance_notify_failed_jobs !== false,
+  maintenance_notify_failed_jobs:
+    values.maintenance_notify_failed_jobs !== false,
   maintenance_stale_job_hours: values.maintenance_stale_job_hours ?? 24,
   log_rotation_enabled: values.log_rotation_enabled !== false,
   log_rotation_max_size_mb: values.log_rotation_max_size_mb ?? 50,
@@ -260,65 +331,98 @@ const maintenanceSettingsValues = (values) => ({
 });
 const appearanceAccentColors = [
   { name: "Blue", value: "blue", color: "#007bff", className: "bg-[#007bff]" },
-  { name: "Purple", value: "purple", color: "#894291", className: "bg-[#894291]" },
+  {
+    name: "Purple",
+    value: "purple",
+    color: "#894291",
+    className: "bg-[#894291]",
+  },
   { name: "Pink", value: "pink", color: "#e45c9c", className: "bg-[#e45c9c]" },
   { name: "Red", value: "red", color: "#ce4745", className: "bg-[#ce4745]" },
-  { name: "Orange", value: "orange", color: "#e8883b", className: "bg-[#e8883b]" },
-  { name: "Yellow", value: "yellow", color: "#f7c84e", className: "bg-[#f7c84e]" },
-  { name: "Green", value: "green", color: "#78b856", className: "bg-[#78b856]" },
-  { name: "Graphite", value: "graphite", color: "#989898", className: "bg-[#989898]" },
+  {
+    name: "Orange",
+    value: "orange",
+    color: "#e8883b",
+    className: "bg-[#e8883b]",
+  },
+  {
+    name: "Yellow",
+    value: "yellow",
+    color: "#f7c84e",
+    className: "bg-[#f7c84e]",
+  },
+  {
+    name: "Green",
+    value: "green",
+    color: "#78b856",
+    className: "bg-[#78b856]",
+  },
+  {
+    name: "Graphite",
+    value: "graphite",
+    color: "#989898",
+    className: "bg-[#989898]",
+  },
 ];
-function Section({ icon: Icon, title, description, badge, children }) {
+function Section({ title, description, badge, children }) {
   return (
-    <>
-      <section className={card}>
-        <div className="mb-6 flex items-start justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-md bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
-              <Icon size={17} />
-            </span>
-            <div>
-              <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
-                {title}
-              </h3>
-              <p className="mt-1 text-sm leading-6 text-neutral-500 dark:text-neutral-400">
-                {description}
-              </p>
-            </div>
-          </div>
-          {badge && (
-            <span className="rounded-full border border-neutral-200 bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-600 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300">
-              {badge}
-            </span>
-          )}
+    <section className="border-b border-neutral-200 pb-6 last:border-b-0 dark:border-neutral-800">
+      <div className="mb-5 flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
+            {title}
+          </h3>
+          <p className="mt-1 text-sm leading-6 text-neutral-500 dark:text-neutral-400">
+            {description}
+          </p>
         </div>
-        {children}
-      </section>
-      <hr className="my-6 border-0 border-t border-neutral-200 dark:border-neutral-800" />
-    </>
+        {badge && (
+          <span className="shrink-0 rounded-full border border-neutral-200 bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-600 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300">
+            {badge}
+          </span>
+        )}
+      </div>
+      <div className="space-y-1">{children}</div>
+    </section>
   );
 }
 function Control({ label, description, children, full = false, error }) {
-  const control = React.isValidElement(children) && children.type !== React.Fragment
-    ? React.cloneElement(children, { className: formControlClass(children.props.className || "", Boolean(error)), "aria-invalid": error ? "true" : undefined })
-    : children;
+  const control =
+    React.isValidElement(children) && children.type !== React.Fragment
+      ? React.cloneElement(children, {
+          className: formControlClass(
+            children.props.className || "",
+            Boolean(error),
+          ),
+          "aria-invalid": error ? "true" : undefined,
+        })
+      : children;
   return (
     <label className={`${row}${full ? " md:grid-cols-1" : ""}`}>
       <span>
-        <strong className={`text-sm font-semibold ${error ? "text-rose-600 dark:text-rose-400" : "text-neutral-900 dark:text-neutral-100"}`}>
+        <strong
+          className={`text-sm font-semibold ${error ? "text-rose-600 dark:text-rose-400" : "text-neutral-900 dark:text-neutral-100"}`}
+        >
           {label}
         </strong>
         <small className="mt-1 block text-sm leading-6 text-neutral-500 dark:text-neutral-400">
           {description}
         </small>
       </span>
-      <span>{control}{error && <small className="mt-1 block text-xs font-normal text-rose-600 dark:text-rose-400">{error}</small>}</span>
+      <span>
+        {control}
+        {error && (
+          <small className="mt-1 block text-xs font-normal text-rose-600 dark:text-rose-400">
+            {error}
+          </small>
+        )}
+      </span>
     </label>
   );
 }
 function Toggle({ label, description, checked, onChange }) {
   return (
-    <label className={row}>
+    <div className={row}>
       <span>
         <strong className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
           {label}
@@ -327,15 +431,20 @@ function Toggle({ label, description, checked, onChange }) {
           {description}
         </small>
       </span>
-      <span className="flex justify-start md:justify-end">
-        <input
-          className="h-4 w-4 rounded border-neutral-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 dark:border-neutral-600 dark:bg-neutral-800 dark:focus:ring-offset-neutral-900"
-          type="checkbox"
-          checked={checked}
-          onChange={(e) => onChange(e.target.checked)}
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        className={`relative h-6 w-11 cursor-pointer rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-neutral-900 ${checked ? "bg-blue-600 dark:bg-blue-500" : "bg-neutral-300 dark:bg-neutral-700"}`}
+        onClick={() => onChange(!checked)}
+      >
+        <span
+          aria-hidden="true"
+          className={`absolute left-1 top-1 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${checked ? "translate-x-5" : ""}`}
         />
-      </span>
-    </label>
+      </button>
+    </div>
   );
 }
 function SelectControl({
@@ -360,18 +469,30 @@ function SelectControl({
 }
 function FieldSet({ label, description, children, error }) {
   const control = React.isValidElement(children)
-    ? React.cloneElement(children, { className: formControlClass(children.props.className || "", Boolean(error)), "aria-invalid": error ? "true" : undefined })
+    ? React.cloneElement(children, {
+        className: formControlClass(
+          children.props.className || "",
+          Boolean(error),
+        ),
+        "aria-invalid": error ? "true" : undefined,
+      })
     : children;
   return (
     <label className="block">
-      <span className={`text-sm font-semibold ${error ? "text-rose-600 dark:text-rose-400" : "text-neutral-900 dark:text-neutral-100"}`}>
+      <span
+        className={`text-sm font-semibold ${error ? "text-rose-600 dark:text-rose-400" : "text-neutral-900 dark:text-neutral-100"}`}
+      >
         {label}
       </span>
       <small className="mt-1 block text-sm leading-6 text-neutral-500 dark:text-neutral-400">
         {description}
       </small>
       {control}
-      {error && <small className="mt-1 block text-xs font-normal text-rose-600 dark:text-rose-400">{error}</small>}
+      {error && (
+        <small className="mt-1 block text-xs font-normal text-rose-600 dark:text-rose-400">
+          {error}
+        </small>
+      )}
     </label>
   );
 }
@@ -430,35 +551,59 @@ function Notice({ children, amber = false }) {
     </div>
   );
 }
-function SettingsActions({ onSave, onReset, saving, dirty, message }) {
+function SettingsActions({
+  onSave,
+  onReset,
+  saving,
+  dirty,
+  message,
+  saveLabel = "Save settings",
+}) {
   return (
-    <div className="mt-5 flex flex-col gap-3 border-t border-neutral-200 pt-5 dark:border-neutral-800 sm:flex-row sm:items-center sm:justify-between">
-      <span className="text-sm text-neutral-500 dark:text-neutral-400">{message}</span>
+    <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <span className="text-sm text-neutral-500 dark:text-neutral-400">
+        {message}
+      </span>
       <div className="flex items-center gap-2">
-        <button type="button" onClick={onReset} disabled={saving} className="inline-flex cursor-pointer items-center justify-center rounded-md px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-neutral-200 dark:hover:bg-neutral-800">Restore defaults</button>
+        <button
+          type="button"
+          onClick={onReset}
+          disabled={saving}
+          className="inline-flex cursor-pointer items-center justify-center rounded-md px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-neutral-200 dark:hover:bg-neutral-800"
+        >
+          Restore defaults
+        </button>
         <SaveButton
           onClick={onSave}
           saving={saving}
           disabled={!dirty}
           className="bg-[var(--panel-accent)] text-white hover:opacity-90"
         >
-          Save API settings
+          {saveLabel}
         </SaveButton>
       </div>
     </div>
   );
 }
-function PanelTab({ values, onChange, onSave, onReset, saving, dirty, message, errors = {} }) {
+function PanelTab({
+  values,
+  onChange,
+  onSave,
+  onReset,
+  saving,
+  dirty,
+  message,
+  errors = {},
+}) {
   const o = {
-    theme: values.panel_theme || "system",
-    density: values.panel_density || "comfortable",
-    accent: values.panel_accent || "blue",
     landing: values.panel_landing || "overview",
     date: values.panel_date_format || "local",
     hints: values.panel_show_hints !== false,
   };
   const set = (key, value) => onChange(key, value);
-  const timezones = timezoneOptions.some((option) => option.value === values.timezone)
+  const timezones = timezoneOptions.some(
+    (option) => option.value === values.timezone,
+  )
     ? timezoneOptions
     : [
         ...timezoneOptions,
@@ -500,52 +645,6 @@ function PanelTab({ values, onChange, onSave, onReset, saving, dirty, message, e
               </option>
             ))}
           </select>
-        </Control>
-      </Section>
-      <Section
-        icon={Palette}
-        title="Appearance"
-        description="Choose a comfortable default for this device."
-      >
-        <SelectControl
-          label="Color theme"
-          description="Default appearance for new sessions."
-          value={o.theme}
-          onChange={(v) => set("panel_theme", v)}
-        >
-          <option value="system">Use system preference</option>
-          <option value="dark">Dark</option>
-          <option value="light">Light</option>
-        </SelectControl>
-        <SelectControl
-          label="Interface density"
-          description="Spacing in tables, cards, and forms."
-          value={o.density}
-          onChange={(v) => set("panel_density", v)}
-        >
-          <option value="comfortable">Comfortable</option>
-          <option value="compact">Compact</option>
-        </SelectControl>
-        <Control label="Accent color" description="Interface accent color.">
-          <div className="flex flex-wrap items-center gap-3" role="radiogroup" aria-label="Accent color">
-            {appearanceAccentColors.map((accent) => {
-              const selected = o.accent === accent.value;
-              return (
-                <button
-                  key={accent.value}
-                  type="button"
-                  role="radio"
-                  aria-checked={selected}
-                  aria-label={accent.name}
-                  title={accent.name}
-                  className={`relative inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded-full border border-neutral-300 shadow-sm ring-offset-2 transition focus:outline-none focus:ring-2 focus:ring-[var(--panel-accent)] dark:border-neutral-600 dark:ring-offset-neutral-900 ${accent.className} ${selected ? "ring-2 ring-[var(--panel-accent)]" : "hover:border-neutral-500"}`}
-                  onClick={() => set("panel_accent", accent.value)}
-                >
-                  {selected && <span className="h-1.5 w-1.5 rounded-full bg-white shadow-sm" />}
-                </button>
-              );
-            })}
-          </div>
         </Control>
       </Section>
       <Section
@@ -648,7 +747,10 @@ function PanelTab({ values, onChange, onSave, onReset, saving, dirty, message, e
         </Notice>
       </Section>
       <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-neutral-500 dark:text-neutral-400" role="status">
+        <p
+          className="text-sm text-neutral-500 dark:text-neutral-400"
+          role="status"
+        >
           {message}
         </p>
         <div className="flex items-center justify-end gap-3">
@@ -674,7 +776,125 @@ function PanelTab({ values, onChange, onSave, onReset, saving, dirty, message, e
     </div>
   );
 }
-function StorageTab({ values, onChange, onSave, onReset, saving, dirty, message, errors = {} }) {
+function AppearanceTab({ values, onChange }) {
+  const theme = values.panel_theme || "system";
+  const accent = values.panel_accent || "blue";
+  const themeOptions = [
+    { value: "system", label: "System", mode: "system" },
+    { value: "light", label: "Light", mode: "light" },
+    { value: "dark", label: "Dark", mode: "dark" },
+  ];
+  return (
+    <div className="space-y-6">
+      <Section title="Appearance" description="Choose the panel appearance.">
+        <div
+          className="grid gap-4 sm:grid-cols-3"
+          role="radiogroup"
+          aria-label="Theme"
+        >
+          {themeOptions.map((option) => {
+            const selected = theme === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                onClick={() => onChange("panel_theme", option.value)}
+                className={`group rounded-lg border p-2 text-left transition focus:outline-none focus:ring-2 focus:ring-[var(--panel-accent)] ${selected ? "border-[var(--panel-accent)] ring-2 ring-[var(--panel-accent)]/20" : "border-neutral-200 hover:border-neutral-400 dark:border-neutral-700 dark:hover:border-neutral-500"}`}
+              >
+                <ThemePreview mode={option.mode} />
+                <span className="mt-2 block px-1 text-sm font-semibold text-neutral-800 dark:text-neutral-100">
+                  {option.label}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="pt-5">
+          <strong className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+            Accent color
+          </strong>
+          <div
+            className="mt-3 flex flex-wrap items-center gap-3"
+            role="radiogroup"
+            aria-label="Accent color"
+          >
+            {appearanceAccentColors.map((option) => {
+              const selected = accent === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  aria-label={option.name}
+                  title={option.name}
+                  className={`relative inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-full border border-neutral-300 shadow-sm ring-offset-2 transition focus:outline-none focus:ring-2 focus:ring-[var(--panel-accent)] dark:border-neutral-600 dark:ring-offset-neutral-900 ${option.className} ${selected ? "ring-2 ring-[var(--panel-accent)]" : "hover:border-neutral-500"}`}
+                  onClick={() => onChange("panel_accent", option.value)}
+                >
+                  {selected && (
+                    <span className="h-2 w-2 rounded-full bg-white shadow-sm" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </Section>
+    </div>
+  );
+}
+function ThemePreview({ mode }) {
+  const dark = mode === "dark";
+  const system = mode === "system";
+  return (
+    <div className="relative h-28 overflow-hidden rounded-md border border-neutral-200 bg-neutral-100 dark:border-neutral-700 dark:bg-neutral-800">
+      {system && (
+        <div className="absolute inset-y-0 right-0 w-1/2 bg-neutral-800" />
+      )}
+      <div className="absolute inset-x-3 top-3 flex items-center gap-1.5">
+        <span className="h-1.5 w-1.5 rounded-full bg-red-400" />
+        <span className="h-1.5 w-1.5 rounded-full bg-yellow-400" />
+        <span className="h-1.5 w-1.5 rounded-full bg-green-400" />
+        <span
+          className={`ml-2 h-1.5 w-16 rounded-full ${dark ? "bg-neutral-600" : "bg-neutral-300"} ${system ? "bg-neutral-500" : ""}`}
+        />
+      </div>
+      <div className="absolute inset-x-3 bottom-3 top-9 flex gap-2">
+        <div
+          className={`w-1/4 rounded-sm ${dark ? "bg-neutral-700" : "bg-white"} ${system ? "bg-white/90" : ""}`}
+        />
+        <div
+          className={`flex-1 rounded-sm p-2 ${dark ? "bg-neutral-700" : "bg-white"} ${system ? "bg-white/90" : ""}`}
+        >
+          <div
+            className={`h-2 w-2/3 rounded-full ${dark ? "bg-neutral-500" : "bg-neutral-200"} ${system ? "bg-neutral-200" : ""}`}
+          />
+          <div className="mt-2 grid grid-cols-3 gap-1">
+            <span className="h-5 rounded-sm bg-[var(--panel-accent)] opacity-80" />
+            <span
+              className={`h-5 rounded-sm ${dark ? "bg-neutral-600" : "bg-neutral-100"} ${system ? "bg-neutral-100" : ""}`}
+            />
+            <span
+              className={`h-5 rounded-sm ${dark ? "bg-neutral-600" : "bg-neutral-100"} ${system ? "bg-neutral-100" : ""}`}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+function StorageTab({
+  values,
+  onChange,
+  onSave,
+  onReset,
+  saving,
+  dirty,
+  message,
+  errors = {},
+}) {
   const o = storageValues(values);
   const set = (key, value) => onChange(key, value);
   return (
@@ -753,7 +973,9 @@ function StorageTab({ values, onChange, onSave, onReset, saving, dirty, message,
             type="number"
             min="1"
             value={o.storage_upload_limit_mb}
-            onChange={(e) => set("storage_upload_limit_mb", Number(e.target.value))}
+            onChange={(e) =>
+              set("storage_upload_limit_mb", Number(e.target.value))
+            }
           />
         </Control>
         <Control
@@ -766,7 +988,9 @@ function StorageTab({ values, onChange, onSave, onReset, saving, dirty, message,
             type="number"
             min="0"
             value={o.storage_required_free_mb}
-            onChange={(e) => set("storage_required_free_mb", Number(e.target.value))}
+            onChange={(e) =>
+              set("storage_required_free_mb", Number(e.target.value))
+            }
           />
         </Control>
         <Notice amber>
@@ -865,7 +1089,10 @@ function StorageTab({ values, onChange, onSave, onReset, saving, dirty, message,
         </Control>
       </Section>
       <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-neutral-500 dark:text-neutral-400" role="status">
+        <p
+          className="text-sm text-neutral-500 dark:text-neutral-400"
+          role="status"
+        >
           {message}
         </p>
         <div className="flex items-center justify-end gap-3">
@@ -891,7 +1118,16 @@ function StorageTab({ values, onChange, onSave, onReset, saving, dirty, message,
     </div>
   );
 }
-function SecurityTab({ values, onChange, onSave, onReset, saving, dirty, message, errors = {} }) {
+function SecurityTab({
+  values,
+  onChange,
+  onSave,
+  onReset,
+  saving,
+  dirty,
+  message,
+  errors = {},
+}) {
   const o = securityValues(values);
   const set = (key, value) => onChange(key, value);
   return (
@@ -940,13 +1176,18 @@ function SecurityTab({ values, onChange, onSave, onReset, saving, dirty, message
             autoComplete="new-password"
             value={values.security_github_token || ""}
             onChange={(e) => set("security_github_token", e.target.value)}
-            placeholder={values.security_github_token_configured ? "Configured — enter a new token to replace it" : "github_pat_…"}
+            placeholder={
+              values.security_github_token_configured
+                ? "Configured — enter a new token to replace it"
+                : "github_pat_…"
+            }
           />
-          {values.security_github_token_configured && !values.security_github_token && (
-            <span className="mt-1 block text-xs font-normal text-neutral-500 dark:text-neutral-400">
-              A token is configured. Leave this blank to keep it unchanged.
-            </span>
-          )}
+          {values.security_github_token_configured &&
+            !values.security_github_token && (
+              <span className="mt-1 block text-xs font-normal text-neutral-500 dark:text-neutral-400">
+                A token is configured. Leave this blank to keep it unchanged.
+              </span>
+            )}
         </Control>
       </Section>
       <Section
@@ -1072,7 +1313,9 @@ function SecurityTab({ values, onChange, onSave, onReset, saving, dirty, message
             className={input}
             type="number"
             value={o.security_max_failed_attempts}
-            onChange={(e) => set("security_max_failed_attempts", Number(e.target.value))}
+            onChange={(e) =>
+              set("security_max_failed_attempts", Number(e.target.value))
+            }
           />
         </Control>
         <Control
@@ -1083,7 +1326,9 @@ function SecurityTab({ values, onChange, onSave, onReset, saving, dirty, message
             className={input}
             type="number"
             value={o.security_lockout_minutes}
-            onChange={(e) => set("security_lockout_minutes", Number(e.target.value))}
+            onChange={(e) =>
+              set("security_lockout_minutes", Number(e.target.value))
+            }
           />
         </Control>
       </Section>
@@ -1107,7 +1352,10 @@ function SecurityTab({ values, onChange, onSave, onReset, saving, dirty, message
         />
       </Section>
       <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-neutral-500 dark:text-neutral-400" role="status">
+        <p
+          className="text-sm text-neutral-500 dark:text-neutral-400"
+          role="status"
+        >
           {message}
         </p>
         <div className="flex items-center justify-end gap-3">
@@ -1133,7 +1381,16 @@ function SecurityTab({ values, onChange, onSave, onReset, saving, dirty, message
     </div>
   );
 }
-function ApiTab({ values, onChange, onSave, onReset, saving, dirty, message, errors = {} }) {
+function ApiTab({
+  values,
+  onChange,
+  onSave,
+  onReset,
+  saving,
+  dirty,
+  message,
+  errors = {},
+}) {
   const o = apiSettingsValues(values);
   const set = (key, value) => onChange(key, value);
   const [tokens, setTokens] = React.useState([]);
@@ -1147,31 +1404,51 @@ function ApiTab({ values, onChange, onSave, onReset, saving, dirty, message, err
     const response = await apiRequest("/api/v1/api-access/tokens");
     if (response.ok) setTokens((await response.json()).tokens || []);
   }, []);
-  React.useEffect(() => { loadTokens(); }, [loadTokens]);
+  React.useEffect(() => {
+    loadTokens();
+  }, [loadTokens]);
   const setScope = (scope, checked) =>
-    setTokenScopes((current) => checked ? [...new Set([...current, scope])] : current.filter((item) => item !== scope));
+    setTokenScopes((current) =>
+      checked
+        ? [...new Set([...current, scope])]
+        : current.filter((item) => item !== scope),
+    );
   const generateToken = async () => {
     setAccessMessage("");
     const response = await apiRequest("/api/v1/api-access/tokens", {
       method: "POST",
-      body: JSON.stringify({ name: tokenName, scopes: tokenScopes, expires_days: o.api_token_expiry_days }),
+      body: JSON.stringify({
+        name: tokenName,
+        scopes: tokenScopes,
+        expires_days: o.api_token_expiry_days,
+      }),
     });
-    if (!response.ok) { setAccessMessage(await readApiError(response)); return; }
+    if (!response.ok) {
+      setAccessMessage(await readApiError(response));
+      return;
+    }
     setNewToken(await response.json());
     await loadTokens();
   };
   const revokeToken = async (id) => {
-    const response = await apiRequest(`/api/v1/api-access/tokens/${id}`, { method: "DELETE" });
+    const response = await apiRequest(`/api/v1/api-access/tokens/${id}`, {
+      method: "DELETE",
+    });
     if (response.ok) await loadTokens();
   };
   const createPairing = async () => {
-    const response = await apiRequest("/api/v1/api-access/pairing", { method: "POST" });
+    const response = await apiRequest("/api/v1/api-access/pairing", {
+      method: "POST",
+    });
     if (response.ok) setPairing(await response.json());
     else setAccessMessage(await readApiError(response));
   };
   React.useEffect(() => {
     if (pairing?.payload && qrCanvas.current) {
-      QRCode.toCanvas(qrCanvas.current, pairing.payload, { width: 220, margin: 2 });
+      QRCode.toCanvas(qrCanvas.current, pairing.payload, {
+        width: 220,
+        margin: 2,
+      });
     }
   }, [pairing]);
   return (
@@ -1272,17 +1549,45 @@ function ApiTab({ values, onChange, onSave, onReset, saving, dirty, message, err
                 <tr key={token.id}>
                   <td className="py-3 font-semibold text-neutral-900 dark:text-neutral-100">
                     <span>{token.name}</span>
-                    <small className="ml-2 text-neutral-400">{token.token_prefix}…</small>
+                    <small className="ml-2 text-neutral-400">
+                      {token.token_prefix}…
+                    </small>
                   </td>
                   <td className="py-3 text-neutral-500">
-                    <span className="block font-medium text-neutral-700 dark:text-neutral-300">{token.device_name || "Unknown device"}</span>
-                    <small>{token.platform || "web"} · {token.last_used_ip || token.created_ip || "Unknown IP"}</small>
+                    <span className="block font-medium text-neutral-700 dark:text-neutral-300">
+                      {token.device_name || "Unknown device"}
+                    </span>
+                    <small>
+                      {token.platform || "web"} ·{" "}
+                      {token.last_used_ip || token.created_ip || "Unknown IP"}
+                    </small>
                   </td>
-                  <td className="py-3 text-neutral-500">{token.scopes?.join(", ")}</td>
-                  <td className="py-3 text-neutral-500">{token.expires_at ? new Date(token.expires_at).toLocaleDateString() : "Never"}</td>
-                  <td className="py-3 text-neutral-500">{token.last_used_at ? new Date(token.last_used_at).toLocaleString() : "Never used"}</td>
+                  <td className="py-3 text-neutral-500">
+                    {token.scopes?.join(", ")}
+                  </td>
+                  <td className="py-3 text-neutral-500">
+                    {token.expires_at
+                      ? new Date(token.expires_at).toLocaleDateString()
+                      : "Never"}
+                  </td>
+                  <td className="py-3 text-neutral-500">
+                    {token.last_used_at
+                      ? new Date(token.last_used_at).toLocaleString()
+                      : "Never used"}
+                  </td>
                   <td className="py-3 text-right">
-                    {token.status === "revoked" ? <span className="text-xs font-semibold text-neutral-400">Revoked</span> : <button onClick={() => revokeToken(token.id)} className="cursor-pointer text-sm font-semibold text-red-600">Revoke</button>}
+                    {token.status === "revoked" ? (
+                      <span className="text-xs font-semibold text-neutral-400">
+                        Revoked
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => revokeToken(token.id)}
+                        className="cursor-pointer text-sm font-semibold text-red-600"
+                      >
+                        Revoke
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -1290,26 +1595,57 @@ function ApiTab({ values, onChange, onSave, onReset, saving, dirty, message, err
           </table>
         </div>
         <div className="mt-5 grid gap-4 border-t border-neutral-200 pt-5 dark:border-neutral-800 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto] md:items-end">
-          <FieldSet label="Token name" description="Use one token per device or integration.">
-            <input className={input} value={tokenName} onChange={(event) => setTokenName(event.target.value)} />
+          <FieldSet
+            label="Token name"
+            description="Use one token per device or integration."
+          >
+            <input
+              className={input}
+              value={tokenName}
+              onChange={(event) => setTokenName(event.target.value)}
+            />
           </FieldSet>
-          <FieldSet label="Token scopes" description="Choose the minimum access this client needs.">
+          <FieldSet
+            label="Token scopes"
+            description="Choose the minimum access this client needs."
+          >
             <div className="flex flex-wrap gap-x-4 gap-y-2 pt-3 text-sm">
-              {["read:*", "write:websites", "read:logs", "read:metrics", "write:backups"].map((scope) => (
-                <label key={scope} className="inline-flex cursor-pointer items-center gap-2">
-                  <input type="checkbox" checked={tokenScopes.includes(scope)} onChange={(event) => setScope(scope, event.target.checked)} className="h-4 w-4 accent-blue-600" />
+              {[
+                "read:*",
+                "write:websites",
+                "read:logs",
+                "read:metrics",
+                "write:backups",
+              ].map((scope) => (
+                <label
+                  key={scope}
+                  className="inline-flex cursor-pointer items-center gap-2"
+                >
+                  <input
+                    type="checkbox"
+                    checked={tokenScopes.includes(scope)}
+                    onChange={(event) => setScope(scope, event.target.checked)}
+                    className="h-4 w-4 accent-blue-600"
+                  />
                   {scope}
                 </label>
               ))}
             </div>
           </FieldSet>
-          <button onClick={generateToken} className="inline-flex cursor-pointer items-center justify-center rounded-md bg-[var(--panel-accent)] px-3 py-2 text-sm font-semibold text-white hover:opacity-90">Generate token</button>
+          <button
+            onClick={generateToken}
+            className="inline-flex cursor-pointer items-center justify-center rounded-md bg-[var(--panel-accent)] px-3 py-2 text-sm font-semibold text-white hover:opacity-90"
+          >
+            Generate token
+          </button>
         </div>
         {newToken && (
           <div className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200">
             <p className="font-semibold">Copy this token now</p>
             <p className="mt-1 text-xs">It will not be shown again.</p>
-            <code className="mt-3 block overflow-x-auto rounded bg-white px-3 py-2 text-xs dark:bg-neutral-950">{newToken.token}</code>
+            <code className="mt-3 block overflow-x-auto rounded bg-white px-3 py-2 text-xs dark:bg-neutral-950">
+              {newToken.token}
+            </code>
           </div>
         )}
         <div className="grid gap-5 border-t border-neutral-200 pt-5 dark:border-neutral-800 md:grid-cols-2">
@@ -1320,7 +1656,9 @@ function ApiTab({ values, onChange, onSave, onReset, saving, dirty, message, err
             <select
               className={input}
               value={o.api_token_expiry_days}
-              onChange={(e) => set("api_token_expiry_days", Number(e.target.value))}
+              onChange={(e) =>
+                set("api_token_expiry_days", Number(e.target.value))
+              }
             >
               <option value="30">30 days</option>
               <option value="90">90 days</option>
@@ -1411,12 +1749,16 @@ function ApiTab({ values, onChange, onSave, onReset, saving, dirty, message, err
               onChange={(e) => set("api_rate_limit", Number(e.target.value))}
             />
           </FieldSet>
-          <FieldSet label="Burst capacity" description="Short spike allowance." error={errors.api_burst}>
+          <FieldSet
+            label="Burst capacity"
+            description="Short spike allowance."
+            error={errors.api_burst}
+          >
             <input
               className={input}
               type="number"
-            value={o.api_burst}
-            onChange={(e) => set("api_burst", Number(e.target.value))}
+              value={o.api_burst}
+              onChange={(e) => set("api_burst", Number(e.target.value))}
             />
           </FieldSet>
           <FieldSet
@@ -1427,8 +1769,8 @@ function ApiTab({ values, onChange, onSave, onReset, saving, dirty, message, err
             <input
               className={input}
               type="number"
-            value={o.api_max_page_size}
-            onChange={(e) => set("api_max_page_size", Number(e.target.value))}
+              value={o.api_max_page_size}
+              onChange={(e) => set("api_max_page_size", Number(e.target.value))}
             />
           </FieldSet>
         </div>
@@ -1476,28 +1818,61 @@ function ApiTab({ values, onChange, onSave, onReset, saving, dirty, message, err
       >
         <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
           <div>
-            <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">One-time device pairing</p>
-            <p className="mt-1 max-w-2xl text-sm text-neutral-500 dark:text-neutral-400">The code expires in five minutes and can be used once. The mobile app receives a scoped API token after scanning it.</p>
+            <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+              One-time device pairing
+            </p>
+            <p className="mt-1 max-w-2xl text-sm text-neutral-500 dark:text-neutral-400">
+              The code expires in five minutes and can be used once. The mobile
+              app receives a scoped API token after scanning it.
+            </p>
           </div>
-          <button type="button" onClick={createPairing} className="inline-flex cursor-pointer items-center justify-center rounded-md bg-[var(--panel-accent)] px-3 py-2 text-sm font-semibold text-white hover:opacity-90">Create pairing QR</button>
+          <button
+            type="button"
+            onClick={createPairing}
+            className="inline-flex cursor-pointer items-center justify-center rounded-md bg-[var(--panel-accent)] px-3 py-2 text-sm font-semibold text-white hover:opacity-90"
+          >
+            Create pairing QR
+          </button>
         </div>
         {pairing && (
           <div className="mt-5 flex flex-col gap-5 rounded-md border border-neutral-200 p-4 dark:border-neutral-800 sm:flex-row sm:items-center">
-            <canvas ref={qrCanvas} className="h-[220px] w-[220px] self-center rounded bg-white p-2 sm:self-auto" />
+            <canvas
+              ref={qrCanvas}
+              className="h-[220px] w-[220px] self-center rounded bg-white p-2 sm:self-auto"
+            />
             <div className="min-w-0 text-sm">
-              <p className="font-semibold text-neutral-900 dark:text-neutral-100">Scan this code in the mobile app</p>
-              <p className="mt-1 text-neutral-500 dark:text-neutral-400">Expires {new Date(pairing.expires_at).toLocaleTimeString()}.</p>
-              <code className="mt-3 block break-all rounded-md bg-neutral-100 px-3 py-2 text-xs text-neutral-700 dark:bg-neutral-900 dark:text-neutral-300">{pairing.code}</code>
+              <p className="font-semibold text-neutral-900 dark:text-neutral-100">
+                Scan this code in the mobile app
+              </p>
+              <p className="mt-1 text-neutral-500 dark:text-neutral-400">
+                Expires {new Date(pairing.expires_at).toLocaleTimeString()}.
+              </p>
+              <code className="mt-3 block break-all rounded-md bg-neutral-100 px-3 py-2 text-xs text-neutral-700 dark:bg-neutral-900 dark:text-neutral-300">
+                {pairing.code}
+              </code>
             </div>
           </div>
         )}
       </Section>
-      {accessMessage && <p className="text-sm text-rose-600 dark:text-rose-400">{accessMessage}</p>}
+      {accessMessage && (
+        <p className="text-sm text-rose-600 dark:text-rose-400">
+          {accessMessage}
+        </p>
+      )}
     </div>
   );
 }
 
-function NotificationsTab({ values, onChange, onSave, onReset, saving, dirty, message, errors = {} }) {
+function NotificationsTab({
+  values,
+  onChange,
+  onSave,
+  onReset,
+  saving,
+  dirty,
+  message,
+  errors = {},
+}) {
   const o = notificationSettingsValues(values);
   const set = (key, value) => onChange(key, value);
   return (
@@ -1697,7 +2072,10 @@ function NotificationsTab({ values, onChange, onSave, onReset, saving, dirty, me
         </Notice>
       </Section>
       <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-neutral-500 dark:text-neutral-400" role="status">
+        <p
+          className="text-sm text-neutral-500 dark:text-neutral-400"
+          role="status"
+        >
           {message}
         </p>
         <div className="flex items-center justify-end gap-3">
@@ -1723,7 +2101,16 @@ function NotificationsTab({ values, onChange, onSave, onReset, saving, dirty, me
     </div>
   );
 }
-function CertificatesTab({ values, onChange, onSave, onReset, saving, dirty, message, errors = {} }) {
+function CertificatesTab({
+  values,
+  onChange,
+  onSave,
+  onReset,
+  saving,
+  dirty,
+  message,
+  errors = {},
+}) {
   const o = certificateSettingsValues(values);
   const set = (key, value) => onChange(key, value);
   return (
@@ -1815,7 +2202,9 @@ function CertificatesTab({ values, onChange, onSave, onReset, saving, dirty, mes
             min="1"
             max="90"
             value={o.certbot_renew_window_days}
-            onChange={(e) => set("certbot_renew_window_days", Number(e.target.value))}
+            onChange={(e) =>
+              set("certbot_renew_window_days", Number(e.target.value))
+            }
           />
         </Control>
         <Control
@@ -1840,7 +2229,9 @@ function CertificatesTab({ values, onChange, onSave, onReset, saving, dirty, mes
             min="1"
             max="90"
             value={o.certbot_expiry_notify_days}
-            onChange={(e) => set("certbot_expiry_notify_days", Number(e.target.value))}
+            onChange={(e) =>
+              set("certbot_expiry_notify_days", Number(e.target.value))
+            }
           />
         </Control>
       </Section>
@@ -1872,7 +2263,10 @@ function CertificatesTab({ values, onChange, onSave, onReset, saving, dirty, mes
         </Notice>
       </Section>
       <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-neutral-500 dark:text-neutral-400" role="status">
+        <p
+          className="text-sm text-neutral-500 dark:text-neutral-400"
+          role="status"
+        >
           {message}
         </p>
         <div className="flex items-center justify-end gap-3">
@@ -1899,16 +2293,52 @@ function CertificatesTab({ values, onChange, onSave, onReset, saving, dirty, mes
   );
 }
 
-function MaintenanceTab({ values, onChange, onSave, onReset, saving, dirty, message, errors = {}, onRun, rotationRunning }) {
+function MaintenanceTab({
+  values,
+  onChange,
+  onSave,
+  onReset,
+  saving,
+  dirty,
+  message,
+  errors = {},
+  onRun,
+  rotationRunning,
+}) {
   const o = maintenanceSettingsValues(values);
   const set = (key, value) => onChange(key, value);
   const [policyService, setPolicyService] = React.useState("nginx");
-  const policyServices = ["nginx", "apache", "php", "mysql", "mariadb", "postgresql", "redis", "valkey", "memcached", "mongodb", "rabbitmq", "postfix", "dovecot", "rspamd", "vsftpd", "powerdns", "haproxy", "caddy", "fail2ban", "supervisor", "ffmpeg", "imagemagick", "git"];
+  const policyServices = [
+    "nginx",
+    "apache",
+    "php",
+    "mysql",
+    "mariadb",
+    "postgresql",
+    "redis",
+    "valkey",
+    "memcached",
+    "mongodb",
+    "rabbitmq",
+    "postfix",
+    "dovecot",
+    "rspamd",
+    "vsftpd",
+    "powerdns",
+    "haproxy",
+    "caddy",
+    "fail2ban",
+    "supervisor",
+    "ffmpeg",
+    "imagemagick",
+    "git",
+  ];
   const policy = o.log_rotation_service_policies[policyService] || {};
-  const setPolicy = (key, value) => set("log_rotation_service_policies", {
-    ...o.log_rotation_service_policies,
-    [policyService]: { ...policy, [key]: value },
-  });
+  const setPolicy = (key, value) =>
+    set("log_rotation_service_policies", {
+      ...o.log_rotation_service_policies,
+      [policyService]: { ...policy, [key]: value },
+    });
   const clearPolicy = () => {
     const next = { ...o.log_rotation_service_policies };
     delete next[policyService];
@@ -1974,31 +2404,142 @@ function MaintenanceTab({ values, onChange, onSave, onReset, saving, dirty, mess
           onChange={(v) => set("log_rotation_enabled", v)}
         />
         <div className="space-y-4">
-          <Control full label="Maximum log size" description="Size threshold used for size-only rotation and active-log protection." error={errors.log_rotation_max_size_mb}>
-            <div className="flex items-center gap-2"><input className={input} type="number" min="1" max="100000" value={o.log_rotation_max_size_mb} onChange={(e) => set("log_rotation_max_size_mb", Number(e.target.value))} /><span className="shrink-0 text-sm text-neutral-500">MB</span></div>
+          <Control
+            full
+            label="Maximum log size"
+            description="Size threshold used for size-only rotation and active-log protection."
+            error={errors.log_rotation_max_size_mb}
+          >
+            <div className="flex items-center gap-2">
+              <input
+                className={input}
+                type="number"
+                min="1"
+                max="100000"
+                value={o.log_rotation_max_size_mb}
+                onChange={(e) =>
+                  set("log_rotation_max_size_mb", Number(e.target.value))
+                }
+              />
+              <span className="shrink-0 text-sm text-neutral-500">MB</span>
+            </div>
           </Control>
-          <SelectControl full label="Rotation schedule" description="Daily and weekly rotation run during the maintenance window." value={o.log_rotation_schedule} onChange={(v) => set("log_rotation_schedule", v)}>
-            <option value="size-only">When size limit is reached</option><option value="daily">Daily and when size limit is reached</option><option value="weekly">Weekly and when size limit is reached</option>
+          <SelectControl
+            full
+            label="Rotation schedule"
+            description="Daily and weekly rotation run during the maintenance window."
+            value={o.log_rotation_schedule}
+            onChange={(v) => set("log_rotation_schedule", v)}
+          >
+            <option value="size-only">When size limit is reached</option>
+            <option value="daily">Daily and when size limit is reached</option>
+            <option value="weekly">
+              Weekly and when size limit is reached
+            </option>
           </SelectControl>
-          <SelectControl full label="Compression" description="Compressed archives use gzip while the active log remains available." value={o.log_rotation_compression} onChange={(v) => set("log_rotation_compression", v)}>
-            <option value="gzip">gzip</option><option value="none">Do not compress</option>
+          <SelectControl
+            full
+            label="Compression"
+            description="Compressed archives use gzip while the active log remains available."
+            value={o.log_rotation_compression}
+            onChange={(v) => set("log_rotation_compression", v)}
+          >
+            <option value="gzip">gzip</option>
+            <option value="none">Do not compress</option>
           </SelectControl>
-          <Control full label="Retention count" description="Rotated archives kept for each log file." error={errors.log_rotation_retention_count}>
-            <input className={input} type="number" min="1" max="100000" value={o.log_rotation_retention_count} onChange={(e) => set("log_rotation_retention_count", Number(e.target.value))} />
+          <Control
+            full
+            label="Retention count"
+            description="Rotated archives kept for each log file."
+            error={errors.log_rotation_retention_count}
+          >
+            <input
+              className={input}
+              type="number"
+              min="1"
+              max="100000"
+              value={o.log_rotation_retention_count}
+              onChange={(e) =>
+                set("log_rotation_retention_count", Number(e.target.value))
+              }
+            />
           </Control>
         </div>
         <div className="border-t border-neutral-200 pt-5 dark:border-neutral-800">
           <div className="space-y-4">
-            <SelectControl full label="Per-service override" description="Override the global policy for one managed service." value={policyService} onChange={setPolicyService}>
-              {policyServices.map((service) => <option key={service} value={service}>{service}</option>)}
+            <SelectControl
+              full
+              label="Per-service override"
+              description="Override the global policy for one managed service."
+              value={policyService}
+              onChange={setPolicyService}
+            >
+              {policyServices.map((service) => (
+                <option key={service} value={service}>
+                  {service}
+                </option>
+              ))}
             </SelectControl>
-            <div className="flex flex-wrap items-center justify-between gap-3"><button type="button" className="cursor-pointer text-sm font-semibold text-neutral-600 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white" onClick={clearPolicy}>Use global defaults</button><button type="button" className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800" onClick={onRun} disabled={rotationRunning}>{rotationRunning ? "Rotating…" : "Run now"}</button></div>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <button
+                type="button"
+                className="cursor-pointer text-sm font-semibold text-neutral-600 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white"
+                onClick={clearPolicy}
+              >
+                Use global defaults
+              </button>
+              <button
+                type="button"
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+                onClick={onRun}
+                disabled={rotationRunning}
+              >
+                {rotationRunning ? "Rotating…" : "Run now"}
+              </button>
+            </div>
           </div>
           <div className="mt-4 space-y-4">
-            <Control full label="Service max size"><input className={input} type="number" min="1" value={policy.max_size_mb ?? o.log_rotation_max_size_mb} onChange={(e) => setPolicy("max_size_mb", Number(e.target.value))} /></Control>
-            <SelectControl full label="Service schedule" value={policy.schedule ?? o.log_rotation_schedule} onChange={(v) => setPolicy("schedule", v)}><option value="size-only">Size only</option><option value="daily">Daily</option><option value="weekly">Weekly</option></SelectControl>
-            <SelectControl full label="Service compression" value={policy.compression ?? o.log_rotation_compression} onChange={(v) => setPolicy("compression", v)}><option value="gzip">gzip</option><option value="none">None</option></SelectControl>
-            <Control full label="Service archives"><input className={input} type="number" min="1" value={policy.retention_count ?? o.log_rotation_retention_count} onChange={(e) => setPolicy("retention_count", Number(e.target.value))} /></Control>
+            <Control full label="Service max size">
+              <input
+                className={input}
+                type="number"
+                min="1"
+                value={policy.max_size_mb ?? o.log_rotation_max_size_mb}
+                onChange={(e) =>
+                  setPolicy("max_size_mb", Number(e.target.value))
+                }
+              />
+            </Control>
+            <SelectControl
+              full
+              label="Service schedule"
+              value={policy.schedule ?? o.log_rotation_schedule}
+              onChange={(v) => setPolicy("schedule", v)}
+            >
+              <option value="size-only">Size only</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+            </SelectControl>
+            <SelectControl
+              full
+              label="Service compression"
+              value={policy.compression ?? o.log_rotation_compression}
+              onChange={(v) => setPolicy("compression", v)}
+            >
+              <option value="gzip">gzip</option>
+              <option value="none">None</option>
+            </SelectControl>
+            <Control full label="Service archives">
+              <input
+                className={input}
+                type="number"
+                min="1"
+                value={policy.retention_count ?? o.log_rotation_retention_count}
+                onChange={(e) =>
+                  setPolicy("retention_count", Number(e.target.value))
+                }
+              />
+            </Control>
           </div>
         </div>
       </Section>
@@ -2080,7 +2621,9 @@ function MaintenanceTab({ values, onChange, onSave, onReset, saving, dirty, mess
             type="number"
             min="1"
             value={o.maintenance_stale_job_hours}
-            onChange={(e) => set("maintenance_stale_job_hours", Number(e.target.value))}
+            onChange={(e) =>
+              set("maintenance_stale_job_hours", Number(e.target.value))
+            }
           />
         </Control>
         <Notice amber>
@@ -2093,7 +2636,10 @@ function MaintenanceTab({ values, onChange, onSave, onReset, saving, dirty, mess
         </Notice>
       </Section>
       <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-neutral-500 dark:text-neutral-400" role="status">
+        <p
+          className="text-sm text-neutral-500 dark:text-neutral-400"
+          role="status"
+        >
           {message}
         </p>
         <div className="flex items-center justify-end gap-3">
@@ -2120,7 +2666,15 @@ function MaintenanceTab({ values, onChange, onSave, onReset, saving, dirty, mess
   );
 }
 
-function Field({ definition, value, settings, onChange, notificationActions, certificateActions, maintenanceActions }) {
+function Field({
+  definition,
+  value,
+  settings,
+  onChange,
+  notificationActions,
+  certificateActions,
+  maintenanceActions,
+}) {
   const [key, label, description, type] = definition;
   if (key === "__notifications__")
     return (
@@ -2197,7 +2751,6 @@ export default function SettingsPage() {
   const [certificateSaved, setCertificateSaved] = React.useState({});
   const [maintenanceSaved, setMaintenanceSaved] = React.useState({});
   const [active, setActive] = React.useState("panel");
-  const [query, setQuery] = React.useState("");
   const [busy, setBusy] = React.useState(true);
   const [panelSaving, setPanelSaving] = React.useState(false);
   const [storageSaving, setStorageSaving] = React.useState(false);
@@ -2222,7 +2775,10 @@ export default function SettingsPage() {
       (option) => option.value === values.panel_accent,
     );
     if (accent) {
-      document.documentElement.style.setProperty("--panel-accent", accent.color);
+      document.documentElement.style.setProperty(
+        "--panel-accent",
+        accent.color,
+      );
     }
   }, [values.panel_accent]);
   React.useEffect(() => {
@@ -2236,63 +2792,125 @@ export default function SettingsPage() {
       apiRequest("/api/v1/settings/certificates"),
       apiRequest("/api/v1/settings/maintenance"),
     ])
-      .then(async ([settingsResponse, panelResponse, storageResponse, securityResponse, apiResponse, notificationResponse, certificateResponse, maintenanceResponse]) => {
-        if (!settingsResponse.ok) throw new Error(await readApiError(settingsResponse));
-        if (!panelResponse.ok) throw new Error(await readApiError(panelResponse));
-        if (!storageResponse.ok) throw new Error(await readApiError(storageResponse));
-        if (!securityResponse.ok) throw new Error(await readApiError(securityResponse));
-        if (!apiResponse.ok) throw new Error(await readApiError(apiResponse));
-        if (!notificationResponse.ok) throw new Error(await readApiError(notificationResponse));
-        if (!certificateResponse.ok) throw new Error(await readApiError(certificateResponse));
-        if (!maintenanceResponse.ok) throw new Error(await readApiError(maintenanceResponse));
-        return Promise.all([
-          settingsResponse.json(),
-          panelResponse.json(),
-          storageResponse.json(),
-          securityResponse.json(),
-          apiResponse.json(),
-          notificationResponse.json(),
-          certificateResponse.json(),
-          maintenanceResponse.json(),
-        ]);
-      })
-      .then(([settingsBody, panelBody, storageBody, securityBody, apiBody, notificationBody, certificateBody, maintenanceBody]) => {
-        setValues({ ...settingsBody.values, ...panelBody.values, ...storageBody.values, ...securityBody.values, ...apiBody.values, ...notificationBody.values, ...certificateBody.values, ...maintenanceBody.values });
-        setPanelSaved(panelBody.values);
-        setStorageSaved(storageBody.values);
-        setSecuritySaved(securityBody.values);
-        setApiSaved(apiBody.values);
-        setNotificationSaved(notificationBody.values);
-        setCertificateSaved(certificateBody.values);
-        setMaintenanceSaved(maintenanceBody.values);
-        applyPanelPreferences(panelBody.values);
-      })
+      .then(
+        async ([
+          settingsResponse,
+          panelResponse,
+          storageResponse,
+          securityResponse,
+          apiResponse,
+          notificationResponse,
+          certificateResponse,
+          maintenanceResponse,
+        ]) => {
+          if (!settingsResponse.ok)
+            throw new Error(await readApiError(settingsResponse));
+          if (!panelResponse.ok)
+            throw new Error(await readApiError(panelResponse));
+          if (!storageResponse.ok)
+            throw new Error(await readApiError(storageResponse));
+          if (!securityResponse.ok)
+            throw new Error(await readApiError(securityResponse));
+          if (!apiResponse.ok) throw new Error(await readApiError(apiResponse));
+          if (!notificationResponse.ok)
+            throw new Error(await readApiError(notificationResponse));
+          if (!certificateResponse.ok)
+            throw new Error(await readApiError(certificateResponse));
+          if (!maintenanceResponse.ok)
+            throw new Error(await readApiError(maintenanceResponse));
+          return Promise.all([
+            settingsResponse.json(),
+            panelResponse.json(),
+            storageResponse.json(),
+            securityResponse.json(),
+            apiResponse.json(),
+            notificationResponse.json(),
+            certificateResponse.json(),
+            maintenanceResponse.json(),
+          ]);
+        },
+      )
+      .then(
+        ([
+          settingsBody,
+          panelBody,
+          storageBody,
+          securityBody,
+          apiBody,
+          notificationBody,
+          certificateBody,
+          maintenanceBody,
+        ]) => {
+          setValues({
+            ...settingsBody.values,
+            ...panelBody.values,
+            ...storageBody.values,
+            ...securityBody.values,
+            ...apiBody.values,
+            ...notificationBody.values,
+            ...certificateBody.values,
+            ...maintenanceBody.values,
+          });
+          setPanelSaved(panelBody.values);
+          setStorageSaved(storageBody.values);
+          setSecuritySaved(securityBody.values);
+          setApiSaved(apiBody.values);
+          setNotificationSaved(notificationBody.values);
+          setCertificateSaved(certificateBody.values);
+          setMaintenanceSaved(maintenanceBody.values);
+          applyPanelPreferences(panelBody.values);
+        },
+      )
       .catch((e) => setMessage(e.message))
       .finally(() => setBusy(false));
   }, []);
   const update = (k, v) => {
     setValues((x) => ({ ...x, [k]: v }));
-    setPanelErrors((current) => current[k] ? { ...current, [k]: "" } : current);
-    setStorageErrors((current) => current[k] ? { ...current, [k]: "" } : current);
-    setSecurityErrors((current) => current[k] ? { ...current, [k]: "" } : current);
-    setApiErrors((current) => current[k] ? { ...current, [k]: "" } : current);
-    setNotificationErrors((current) => current[k] ? { ...current, [k]: "" } : current);
-    setCertificateErrors((current) => current[k] ? { ...current, [k]: "" } : current);
-    setMaintenanceErrors((current) => current[k] ? { ...current, [k]: "" } : current);
+    setPanelErrors((current) =>
+      current[k] ? { ...current, [k]: "" } : current,
+    );
+    setStorageErrors((current) =>
+      current[k] ? { ...current, [k]: "" } : current,
+    );
+    setSecurityErrors((current) =>
+      current[k] ? { ...current, [k]: "" } : current,
+    );
+    setApiErrors((current) => (current[k] ? { ...current, [k]: "" } : current));
+    setNotificationErrors((current) =>
+      current[k] ? { ...current, [k]: "" } : current,
+    );
+    setCertificateErrors((current) =>
+      current[k] ? { ...current, [k]: "" } : current,
+    );
+    setMaintenanceErrors((current) =>
+      current[k] ? { ...current, [k]: "" } : current,
+    );
   };
-  const panelDirty = JSON.stringify(panelValues(values)) !== JSON.stringify(panelSaved);
-  const storageDirty = JSON.stringify(storageValues(values)) !== JSON.stringify(storageSaved);
-  const securityDirty = JSON.stringify(securityValues(values)) !== JSON.stringify(securitySaved);
-  const apiDirty = JSON.stringify(apiSettingsValues(values)) !== JSON.stringify(apiSaved);
-  const notificationDirty = JSON.stringify(notificationSettingsValues(values)) !== JSON.stringify(notificationSaved);
-  const certificateDirty = JSON.stringify(certificateSettingsValues(values)) !== JSON.stringify(certificateSaved);
-  const maintenanceDirty = JSON.stringify(maintenanceSettingsValues(values)) !== JSON.stringify(maintenanceSaved);
+  const panelDirty =
+    JSON.stringify(panelValues(values)) !== JSON.stringify(panelSaved);
+  const storageDirty =
+    JSON.stringify(storageValues(values)) !== JSON.stringify(storageSaved);
+  const securityDirty =
+    JSON.stringify(securityValues(values)) !== JSON.stringify(securitySaved);
+  const apiDirty =
+    JSON.stringify(apiSettingsValues(values)) !== JSON.stringify(apiSaved);
+  const notificationDirty =
+    JSON.stringify(notificationSettingsValues(values)) !==
+    JSON.stringify(notificationSaved);
+  const certificateDirty =
+    JSON.stringify(certificateSettingsValues(values)) !==
+    JSON.stringify(certificateSaved);
+  const maintenanceDirty =
+    JSON.stringify(maintenanceSettingsValues(values)) !==
+    JSON.stringify(maintenanceSaved);
   const savePanel = async () => {
     setPanelMessage("");
     const parsed = panelSchema.safeParse(panelValues(values));
     if (!parsed.success) {
       const next = {};
-      parsed.error.issues.forEach((issue) => { next[issue.path[0]] = issue.message; });
+      parsed.error.issues.forEach((issue) => {
+        next[issue.path[0]] = issue.message;
+      });
       setPanelErrors(next);
       setPanelMessage("Review the highlighted panel settings.");
       return false;
@@ -2314,11 +2932,33 @@ export default function SettingsPage() {
     setPanelSaving(false);
     return r.ok;
   };
+  const saveAppearanceChange = async (key, value) => {
+    const nextValues = { ...values, [key]: value };
+    setValues(nextValues);
+    setPanelMessage("");
+    applyPanelPreferences(panelValues(nextValues));
+    setPanelSaving(true);
+    const r = await apiRequest("/api/v1/settings/panel", {
+      method: "PATCH",
+      body: JSON.stringify({ values: panelValues(nextValues) }),
+    });
+    if (r.ok) {
+      const body = await r.json();
+      setValues((current) => ({ ...current, ...body.values }));
+      setPanelSaved(body.values);
+      applyPanelPreferences(body.values);
+      setSettingsToast("Appearance updated.");
+    } else {
+      setPanelMessage(await readApiError(r));
+    }
+    setPanelSaving(false);
+  };
   const restorePanel = () =>
     setDialog({
       kind: "confirm",
       title: "Restore Panel defaults?",
-      message: "Panel identity, appearance, regional, workspace, and access settings will return to their defaults.",
+      message:
+        "Panel identity, appearance, regional, workspace, and access settings will return to their defaults.",
       submitLabel: "Restore defaults",
       onSubmit: async () => {
         setDialog(null);
@@ -2341,7 +2981,11 @@ export default function SettingsPage() {
   const saveStorage = async () => {
     setStorageMessage("");
     const errors = validationErrors(storageSchema, storageValues(values));
-    if (Object.keys(errors).length) { setStorageErrors(errors); setStorageMessage("Review the highlighted storage settings."); return false; }
+    if (Object.keys(errors).length) {
+      setStorageErrors(errors);
+      setStorageMessage("Review the highlighted storage settings.");
+      return false;
+    }
     setStorageErrors({});
     setStorageSaving(true);
     const r = await apiRequest("/api/v1/settings/storage", {
@@ -2362,7 +3006,8 @@ export default function SettingsPage() {
     setDialog({
       kind: "confirm",
       title: "Restore Web & storage defaults?",
-      message: "Website paths, file manager behavior, upload limits, and backup policy will return to their defaults.",
+      message:
+        "Website paths, file manager behavior, upload limits, and backup policy will return to their defaults.",
       submitLabel: "Restore defaults",
       onSubmit: async () => {
         setDialog(null);
@@ -2383,7 +3028,11 @@ export default function SettingsPage() {
   const saveSecurity = async () => {
     setSecurityMessage("");
     const errors = validationErrors(securitySchema, securityValues(values));
-    if (Object.keys(errors).length) { setSecurityErrors(errors); setSecurityMessage("Review the highlighted security settings."); return false; }
+    if (Object.keys(errors).length) {
+      setSecurityErrors(errors);
+      setSecurityMessage("Review the highlighted security settings.");
+      return false;
+    }
     setSecurityErrors({});
     setSecuritySaving(true);
     const r = await apiRequest("/api/v1/settings/security", {
@@ -2392,7 +3041,11 @@ export default function SettingsPage() {
     });
     if (r.ok) {
       const body = await r.json();
-      setValues((current) => ({ ...current, ...body.values, security_github_token: "" }));
+      setValues((current) => ({
+        ...current,
+        ...body.values,
+        security_github_token: "",
+      }));
       setSecuritySaved(body.values);
       setSecurityMessage("Security settings saved.");
       setSettingsToast("Security settings saved.");
@@ -2404,7 +3057,8 @@ export default function SettingsPage() {
     setDialog({
       kind: "confirm",
       title: "Restore Security & access defaults?",
-      message: "Authentication, network boundary, encryption, throttling, audit, and notification settings will return to their defaults.",
+      message:
+        "Authentication, network boundary, encryption, throttling, audit, and notification settings will return to their defaults.",
       submitLabel: "Restore defaults",
       onSubmit: async () => {
         setDialog(null);
@@ -2425,7 +3079,11 @@ export default function SettingsPage() {
   const saveApi = async () => {
     setApiMessage("");
     const errors = validationErrors(apiSchema, apiSettingsValues(values));
-    if (Object.keys(errors).length) { setApiErrors(errors); setApiMessage("Review the highlighted API settings."); return false; }
+    if (Object.keys(errors).length) {
+      setApiErrors(errors);
+      setApiMessage("Review the highlighted API settings.");
+      return false;
+    }
     setApiErrors({});
     setApiSaving(true);
     const r = await apiRequest("/api/v1/settings/api", {
@@ -2446,13 +3104,16 @@ export default function SettingsPage() {
     setDialog({
       kind: "confirm",
       title: "Restore API defaults?",
-      message: "API access, rate limits, token policy, webhook, and audit settings will return to their defaults.",
+      message:
+        "API access, rate limits, token policy, webhook, and audit settings will return to their defaults.",
       submitLabel: "Restore defaults",
       onSubmit: async () => {
         setDialog(null);
         setApiSaving(true);
         setApiMessage("");
-        const r = await apiRequest("/api/v1/settings/api/reset", { method: "POST" });
+        const r = await apiRequest("/api/v1/settings/api/reset", {
+          method: "POST",
+        });
         if (r.ok) {
           const body = await r.json();
           setValues((current) => ({ ...current, ...body.values }));
@@ -2464,8 +3125,15 @@ export default function SettingsPage() {
     });
   const saveNotifications = async () => {
     setNotificationMessage("");
-    const errors = validationErrors(notificationSchema, notificationSettingsValues(values));
-    if (Object.keys(errors).length) { setNotificationErrors(errors); setNotificationMessage("Review the highlighted notification settings."); return false; }
+    const errors = validationErrors(
+      notificationSchema,
+      notificationSettingsValues(values),
+    );
+    if (Object.keys(errors).length) {
+      setNotificationErrors(errors);
+      setNotificationMessage("Review the highlighted notification settings.");
+      return false;
+    }
     setNotificationErrors({});
     setNotificationSaving(true);
     const r = await apiRequest("/api/v1/settings/notifications", {
@@ -2486,7 +3154,8 @@ export default function SettingsPage() {
     setDialog({
       kind: "confirm",
       title: "Restore Notification defaults?",
-      message: "Delivery channels, event subscriptions, quiet hours, and retention will return to their defaults.",
+      message:
+        "Delivery channels, event subscriptions, quiet hours, and retention will return to their defaults.",
       submitLabel: "Restore defaults",
       onSubmit: async () => {
         setDialog(null);
@@ -2506,8 +3175,15 @@ export default function SettingsPage() {
     });
   const saveCertificates = async () => {
     setCertificateMessage("");
-    const errors = validationErrors(certificateSchema, certificateSettingsValues(values));
-    if (Object.keys(errors).length) { setCertificateErrors(errors); setCertificateMessage("Review the highlighted certificate settings."); return false; }
+    const errors = validationErrors(
+      certificateSchema,
+      certificateSettingsValues(values),
+    );
+    if (Object.keys(errors).length) {
+      setCertificateErrors(errors);
+      setCertificateMessage("Review the highlighted certificate settings.");
+      return false;
+    }
     setCertificateErrors({});
     setCertificateSaving(true);
     const r = await apiRequest("/api/v1/settings/certificates", {
@@ -2528,7 +3204,8 @@ export default function SettingsPage() {
     setDialog({
       kind: "confirm",
       title: "Restore Certificate defaults?",
-      message: "Certificate authority, challenge, renewal, notification, and storage settings will return to their defaults.",
+      message:
+        "Certificate authority, challenge, renewal, notification, and storage settings will return to their defaults.",
       submitLabel: "Restore defaults",
       onSubmit: async () => {
         setDialog(null);
@@ -2548,8 +3225,15 @@ export default function SettingsPage() {
     });
   const saveMaintenance = async () => {
     setMaintenanceMessage("");
-    const errors = validationErrors(maintenanceSchema, maintenanceSettingsValues(values));
-    if (Object.keys(errors).length) { setMaintenanceErrors(errors); setMaintenanceMessage("Review the highlighted maintenance settings."); return false; }
+    const errors = validationErrors(
+      maintenanceSchema,
+      maintenanceSettingsValues(values),
+    );
+    if (Object.keys(errors).length) {
+      setMaintenanceErrors(errors);
+      setMaintenanceMessage("Review the highlighted maintenance settings.");
+      return false;
+    }
     setMaintenanceErrors({});
     setMaintenanceSaving(true);
     const r = await apiRequest("/api/v1/settings/maintenance", {
@@ -2570,7 +3254,8 @@ export default function SettingsPage() {
     setDialog({
       kind: "confirm",
       title: "Restore Maintenance defaults?",
-      message: "Retention, cleanup, maintenance windows, updates, health checks, and recovery settings will return to their defaults.",
+      message:
+        "Retention, cleanup, maintenance windows, updates, health checks, and recovery settings will return to their defaults.",
       submitLabel: "Restore defaults",
       onSubmit: async () => {
         setDialog(null);
@@ -2590,30 +3275,27 @@ export default function SettingsPage() {
     });
   const runLogRotation = async () => {
     setRotationRunning(true);
-    const response = await apiRequest("/api/v1/settings/maintenance/log-rotation/run", { method: "POST" });
+    const response = await apiRequest(
+      "/api/v1/settings/maintenance/log-rotation/run",
+      { method: "POST" },
+    );
     if (response.ok) {
       const body = await response.json();
-      setMaintenanceMessage(`${body.rotated || 0} log file${body.rotated === 1 ? "" : "s"} rotated.`);
+      setMaintenanceMessage(
+        `${body.rotated || 0} log file${body.rotated === 1 ? "" : "s"} rotated.`,
+      );
       setSettingsToast("Log rotation completed.");
     } else {
-      setMaintenanceMessage(await readApiError(response, "Log rotation failed."));
+      setMaintenanceMessage(
+        await readApiError(response, "Log rotation failed."),
+      );
     }
     setRotationRunning(false);
   };
-  const visible = groups.filter(
-    ([id, label, , description]) =>
-      !query ||
-      `${id} ${label} ${description}`
-        .toLowerCase()
-        .includes(query.toLowerCase()),
-  );
   return (
     <div className="space-y-7">
       <div className="flex flex-col items-start justify-between gap-5 xl:flex-row xl:items-end">
         <div>
-          <p className="text-sm font-medium text-neutral-500 dark:text-neutral-400">
-            Control plane
-          </p>
           <h2 className="mt-1 text-4xl font-bold tracking-tight text-neutral-900 dark:text-neutral-100">
             Settings
           </h2>
@@ -2623,38 +3305,27 @@ export default function SettingsPage() {
           </p>
         </div>
       </div>
-      <div className="grid overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-sm dark:border-neutral-800 dark:bg-neutral-900 lg:grid-cols-[18rem_minmax(0,1fr)]">
-        <aside className="border-b border-neutral-200 bg-neutral-50 p-4 dark:border-neutral-800 dark:bg-neutral-950 lg:border-b-0 lg:border-r">
-          <div className="flex items-center gap-2 rounded-md border border-neutral-300 bg-white px-3 py-2.5 text-neutral-400 dark:border-neutral-700 dark:bg-neutral-900">
-            <Search size={16} />
-            <input
-              className="w-full bg-transparent text-sm text-neutral-900 outline-none dark:text-neutral-100"
-              placeholder="Find a setting"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </div>
-          <nav className="mt-3 space-y-1">
-            {visible.map(([id, label, Icon, description]) => (
+      <div>
+        <div className="border-b border-neutral-200 pt-5 dark:border-neutral-800">
+          <nav
+            className="flex gap-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            aria-label="Settings sections"
+          >
+            {groups.map(([id, label, Icon]) => (
               <button
                 key={id}
-                className={`flex w-full items-start gap-3 rounded-md p-3 text-left ${active === id ? "bg-neutral-100 text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100" : "text-neutral-600 hover:bg-white dark:text-neutral-400 dark:hover:bg-neutral-900"}`}
+                type="button"
+                className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-4 pb-3 text-sm font-semibold ${active === id ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200"}`}
                 onClick={() => setActive(id)}
+                aria-current={active === id ? "page" : undefined}
               >
-                <Icon size={17} className="mt-0.5 shrink-0" />
-                <span>
-                  <strong className="block text-sm font-semibold">
-                    {label}
-                  </strong>
-                  <small className="mt-1 block text-xs leading-5 text-neutral-500 dark:text-neutral-400">
-                    {description}
-                  </small>
-                </span>
+                <Icon size={16} />
+                {label}
               </button>
             ))}
           </nav>
-        </aside>
-        <main className="min-w-0 bg-white p-5 dark:bg-neutral-900 md:p-8">
+        </div>
+        <main className="min-w-0 bg-white pt-6 dark:bg-neutral-900">
           {message && (
             <div className="mb-6 rounded-md border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-700 dark:border-neutral-800 dark:bg-neutral-950 dark:text-neutral-300">
               {message}
@@ -2675,6 +3346,8 @@ export default function SettingsPage() {
               dirty={panelDirty}
               message={panelMessage}
             />
+          ) : active === "appearance" ? (
+            <AppearanceTab values={values} onChange={saveAppearanceChange} />
           ) : active === "storage" ? (
             <StorageTab
               values={values}
@@ -2706,6 +3379,7 @@ export default function SettingsPage() {
                 saving={apiSaving}
                 dirty={apiDirty}
                 message={apiMessage}
+                saveLabel="Save API settings"
               />
             </>
           ) : fields[active] ? (

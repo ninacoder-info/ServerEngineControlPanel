@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 FirewallAction = Literal["Allow", "Deny", "Reject"]
 FirewallProtocol = Literal["TCP", "UDP", "TCP / UDP", "ICMP"]
+NftablesPolicy = Literal["accept", "drop"]
 
 
 class FirewallRuleRequest(BaseModel):
@@ -27,6 +28,12 @@ class FirewallRule(FirewallRuleRequest):
 
 class FirewallRulePatch(BaseModel):
     enabled: bool | None = None
+
+
+class NftablesConfigRequest(BaseModel):
+    enabled: bool = True
+    input_policy: NftablesPolicy = "accept"
+    forward_policy: NftablesPolicy = "accept"
 
 
 class PortForwardRequest(BaseModel):

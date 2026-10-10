@@ -22,7 +22,12 @@ function Sparkline({
   fill = "fill-blue-500/10",
 }) {
   const safeValues = values.filter((value) => Number.isFinite(value));
-  const points = safeValues.length > 1 ? safeValues : safeValues.length === 1 ? [0, safeValues[0]] : [0, 0];
+  const points =
+    safeValues.length > 1
+      ? safeValues
+      : safeValues.length === 1
+        ? [0, safeValues[0]]
+        : [0, 0];
   const max = Math.max(...points, 1);
   const min = Math.min(...points, 0);
   const range = max - min || 1;
@@ -141,7 +146,11 @@ export default function ResourceMetricCards() {
         icon={Cpu}
         label="CPU"
         value={cpu ? `${cpu.percent.toFixed(1)}%` : "—"}
-        detail={cpu ? `${t("dashboard.load")} ${cpu.load.toFixed(2)}` : t("dashboard.collectingSample")}
+        detail={
+          cpu
+            ? `${t("dashboard.load")} ${cpu.load.toFixed(2)}`
+            : t("dashboard.collectingSample")
+        }
         values={history.cpu}
         color="text-blue-500"
         fill="fill-blue-500/10"

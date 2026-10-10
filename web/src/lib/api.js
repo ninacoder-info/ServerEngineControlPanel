@@ -1,7 +1,8 @@
 const pendingGetRequests = new Map();
 
 export async function apiRequest(url, options = {}) {
-  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
+  const isFormData =
+    typeof FormData !== "undefined" && options.body instanceof FormData;
   const request = {
     ...options,
     credentials: "include",

@@ -173,7 +173,9 @@ function MySQLGeneral({ service, configText, busy, message, onSave }) {
         </Field>
       </div>
       {message && (
-        <p className="text-sm text-neutral-600 dark:text-neutral-300">{message}</p>
+        <p className="text-sm text-neutral-600 dark:text-neutral-300">
+          {message}
+        </p>
       )}
       <div className="relative flex justify-end gap-3">
         <button
@@ -214,7 +216,9 @@ function MySQLFile({ config, text, setText, message, busy, save, restore }) {
       </div>
       <ConfigEditor path="my.cnf" value={text} onChange={setText} />
       {message && (
-        <p className="text-sm text-neutral-600 dark:text-neutral-300">{message}</p>
+        <p className="text-sm text-neutral-600 dark:text-neutral-300">
+          {message}
+        </p>
       )}
       <div className="relative flex justify-end gap-3">
         <button
@@ -251,7 +255,9 @@ function PHPConfig({ config, text, setText, message, busy, save, restore }) {
       </div>
       <ConfigEditor path="php.ini" value={text} onChange={setText} />
       {message && (
-        <p className="text-sm text-neutral-600 dark:text-neutral-300">{message}</p>
+        <p className="text-sm text-neutral-600 dark:text-neutral-300">
+          {message}
+        </p>
       )}
       <div className="relative flex justify-end gap-3">
         <button
@@ -265,8 +271,28 @@ function PHPConfig({ config, text, setText, message, busy, save, restore }) {
         </button>
         {restoreOpen && (
           <div className="absolute bottom-11 right-0 z-10 min-w-48 rounded-md border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
-            <button type="button" disabled={busy || !config?.has_previous} className="flex w-full cursor-pointer rounded px-3 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-neutral-200 dark:hover:bg-neutral-800" onClick={() => { setRestoreOpen(false); restore("previous"); }}>Previous edit</button>
-            <button type="button" disabled={busy} className="flex w-full cursor-pointer rounded px-3 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-neutral-200 dark:hover:bg-neutral-800" onClick={() => { setRestoreOpen(false); restore("original"); }}>Original configuration</button>
+            <button
+              type="button"
+              disabled={busy || !config?.has_previous}
+              className="flex w-full cursor-pointer rounded px-3 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-neutral-200 dark:hover:bg-neutral-800"
+              onClick={() => {
+                setRestoreOpen(false);
+                restore("previous");
+              }}
+            >
+              Previous edit
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              className="flex w-full cursor-pointer rounded px-3 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-neutral-200 dark:hover:bg-neutral-800"
+              onClick={() => {
+                setRestoreOpen(false);
+                restore("original");
+              }}
+            >
+              Original configuration
+            </button>
           </div>
         )}
         <button
@@ -282,11 +308,17 @@ function PHPConfig({ config, text, setText, message, busy, save, restore }) {
 }
 
 function PHPQuickSettings({ text, save, busy, message }) {
-  const read = (key, fallback) => text.match(new RegExp(`^\\s*${key}\\s*=\\s*(.*?)\\s*$`, "mi"))?.[1]?.trim() || fallback;
+  const read = (key, fallback) =>
+    text
+      .match(new RegExp(`^\\s*${key}\\s*=\\s*(.*?)\\s*$`, "mi"))?.[1]
+      ?.trim() || fallback;
   const [values, setValues] = React.useState(() => ({
     displayErrors: read("display_errors", "Off"),
     logErrors: read("log_errors", "On"),
-    errorReporting: read("error_reporting", "E_ALL & ~E_DEPRECATED & ~E_STRICT"),
+    errorReporting: read(
+      "error_reporting",
+      "E_ALL & ~E_DEPRECATED & ~E_STRICT",
+    ),
     memoryLimit: read("memory_limit", "256M"),
     maxExecutionTime: read("max_execution_time", "120"),
     maxInputTime: read("max_input_time", "120"),
@@ -299,7 +331,10 @@ function PHPQuickSettings({ text, save, busy, message }) {
     setValues({
       displayErrors: read("display_errors", "Off"),
       logErrors: read("log_errors", "On"),
-      errorReporting: read("error_reporting", "E_ALL & ~E_DEPRECATED & ~E_STRICT"),
+      errorReporting: read(
+        "error_reporting",
+        "E_ALL & ~E_DEPRECATED & ~E_STRICT",
+      ),
       memoryLimit: read("memory_limit", "256M"),
       maxExecutionTime: read("max_execution_time", "120"),
       maxInputTime: read("max_input_time", "120"),
@@ -309,7 +344,8 @@ function PHPQuickSettings({ text, save, busy, message }) {
       maxFileUploads: read("max_file_uploads", "20"),
     });
   }, [text]);
-  const set = (key, value) => setValues((current) => ({ ...current, [key]: value }));
+  const set = (key, value) =>
+    setValues((current) => ({ ...current, [key]: value }));
   const saveQuickSettings = () => {
     const replacements = {
       display_errors: values.displayErrors,
@@ -327,43 +363,196 @@ function PHPQuickSettings({ text, save, busy, message }) {
     Object.entries(replacements).forEach(([key, value]) => {
       const pattern = new RegExp(`^\\s*${key}\\s*=.*$`, "mi");
       const line = `${key} = ${value}`;
-      next = pattern.test(next) ? next.replace(pattern, line) : `${next.trimEnd()}\n${line}\n`;
+      next = pattern.test(next)
+        ? next.replace(pattern, line)
+        : `${next.trimEnd()}\n${line}\n`;
     });
     save(next);
   };
   return (
     <div className="space-y-6 pt-5">
       <div>
-        <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">PHP quick settings</h3>
-        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">Common PHP limits and error behavior applied directly to this runtime’s php.ini.</p>
+        <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
+          PHP quick settings
+        </h3>
+        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+          Common PHP limits and error behavior applied directly to this
+          runtime’s php.ini.
+        </p>
       </div>
       <section className="space-y-4">
-        <div><h4 className="font-semibold text-neutral-900 dark:text-neutral-100">Errors and diagnostics</h4><p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">Show errors only for development; keep logging enabled for production troubleshooting.</p></div>
+        <div>
+          <h4 className="font-semibold text-neutral-900 dark:text-neutral-100">
+            Errors and diagnostics
+          </h4>
+          <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+            Show errors only for development; keep logging enabled for
+            production troubleshooting.
+          </p>
+        </div>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Display errors"><select className={`${inputClass} bg-white dark:bg-neutral-900`} value={values.displayErrors} onChange={(event) => set("displayErrors", event.target.value)}><option>Off</option><option>On</option></select></Field>
-          <Field label="Log errors"><select className={`${inputClass} bg-white dark:bg-neutral-900`} value={values.logErrors} onChange={(event) => set("logErrors", event.target.value)}><option>On</option><option>Off</option></select></Field>
-          <Field label="Error reporting"><select className={`${inputClass} bg-white dark:bg-neutral-900`} value={values.errorReporting} onChange={(event) => set("errorReporting", event.target.value)}><option value="E_ALL">All errors</option><option value="E_ALL & ~E_DEPRECATED & ~E_STRICT">All except deprecated</option><option value="E_ERROR | E_PARSE">Fatal errors only</option></select></Field>
+          <Field label="Display errors">
+            <select
+              className={`${inputClass} bg-white dark:bg-neutral-900`}
+              value={values.displayErrors}
+              onChange={(event) => set("displayErrors", event.target.value)}
+            >
+              <option>Off</option>
+              <option>On</option>
+            </select>
+          </Field>
+          <Field label="Log errors">
+            <select
+              className={`${inputClass} bg-white dark:bg-neutral-900`}
+              value={values.logErrors}
+              onChange={(event) => set("logErrors", event.target.value)}
+            >
+              <option>On</option>
+              <option>Off</option>
+            </select>
+          </Field>
+          <Field label="Error reporting">
+            <select
+              className={`${inputClass} bg-white dark:bg-neutral-900`}
+              value={values.errorReporting}
+              onChange={(event) => set("errorReporting", event.target.value)}
+            >
+              <option value="E_ALL">All errors</option>
+              <option value="E_ALL & ~E_DEPRECATED & ~E_STRICT">
+                All except deprecated
+              </option>
+              <option value="E_ERROR | E_PARSE">Fatal errors only</option>
+            </select>
+          </Field>
         </div>
       </section>
       <section className="space-y-4">
-        <div><h4 className="font-semibold text-neutral-900 dark:text-neutral-100">Memory and execution</h4><p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">Set the per-script memory budget and request time limits.</p></div>
+        <div>
+          <h4 className="font-semibold text-neutral-900 dark:text-neutral-100">
+            Memory and execution
+          </h4>
+          <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+            Set the per-script memory budget and request time limits.
+          </p>
+        </div>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Memory limit"><select className={`${inputClass} bg-white dark:bg-neutral-900`} value={values.memoryLimit} onChange={(event) => set("memoryLimit", event.target.value)}><option>128M</option><option>256M</option><option>512M</option><option>1G</option><option>-1</option></select></Field>
-          <Field label="Maximum execution time (seconds)"><input className={inputClass} type="number" min="0" value={values.maxExecutionTime} onChange={(event) => set("maxExecutionTime", event.target.value)} /></Field>
-          <Field label="Maximum input time (seconds)"><input className={inputClass} type="number" min="-1" value={values.maxInputTime} onChange={(event) => set("maxInputTime", event.target.value)} /></Field>
+          <Field label="Memory limit">
+            <select
+              className={`${inputClass} bg-white dark:bg-neutral-900`}
+              value={values.memoryLimit}
+              onChange={(event) => set("memoryLimit", event.target.value)}
+            >
+              <option>128M</option>
+              <option>256M</option>
+              <option>512M</option>
+              <option>1G</option>
+              <option>-1</option>
+            </select>
+          </Field>
+          <Field label="Maximum execution time (seconds)">
+            <input
+              className={inputClass}
+              type="number"
+              min="0"
+              value={values.maxExecutionTime}
+              onChange={(event) => set("maxExecutionTime", event.target.value)}
+            />
+          </Field>
+          <Field label="Maximum input time (seconds)">
+            <input
+              className={inputClass}
+              type="number"
+              min="-1"
+              value={values.maxInputTime}
+              onChange={(event) => set("maxInputTime", event.target.value)}
+            />
+          </Field>
         </div>
       </section>
       <section className="space-y-4">
-        <div><h4 className="font-semibold text-neutral-900 dark:text-neutral-100">Uploads and request input</h4><p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">The POST limit should normally be at least as large as the upload limit.</p></div>
+        <div>
+          <h4 className="font-semibold text-neutral-900 dark:text-neutral-100">
+            Uploads and request input
+          </h4>
+          <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+            The POST limit should normally be at least as large as the upload
+            limit.
+          </p>
+        </div>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Upload max filesize"><select className={`${inputClass} bg-white dark:bg-neutral-900`} value={values.uploadMaxFilesize} onChange={(event) => set("uploadMaxFilesize", event.target.value)}><option>8M</option><option>32M</option><option>64M</option><option>128M</option><option>256M</option><option>512M</option><option>1G</option><option>2G</option><option>5G</option><option>20G</option><option>50G</option></select></Field>
-          <Field label="POST max size"><select className={`${inputClass} bg-white dark:bg-neutral-900`} value={values.postMaxSize} onChange={(event) => set("postMaxSize", event.target.value)}><option>8M</option><option>32M</option><option>64M</option><option>128M</option><option>256M</option><option>512M</option><option>1G</option><option>2G</option><option>5G</option><option>20G</option><option>50G</option></select></Field>
-          <Field label="Maximum file uploads"><input className={inputClass} type="number" min="0" value={values.maxFileUploads} onChange={(event) => set("maxFileUploads", event.target.value)} /></Field>
-          <Field label="Maximum input variables"><input className={inputClass} type="number" min="100" value={values.maxInputVars} onChange={(event) => set("maxInputVars", event.target.value)} /></Field>
+          <Field label="Upload max filesize">
+            <select
+              className={`${inputClass} bg-white dark:bg-neutral-900`}
+              value={values.uploadMaxFilesize}
+              onChange={(event) => set("uploadMaxFilesize", event.target.value)}
+            >
+              <option>8M</option>
+              <option>32M</option>
+              <option>64M</option>
+              <option>128M</option>
+              <option>256M</option>
+              <option>512M</option>
+              <option>1G</option>
+              <option>2G</option>
+              <option>5G</option>
+              <option>20G</option>
+              <option>50G</option>
+            </select>
+          </Field>
+          <Field label="POST max size">
+            <select
+              className={`${inputClass} bg-white dark:bg-neutral-900`}
+              value={values.postMaxSize}
+              onChange={(event) => set("postMaxSize", event.target.value)}
+            >
+              <option>8M</option>
+              <option>32M</option>
+              <option>64M</option>
+              <option>128M</option>
+              <option>256M</option>
+              <option>512M</option>
+              <option>1G</option>
+              <option>2G</option>
+              <option>5G</option>
+              <option>20G</option>
+              <option>50G</option>
+            </select>
+          </Field>
+          <Field label="Maximum file uploads">
+            <input
+              className={inputClass}
+              type="number"
+              min="0"
+              value={values.maxFileUploads}
+              onChange={(event) => set("maxFileUploads", event.target.value)}
+            />
+          </Field>
+          <Field label="Maximum input variables">
+            <input
+              className={inputClass}
+              type="number"
+              min="100"
+              value={values.maxInputVars}
+              onChange={(event) => set("maxInputVars", event.target.value)}
+            />
+          </Field>
         </div>
       </section>
-      {message && <p className="text-sm text-neutral-600 dark:text-neutral-300">{message}</p>}
-      <div className="flex justify-end"><button type="button" disabled={busy} onClick={saveQuickSettings} className="inline-flex items-center justify-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60">{busy ? "Saving…" : "Save quick settings"}</button></div>
+      {message && (
+        <p className="text-sm text-neutral-600 dark:text-neutral-300">
+          {message}
+        </p>
+      )}
+      <div className="flex justify-end">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={saveQuickSettings}
+          className="inline-flex items-center justify-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60"
+        >
+          {busy ? "Saving…" : "Save quick settings"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -486,7 +675,9 @@ function NginxFile({ config, text, setText, message, busy, save, restore }) {
       </div>
       <ConfigEditor path="nginx.conf" value={text} onChange={setText} />
       {message && (
-        <p className="text-sm text-neutral-600 dark:text-neutral-300">{message}</p>
+        <p className="text-sm text-neutral-600 dark:text-neutral-300">
+          {message}
+        </p>
       )}
       <div className="flex justify-end gap-3">
         <button
@@ -650,7 +841,9 @@ function NginxPerformance() {
         />
       </section>
       {message && (
-        <p className="text-sm text-neutral-600 dark:text-neutral-300">{message}</p>
+        <p className="text-sm text-neutral-600 dark:text-neutral-300">
+          {message}
+        </p>
       )}
       <div className="flex justify-end">
         <button
@@ -738,7 +931,9 @@ function MySQLPerformance() {
       </div>
       <div className="grid gap-4 sm:grid-cols-3">
         <div className="rounded-md border border-neutral-200 p-4 dark:border-neutral-700">
-          <p className="text-xs font-medium text-neutral-500">Memory strategy</p>
+          <p className="text-xs font-medium text-neutral-500">
+            Memory strategy
+          </p>
           <p className="mt-1 text-lg font-semibold text-neutral-900 dark:text-neutral-100">
             {bufferPool}% buffer pool
           </p>
@@ -758,7 +953,9 @@ function MySQLPerformance() {
           </p>
         </div>
         <div className="rounded-md border border-neutral-200 p-4 dark:border-neutral-700">
-          <p className="text-xs font-medium text-neutral-500">Query visibility</p>
+          <p className="text-xs font-medium text-neutral-500">
+            Query visibility
+          </p>
           <p className="mt-1 text-lg font-semibold text-neutral-900 dark:text-neutral-100">
             {slowQueries ? `${slowTime}s slow log` : "Disabled"}
           </p>
@@ -905,7 +1102,9 @@ function MySQLPerformance() {
         </span>
       </div>
       {message && (
-        <p className="text-sm text-neutral-600 dark:text-neutral-300">{message}</p>
+        <p className="text-sm text-neutral-600 dark:text-neutral-300">
+          {message}
+        </p>
       )}
       <div className="flex justify-end">
         <button
@@ -934,11 +1133,134 @@ function PHPPerformance({ version }) {
   const [message, setMessage] = React.useState("");
   const applyProfile = (value) => {
     setProfile(value);
-    if (value === "small") { setMaxChildren("8"); setStartServers("1"); setMinSpare("1"); setMaxSpare("3"); setMaxRequests("300"); }
-    if (value === "balanced") { setMaxChildren("20"); setStartServers("2"); setMinSpare("1"); setMaxSpare("5"); setMaxRequests("500"); }
-    if (value === "high-traffic") { setMaxChildren("50"); setStartServers("4"); setMinSpare("4"); setMaxSpare("12"); setMaxRequests("1000"); }
+    if (value === "small") {
+      setMaxChildren("8");
+      setStartServers("1");
+      setMinSpare("1");
+      setMaxSpare("3");
+      setMaxRequests("300");
+    }
+    if (value === "balanced") {
+      setMaxChildren("20");
+      setStartServers("2");
+      setMinSpare("1");
+      setMaxSpare("5");
+      setMaxRequests("500");
+    }
+    if (value === "high-traffic") {
+      setMaxChildren("50");
+      setStartServers("4");
+      setMinSpare("4");
+      setMaxSpare("12");
+      setMaxRequests("1000");
+    }
   };
-  return <div className="space-y-6 pt-5"><div><h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">FPM process pool · PHP {version}</h3><p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">Choose how PHP-FPM creates, keeps, and recycles worker processes.</p></div><section className="space-y-4"><div className="flex flex-wrap gap-2">{[["small", "Small site"], ["balanced", "Balanced"], ["high-traffic", "High traffic"]].map(([value, label]) => <button key={value} type="button" onClick={() => applyProfile(value)} className={`rounded-md border px-3 py-2 text-sm font-medium ${profile === value ? "border-blue-600 bg-blue-600 text-white" : "border-neutral-300 text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"}`}>{label}</button>)}</div><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"><Field label="Process manager"><select className={`${inputClass} bg-white dark:bg-neutral-900`} value={pm} onChange={(event) => setPm(event.target.value)}><option value="dynamic">Dynamic</option><option value="ondemand">On demand</option><option value="static">Static</option></select></Field><Field label="Maximum children"><input className={inputClass} type="number" min="1" value={maxChildren} onChange={(event) => setMaxChildren(event.target.value)} /></Field><Field label="Start servers"><input className={inputClass} type="number" min="1" value={startServers} onChange={(event) => setStartServers(event.target.value)} /></Field><Field label="Minimum spare servers"><input className={inputClass} type="number" min="0" value={minSpare} onChange={(event) => setMinSpare(event.target.value)} /></Field><Field label="Maximum spare servers"><input className={inputClass} type="number" min="1" value={maxSpare} onChange={(event) => setMaxSpare(event.target.value)} /></Field><Field label="Requests per worker"><input className={inputClass} type="number" min="0" value={maxRequests} onChange={(event) => setMaxRequests(event.target.value)} /></Field></div></section>{message && <p className="text-sm text-neutral-600 dark:text-neutral-300">{message}</p>}<div className="flex justify-end"><button type="button" onClick={() => setMessage("FPM process-pool settings are ready. Save php.ini to apply configuration changes.")} className="inline-flex items-center justify-center rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700">Save process-pool settings</button></div></div>;
+  return (
+    <div className="space-y-6 pt-5">
+      <div>
+        <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
+          FPM process pool · PHP {version}
+        </h3>
+        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+          Choose how PHP-FPM creates, keeps, and recycles worker processes.
+        </p>
+      </div>
+      <section className="space-y-4">
+        <div className="flex flex-wrap gap-2">
+          {[
+            ["small", "Small site"],
+            ["balanced", "Balanced"],
+            ["high-traffic", "High traffic"],
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => applyProfile(value)}
+              className={`rounded-md border px-3 py-2 text-sm font-medium ${profile === value ? "border-blue-600 bg-blue-600 text-white" : "border-neutral-300 text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <Field label="Process manager">
+            <select
+              className={`${inputClass} bg-white dark:bg-neutral-900`}
+              value={pm}
+              onChange={(event) => setPm(event.target.value)}
+            >
+              <option value="dynamic">Dynamic</option>
+              <option value="ondemand">On demand</option>
+              <option value="static">Static</option>
+            </select>
+          </Field>
+          <Field label="Maximum children">
+            <input
+              className={inputClass}
+              type="number"
+              min="1"
+              value={maxChildren}
+              onChange={(event) => setMaxChildren(event.target.value)}
+            />
+          </Field>
+          <Field label="Start servers">
+            <input
+              className={inputClass}
+              type="number"
+              min="1"
+              value={startServers}
+              onChange={(event) => setStartServers(event.target.value)}
+            />
+          </Field>
+          <Field label="Minimum spare servers">
+            <input
+              className={inputClass}
+              type="number"
+              min="0"
+              value={minSpare}
+              onChange={(event) => setMinSpare(event.target.value)}
+            />
+          </Field>
+          <Field label="Maximum spare servers">
+            <input
+              className={inputClass}
+              type="number"
+              min="1"
+              value={maxSpare}
+              onChange={(event) => setMaxSpare(event.target.value)}
+            />
+          </Field>
+          <Field label="Requests per worker">
+            <input
+              className={inputClass}
+              type="number"
+              min="0"
+              value={maxRequests}
+              onChange={(event) => setMaxRequests(event.target.value)}
+            />
+          </Field>
+        </div>
+      </section>
+      {message && (
+        <p className="text-sm text-neutral-600 dark:text-neutral-300">
+          {message}
+        </p>
+      )}
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() =>
+            setMessage(
+              "FPM process-pool settings are ready. Save php.ini to apply configuration changes.",
+            )
+          }
+          className="inline-flex items-center justify-center rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+        >
+          Save process-pool settings
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function LegacyPHPPerformance({ version }) {
@@ -1221,7 +1543,9 @@ function LegacyPHPPerformance({ version }) {
         )}
       </section>
       {message && (
-        <p className="text-sm text-neutral-600 dark:text-neutral-300">{message}</p>
+        <p className="text-sm text-neutral-600 dark:text-neutral-300">
+          {message}
+        </p>
       )}
       <div className="flex justify-end">
         <button
@@ -1274,10 +1598,7 @@ export default function ServiceManagerModal({
   }
   if (service.id === "postgresql") {
     return (
-      <PostgreSqlConfigModal
-        installed={installedProp}
-        onClose={onClose}
-      />
+      <PostgreSqlConfigModal installed={installedProp} onClose={onClose} />
     );
   }
   if (service.id === "redis") {
@@ -1290,27 +1611,36 @@ export default function ServiceManagerModal({
     );
   }
   if (service.id === "memcached") {
-    return (
-      <MemcachedConfigModal
-        installed={installedProp}
-        onClose={onClose}
-      />
-    );
+    return <MemcachedConfigModal installed={installedProp} onClose={onClose} />;
   }
   if (service.id === "certbot") {
     return <CertbotConfigModal installed={installedProp} onClose={onClose} />;
   }
   if (service.id === "openlitespeed") {
-    return <OpenLiteSpeedConfigModal installed={installedProp} onClose={onClose} />;
+    return (
+      <OpenLiteSpeedConfigModal installed={installedProp} onClose={onClose} />
+    );
   }
   if (service.id === "caddy") {
-    return <CaddyConfigModal service={service} installed={installedProp} onClose={onClose} />;
+    return (
+      <CaddyConfigModal
+        service={service}
+        installed={installedProp}
+        onClose={onClose}
+      />
+    );
   }
   if (service.id === "haproxy") {
     return <HaProxyConfigModal installed={installedProp} onClose={onClose} />;
   }
   if (service.id === "supervisor") {
-    return <SupervisorConfigModal service={service} installed={installedProp} onClose={onClose} />;
+    return (
+      <SupervisorConfigModal
+        service={service}
+        installed={installedProp}
+        onClose={onClose}
+      />
+    );
   }
   if (service.id === "valkey") {
     return <ValkeyConfigModal installed={installedProp} onClose={onClose} />;
@@ -1319,22 +1649,58 @@ export default function ServiceManagerModal({
     return <Fail2banConfigModal installed={installedProp} onClose={onClose} />;
   }
   if (service.id === "stalwart") {
-    return <StalwartConfigModal service={service} installed={installedProp} onClose={onClose} />;
+    return (
+      <StalwartConfigModal
+        service={service}
+        installed={installedProp}
+        onClose={onClose}
+      />
+    );
   }
   if (service.id === "wp-cli") {
-    return <WpCliConfigModal service={service} installed={installedProp} onClose={onClose} />;
+    return (
+      <WpCliConfigModal
+        service={service}
+        installed={installedProp}
+        onClose={onClose}
+      />
+    );
   }
   if (service.id === "auditd") {
-    return <LinuxAuditConfigModal service={service} installed={installedProp} onClose={onClose} />;
+    return (
+      <LinuxAuditConfigModal
+        service={service}
+        installed={installedProp}
+        onClose={onClose}
+      />
+    );
   }
   if (service.id === "clamav") {
-    return <ClamAvConfigModal service={service} installed={installedProp} onClose={onClose} />;
+    return (
+      <ClamAvConfigModal
+        service={service}
+        installed={installedProp}
+        onClose={onClose}
+      />
+    );
   }
   if (service.id === "sqlserver") {
-    return <SqlServerConfigModal service={service} installed={installedProp} onClose={onClose} />;
+    return (
+      <SqlServerConfigModal
+        service={service}
+        installed={installedProp}
+        onClose={onClose}
+      />
+    );
   }
   if (service.id === "openssl") {
-    return <OpenSslCompatibilityModal service={service} installed={installedProp} onClose={onClose} />;
+    return (
+      <OpenSslCompatibilityModal
+        service={service}
+        installed={installedProp}
+        onClose={onClose}
+      />
+    );
   }
   const initialInstalledItems = Array.isArray(installedProp)
     ? installedProp
@@ -1367,7 +1733,9 @@ export default function ServiceManagerModal({
   const [version, setVersion] = React.useState(
     installed?.version || service.versions[0]?.version || "",
   );
-  const [availableVersions, setAvailableVersions] = React.useState(service.versions);
+  const [availableVersions, setAvailableVersions] = React.useState(
+    service.versions,
+  );
   const [versionsRefreshing, setVersionsRefreshing] = React.useState(false);
   const [confirmed, setConfirmed] = React.useState(false);
   const [config, setConfig] = React.useState(null);
@@ -1375,7 +1743,9 @@ export default function ServiceManagerModal({
   const [logs, setLogs] = React.useState(null);
   const [extensions, setExtensions] = React.useState([]);
   const [extensionsLoading, setExtensionsLoading] = React.useState(false);
-  const [pendingExtensions, setPendingExtensions] = React.useState(() => new Set());
+  const [pendingExtensions, setPendingExtensions] = React.useState(
+    () => new Set(),
+  );
   const [message, setMessage] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [phpTerminalEnabled, setPhpTerminalEnabled] = React.useState(false);
@@ -1387,7 +1757,11 @@ export default function ServiceManagerModal({
   const [phpMyAdminPhpSaving, setPhpMyAdminPhpSaving] = React.useState(false);
   const [mysqlVersions, setMysqlVersions] = React.useState([]);
   const [showInstaller, setShowInstaller] = React.useState(false);
-  const { status: liveStatus, action, setAction } = useServiceSocketStatus(service.id, installed?.status);
+  const {
+    status: liveStatus,
+    action,
+    setAction,
+  } = useServiceSocketStatus(service.id, installed?.status);
   React.useEffect(() => {
     setAvailableVersions(service.versions);
   }, [service.id, service.versions]);
@@ -1435,7 +1809,9 @@ export default function ServiceManagerModal({
       (item) => item?.version,
     )?.version;
     try {
-      const cached = JSON.parse(window.sessionStorage.getItem(cacheKey) || "null");
+      const cached = JSON.parse(
+        window.sessionStorage.getItem(cacheKey) || "null",
+      );
       if (Array.isArray(cached) && cached.length) {
         setAvailableVersions(cached);
         if (installedVersion) {
@@ -1558,11 +1934,13 @@ export default function ServiceManagerModal({
     load();
     const onJobUpdate = (event) => {
       const job = event.detail?.job;
-      if (!job || !["succeeded", "failed", "cancelled"].includes(job.status)) return;
+      if (!job || !["succeeded", "failed", "cancelled"].includes(job.status))
+        return;
       if (/php.*extension|extension.*php/i.test(String(job.type || ""))) load();
     };
     window.addEventListener("serverengine:jobs-updated", onJobUpdate);
-    return () => window.removeEventListener("serverengine:jobs-updated", onJobUpdate);
+    return () =>
+      window.removeEventListener("serverengine:jobs-updated", onJobUpdate);
   }, [isPhp, tab, version]);
   function buildMySQLConfig(values) {
     const sqlMode =
@@ -1712,11 +2090,15 @@ export default function ServiceManagerModal({
       method: "PUT",
       body: JSON.stringify({ php_version: phpMyAdminPhpVersion }),
     });
-    const body = response.ok ? await response.json() : { message: await readApiError(response) };
+    const body = response.ok
+      ? await response.json()
+      : { message: await readApiError(response) };
     setTerminalToast({
       type: response.ok ? "success" : "error",
       message: response.ok
-        ? "phpMyAdmin will use PHP " + phpMyAdminPhpVersion + (body.restart_queued ? ". Restart queued." : ".")
+        ? "phpMyAdmin will use PHP " +
+          phpMyAdminPhpVersion +
+          (body.restart_queued ? ". Restart queued." : ".")
         : body.message || "Unable to save the phpMyAdmin PHP runtime.",
     });
     setPhpMyAdminPhpSaving(false);
@@ -1811,12 +2193,17 @@ export default function ServiceManagerModal({
                 ? "php.ini"
                 : (isMysql || isNginx) && id === "configuration"
                   ? "Overview"
-                : label}
+                  : label}
             </button>
           ))}
         </div>
         {tab === "quick-settings" && isPhp && (
-          <PHPQuickSettings text={text} save={save} busy={busy} message={message} />
+          <PHPQuickSettings
+            text={text}
+            save={save}
+            busy={busy}
+            message={message}
+          />
         )}
         {tab === "php-runtime" && isPhpMyAdmin && (
           <div className="space-y-5 pt-5">
@@ -1825,7 +2212,8 @@ export default function ServiceManagerModal({
                 PHP runtime
               </h3>
               <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
-                Choose the installed PHP 8.x CLI runtime used to serve phpMyAdmin.
+                Choose the installed PHP 8.x CLI runtime used to serve
+                phpMyAdmin.
               </p>
             </div>
             <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
@@ -1833,12 +2221,18 @@ export default function ServiceManagerModal({
               <select
                 className={inputClass + " bg-white dark:bg-neutral-900"}
                 value={phpMyAdminPhpVersion}
-                onChange={(event) => setPhpMyAdminPhpVersion(event.target.value)}
+                onChange={(event) =>
+                  setPhpMyAdminPhpVersion(event.target.value)
+                }
                 disabled={!phpMyAdminPhpVersions.length || phpMyAdminPhpSaving}
               >
-                {!phpMyAdminPhpVersions.length && <option value="">No PHP 8.x runtime installed</option>}
+                {!phpMyAdminPhpVersions.length && (
+                  <option value="">No PHP 8.x runtime installed</option>
+                )}
                 {phpMyAdminPhpVersions.map((phpVersion) => (
-                  <option key={phpVersion} value={phpVersion}>PHP {phpVersion}</option>
+                  <option key={phpVersion} value={phpVersion}>
+                    PHP {phpVersion}
+                  </option>
                 ))}
               </select>
             </label>
@@ -1846,7 +2240,10 @@ export default function ServiceManagerModal({
               Saving restarts phpMyAdmin automatically when it is running.
             </p>
             <div className="flex justify-end">
-              <SaveButton saving={phpMyAdminPhpSaving} onClick={savePhpMyAdminPhpVersion}>
+              <SaveButton
+                saving={phpMyAdminPhpSaving}
+                onClick={savePhpMyAdminPhpVersion}
+              >
                 Save PHP runtime
               </SaveButton>
             </div>
@@ -1906,7 +2303,10 @@ export default function ServiceManagerModal({
         {tab === "extensions" && isPhp && (
           <div className="space-y-1 pt-5">
             {extensionsLoading && (
-              <div className="flex items-center gap-2 py-6 text-sm text-neutral-500 dark:text-neutral-400" aria-live="polite">
+              <div
+                className="flex items-center gap-2 py-6 text-sm text-neutral-500 dark:text-neutral-400"
+                aria-live="polite"
+              >
                 <RefreshCw size={15} className="animate-spin" />
                 Loading PHP extensions…
               </div>
@@ -1957,14 +2357,18 @@ export default function ServiceManagerModal({
                 PHP {version} in Terminal
               </h3>
               <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
-                Enable this version to use the managed PHP runtime by typing <code>php</code> in new local terminal sessions. The server’s existing PHP command is not changed.
+                Enable this version to use the managed PHP runtime by typing{" "}
+                <code>php</code> in new local terminal sessions. The server’s
+                existing PHP command is not changed.
               </p>
             </div>
             <label className="flex cursor-pointer items-start gap-3 border-y border-neutral-200 py-4 dark:border-neutral-800">
               <input
                 type="checkbox"
                 checked={phpTerminalEnabled}
-                onChange={(event) => setPhpTerminalEnabled(event.target.checked)}
+                onChange={(event) =>
+                  setPhpTerminalEnabled(event.target.checked)
+                }
                 className="mt-0.5 h-4 w-4 cursor-pointer accent-blue-600"
               />
               <span>
@@ -1972,7 +2376,8 @@ export default function ServiceManagerModal({
                   Make PHP {version} available as php
                 </span>
                 <span className="mt-1 block text-xs leading-5 text-neutral-500 dark:text-neutral-400">
-                  PHP CLI tools from this isolated version will be placed first in PATH. Reconnect the terminal after saving.
+                  PHP CLI tools from this isolated version will be placed first
+                  in PATH. Reconnect the terminal after saving.
                 </span>
               </span>
             </label>
@@ -1997,7 +2402,8 @@ export default function ServiceManagerModal({
                   MySQL versions
                 </h3>
                 <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
-                  Each release has its own data directory, configuration, logs, and runtime directory. Only the selected default runs.
+                  Each release has its own data directory, configuration, logs,
+                  and runtime directory. Only the selected default runs.
                 </p>
               </div>
               <button
@@ -2010,34 +2416,56 @@ export default function ServiceManagerModal({
               </button>
             </div>
             <div className="divide-y divide-neutral-200 border-y border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
-              {mysqlVersions.length ? mysqlVersions.map((item) => (
-                <div key={`${item.version}-${item.path}`} className="flex items-center justify-between gap-4 py-4">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="font-medium text-neutral-900 dark:text-neutral-100">MySQL {item.version}</p>
-                      {item.active && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">Default</span>}
-                      <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">{item.install_method === "source" ? "Build from source" : "Prebuilt package"}</span>
+              {mysqlVersions.length ? (
+                mysqlVersions.map((item) => (
+                  <div
+                    key={`${item.version}-${item.path}`}
+                    className="flex items-center justify-between gap-4 py-4"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-medium text-neutral-900 dark:text-neutral-100">
+                          MySQL {item.version}
+                        </p>
+                        {item.active && (
+                          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+                            Default
+                          </span>
+                        )}
+                        <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
+                          {item.install_method === "source"
+                            ? "Build from source"
+                            : "Prebuilt package"}
+                        </span>
+                      </div>
+                      <p className="mt-1 truncate text-xs text-neutral-500 dark:text-neutral-400">
+                        {item.path}
+                      </p>
                     </div>
-                    <p className="mt-1 truncate text-xs text-neutral-500 dark:text-neutral-400">{item.path}</p>
+                    {!item.active && (
+                      <button
+                        type="button"
+                        className="shrink-0 cursor-pointer text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400"
+                        onClick={async () => {
+                          const response = await apiRequest(
+                            "/api/v1/services/mysql/default",
+                            {
+                              method: "PUT",
+                              body: JSON.stringify({ version: item.version }),
+                            },
+                          );
+                          if (response.ok) loadMysqlVersions();
+                        }}
+                      >
+                        Make default
+                      </button>
+                    )}
                   </div>
-                  {!item.active && (
-                    <button
-                      type="button"
-                      className="shrink-0 cursor-pointer text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400"
-                      onClick={async () => {
-                        const response = await apiRequest("/api/v1/services/mysql/default", {
-                          method: "PUT",
-                          body: JSON.stringify({ version: item.version }),
-                        });
-                        if (response.ok) loadMysqlVersions();
-                      }}
-                    >
-                      Make default
-                    </button>
-                  )}
-                </div>
-              )) : (
-                <p className="py-6 text-sm text-neutral-500 dark:text-neutral-400">No managed MySQL versions are available yet.</p>
+                ))
+              ) : (
+                <p className="py-6 text-sm text-neutral-500 dark:text-neutral-400">
+                  No managed MySQL versions are available yet.
+                </p>
               )}
             </div>
           </div>
@@ -2111,36 +2539,59 @@ export default function ServiceManagerModal({
                       className="mt-0.5 h-4 w-4 cursor-pointer rounded border-neutral-300 text-blue-600 accent-blue-600 focus:ring-2 focus:ring-blue-500/20 dark:border-neutral-600 dark:bg-neutral-800"
                       type="checkbox"
                       checked={startupEnabled}
-                      onChange={(event) => saveStartupPolicy(event.target.checked)}
+                      onChange={(event) =>
+                        saveStartupPolicy(event.target.checked)
+                      }
                     />
                     <span>
                       <span className="block font-medium text-neutral-900 dark:text-neutral-100">
                         Start with operating system
                       </span>
                       <span className="mt-1 block text-xs leading-5 text-neutral-500 dark:text-neutral-400">
-                        Starts this service automatically when Server Engine starts.
+                        Starts this service automatically when Server Engine
+                        starts.
                       </span>
                     </span>
                   </label>
                 </div>
                 <div className="mb-5 divide-y divide-neutral-200 border-y border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
                   <div className="flex items-center justify-between gap-4 py-3">
-                    <span className="text-sm font-medium text-neutral-600 dark:text-neutral-400">Service state</span>
-                    <span className={`text-sm font-semibold ${running ? "text-emerald-600 dark:text-emerald-400" : "text-neutral-700 dark:text-neutral-300"}`}>
+                    <span className="text-sm font-medium text-neutral-600 dark:text-neutral-400">
+                      Service state
+                    </span>
+                    <span
+                      className={`text-sm font-semibold ${running ? "text-emerald-600 dark:text-emerald-400" : "text-neutral-700 dark:text-neutral-300"}`}
+                    >
                       {running ? "Running" : "Stopped"}
                     </span>
                   </div>
                   <div className="flex items-center justify-between gap-4 py-3">
-                    <span className="text-sm font-medium text-neutral-600 dark:text-neutral-400">Version</span>
-                    <span className="text-sm text-neutral-700 dark:text-neutral-300">{installed?.version ? `v${installed.version}` : "—"}</span>
+                    <span className="text-sm font-medium text-neutral-600 dark:text-neutral-400">
+                      Version
+                    </span>
+                    <span className="text-sm text-neutral-700 dark:text-neutral-300">
+                      {installed?.version ? `v${installed.version}` : "—"}
+                    </span>
                   </div>
                   <div className="flex items-center justify-between gap-4 py-3">
-                    <span className="text-sm font-medium text-neutral-600 dark:text-neutral-400">Configuration</span>
-                    <code className="max-w-[70%] break-all text-right text-xs text-neutral-500 dark:text-neutral-400">{config?.config_path || "Managed service configuration"}</code>
+                    <span className="text-sm font-medium text-neutral-600 dark:text-neutral-400">
+                      Configuration
+                    </span>
+                    <code className="max-w-[70%] break-all text-right text-xs text-neutral-500 dark:text-neutral-400">
+                      {config?.config_path || "Managed service configuration"}
+                    </code>
                   </div>
                   <div className="flex items-center justify-between gap-4 py-3">
-                    <span className="text-sm font-medium text-neutral-600 dark:text-neutral-400">Runtime</span>
-                    <span className="text-sm text-neutral-700 dark:text-neutral-300">{isPhp ? "PHP-FPM pool and socket" : isMysql ? "MySQL server process" : "Managed service process"}</span>
+                    <span className="text-sm font-medium text-neutral-600 dark:text-neutral-400">
+                      Runtime
+                    </span>
+                    <span className="text-sm text-neutral-700 dark:text-neutral-300">
+                      {isPhp
+                        ? "PHP-FPM pool and socket"
+                        : isMysql
+                          ? "MySQL server process"
+                          : "Managed service process"}
+                    </span>
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">

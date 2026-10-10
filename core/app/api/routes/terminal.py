@@ -15,7 +15,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.auth import SESSION_COOKIE
 from app.services.job_service import job_store
-from app.services.service_runtime import composer_path, ensure_composer_launcher, ensure_php_terminal_launcher, prepare_mysql_runtime, service_root
+from app.services.service_runtime import composer_path, ensure_composer_launcher, ensure_php_terminal_launcher, php_cli_path, prepare_mysql_runtime, service_root
 
 router = APIRouter(prefix="/api/v1/terminal", tags=["terminal"])
 
@@ -49,8 +49,8 @@ def resize(fd: int, cols: int, rows: int):
     fcntl.ioctl(fd, termios_ioctl, winsize)
 
 
-def local_runtime_environment() -> dict[str, str]:
-    """Expose installed isolated runtimes to the local management shell."""
+def local_runtime_environment(selected_php_version: str | None = None) -> dict[str, str]:
+    """Expose installed runtimes, optionally selecting PHP for this shell only."""
     environment = os.environ.copy()
     tool_paths = []
     mysql_client = service_root("mysql") / "bin/mysql"
@@ -74,12 +74,31 @@ def local_runtime_environment() -> dict[str, str]:
         return environment
 
     versions = sorted(
-        (item for item in versions_root.iterdir() if item.is_dir() and (item / ".terminal-enabled").exists()),
+        (item for item in versions_root.iterdir() if item.is_dir() and php_cli_path(item.name).is_file()),
         reverse=True,
     )
+    selected_root = next((item for item in versions if item.name == selected_php_version), None) if selected_php_version else None
+    if selected_php_version and not selected_root:
+        selected_php_version = None
+    if selected_root:
+        ensure_php_terminal_launcher(selected_root.name)
+        selected_php = selected_root / "usr/bin/php"
+        if selected_php.exists():
+            environment["SE_SELECTED_PHP"] = str(selected_php)
+            environment["SE_SELECTED_PHP_VERSION"] = selected_root.name
+            environment["PHP_INI_SCAN_DIR"] = str(selected_root / "conf/conf.d")
+            environment["SE_TERMINAL_NOTE"] = "selected"
+            composer_archive = composer_path().parent.parent / "composer.phar"
+            if composer_archive.exists():
+                environment["SE_SELECTED_COMPOSER_PHAR"] = str(composer_archive)
+            wp_root = service_root("wp-cli") / "versions"
+            wp_archives = sorted(wp_root.glob("*/wp-cli.phar"), reverse=True) if wp_root.exists() else []
+            if wp_archives:
+                environment["SE_SELECTED_WP_CLI_PHAR"] = str(wp_archives[0])
     bin_paths = []
     library_paths = []
-    for version_root in versions:
+    ordered_versions = ([selected_root] if selected_root else []) + [item for item in versions if item is not selected_root]
+    for version_root in ordered_versions:
         ensure_php_terminal_launcher(version_root.name)
         for relative in ("usr/bin", "bin"):
             path = version_root / relative
@@ -134,6 +153,7 @@ async def terminal_socket(websocket: WebSocket):
     private_key = str(connection.get("private_key", ""))
     auth_method = str(connection.get("auth_method", "key"))
     password = str(connection.get("password", ""))
+    php_version = str(connection.get("php_version", "")).strip()
     if kind == "remote" and (not host or not username):
         await websocket.send_text("\r\n\x1b[31mRemote connection requires a host and username.\x1b[0m\r\n")
         await websocket.close(code=1008, reason="Invalid remote connection")
@@ -213,13 +233,27 @@ async def terminal_socket(websocket: WebSocket):
             )
         else:
             os.chdir("/")
-            runtime_environment = local_runtime_environment()
+            runtime_environment = local_runtime_environment(php_version or None)
             # Keep managed paths inside this terminal process. Login profiles
             # can replace PATH, so restore the isolated values after loading
             # them without changing the host OS.
             runtime_environment["SE_MANAGED_PATH"] = runtime_environment.get("PATH", "")
             runtime_environment["SE_MANAGED_LD_LIBRARY_PATH"] = runtime_environment.get("LD_LIBRARY_PATH", "")
-            shell = 'export PATH="$SE_MANAGED_PATH"; export LD_LIBRARY_PATH="$SE_MANAGED_LD_LIBRARY_PATH"; unset SE_MANAGED_PATH SE_MANAGED_LD_LIBRARY_PATH; exec bash -i'
+            shell = (
+                'export PATH="$SE_MANAGED_PATH"; '
+                'export LD_LIBRARY_PATH="$SE_MANAGED_LD_LIBRARY_PATH"; '
+                'unset SE_MANAGED_PATH SE_MANAGED_LD_LIBRARY_PATH; '
+                'if [ -n "${SE_SELECTED_PHP:-}" ]; then '
+                '  php() { "$SE_SELECTED_PHP" "$@"; }; export -f php; '
+                '  if [ -n "${SE_SELECTED_COMPOSER_PHAR:-}" ]; then '
+                '    composer() { "$SE_SELECTED_PHP" "$SE_SELECTED_COMPOSER_PHAR" "$@"; }; export -f composer; '
+                '  fi; '
+                '  if [ -n "${SE_SELECTED_WP_CLI_PHAR:-}" ]; then '
+                '    wp() { "$SE_SELECTED_PHP" "$SE_SELECTED_WP_CLI_PHAR" "$@"; }; export -f wp; '
+                '  fi; '
+                '  printf "\\r\\n\\033[36mServer Engine terminal: PHP %s selected; php, composer, and wp-cli use this runtime.\\033[0m\\r\\n" "$SE_SELECTED_PHP_VERSION"; '
+                'fi; exec bash -i'
+            )
             os.execvpe("/bin/bash", ["bash", "-lc", shell], runtime_environment)
 
     os.set_blocking(fd, False)

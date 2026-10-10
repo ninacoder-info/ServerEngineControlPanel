@@ -158,7 +158,11 @@ export default function Fail2banConfigModal({ installed, onClose }) {
   const [busy, setBusy] = React.useState(false);
   const [message, setMessage] = React.useState("");
   const [logs, setLogs] = React.useState(null);
-  const { status: runtimeStatus, action, setAction } = useServiceSocketStatus("fail2ban", current?.status);
+  const {
+    status: runtimeStatus,
+    action,
+    setAction,
+  } = useServiceSocketStatus("fail2ban", current?.status);
   const loadConfig = React.useCallback(
     () =>
       apiRequest("/api/v1/services/fail2ban/configuration")

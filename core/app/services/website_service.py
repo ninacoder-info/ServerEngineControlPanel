@@ -177,6 +177,13 @@ class WebsiteService:
         except (OSError, ValueError):
             return []
 
+    def check_domains(self, domain: str, aliases: list[str] | None = None) -> None:
+        """Validate domain syntax and availability without creating a website."""
+        with self._lock:
+            sites = [Website.model_validate(item) for item in self._read()]
+            primary, normalized_aliases = self._domains(domain, aliases or [])
+            self._ensure_domains_free(sites, [primary, *normalized_aliases])
+
     def certificate_paths(self, site: Website) -> tuple[Path, Path]:
         if site.certificate_path and site.private_key_path:
             return Path(site.certificate_path), Path(site.private_key_path)

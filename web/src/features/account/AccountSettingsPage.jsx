@@ -21,11 +21,19 @@ const tabs = [
   ["recovery", "Recovery", Bell],
 ];
 function Field({ label, description, error, children }) {
-  return <FormField label={label} hint={description} error={error}>{children}</FormField>;
+  return (
+    <FormField label={label} hint={description} error={error}>
+      {children}
+    </FormField>
+  );
 }
 
 const profileSchema = z.object({
-  name: z.string().trim().min(1, "Display name is required.").max(120, "Display name is too long."),
+  name: z
+    .string()
+    .trim()
+    .min(1, "Display name is required.")
+    .max(120, "Display name is too long."),
   email: z.string().trim().email("Enter a valid email address."),
 });
 function Toggle({ label, description, checked, onChange }) {
@@ -106,7 +114,14 @@ export default function AccountSettingsPage({ user }) {
   function saveProfile() {
     const validation = profileSchema.safeParse({ name, email });
     if (!validation.success) {
-      setProfileErrors(Object.fromEntries(validation.error.issues.map((issue) => [issue.path[0], issue.message])));
+      setProfileErrors(
+        Object.fromEntries(
+          validation.error.issues.map((issue) => [
+            issue.path[0],
+            issue.message,
+          ]),
+        ),
+      );
       setMessage("");
       return;
     }
@@ -121,14 +136,29 @@ export default function AccountSettingsPage({ user }) {
     setPasskeyBusy(true);
     setMessage("");
     try {
-      const optionsResponse = await apiRequest("/api/v1/auth/passkey/register/options", { method: "POST" });
-      if (!optionsResponse.ok) throw new Error(await readApiError(optionsResponse, "Unable to begin passkey registration."));
+      const optionsResponse = await apiRequest(
+        "/api/v1/auth/passkey/register/options",
+        { method: "POST" },
+      );
+      if (!optionsResponse.ok)
+        throw new Error(
+          await readApiError(
+            optionsResponse,
+            "Unable to begin passkey registration.",
+          ),
+        );
       const credential = await createPasskey(await optionsResponse.json());
-      const response = await apiRequest("/api/v1/auth/passkey/register/verify", {
-        method: "POST",
-        body: JSON.stringify({ credential }),
-      });
-      if (!response.ok) throw new Error(await readApiError(response, "Unable to register passkey."));
+      const response = await apiRequest(
+        "/api/v1/auth/passkey/register/verify",
+        {
+          method: "POST",
+          body: JSON.stringify({ credential }),
+        },
+      );
+      if (!response.ok)
+        throw new Error(
+          await readApiError(response, "Unable to register passkey."),
+        );
       setSecurity((values) => ({ ...values, passkeys: true }));
       setMessage("Passkey registered. You can use it on the next sign-in.");
     } catch (error) {
@@ -188,7 +218,10 @@ export default function AccountSettingsPage({ user }) {
                       value={name}
                       onChange={(e) => {
                         setName(e.target.value);
-                        setProfileErrors((current) => ({ ...current, name: "" }));
+                        setProfileErrors((current) => ({
+                          ...current,
+                          name: "",
+                        }));
                       }}
                     />
                   </Field>
@@ -203,7 +236,10 @@ export default function AccountSettingsPage({ user }) {
                       value={email}
                       onChange={(e) => {
                         setEmail(e.target.value);
-                        setProfileErrors((current) => ({ ...current, email: "" }));
+                        setProfileErrors((current) => ({
+                          ...current,
+                          email: "",
+                        }));
                       }}
                     />
                   </Field>

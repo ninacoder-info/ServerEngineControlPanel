@@ -230,6 +230,53 @@ class FileManagerService:
             copied.append(self._entry(target))
         return copied
 
+    def copy_conflicts(self, paths: list[str], destination: str) -> list[str]:
+        target_dir = self.safe_path(destination)
+        if not target_dir.is_dir():
+            raise HTTPException(status_code=404, detail="Destination folder not found")
+        conflicts = []
+        for relative in paths:
+            source = self.safe_path(relative)
+            target = target_dir / source.name
+            if source != target.resolve() and target.exists():
+                conflicts.append(source.name)
+        return conflicts
+
+    def move(self, paths: list[str], destination: str, overwrite: bool = False) -> list[FileEntry]:
+        self._managed_account()
+        target_dir = self.safe_path(destination)
+        if not target_dir.is_dir():
+            raise HTTPException(status_code=404, detail="Destination folder not found")
+        sources = [(self.safe_path(relative), relative) for relative in paths]
+        targets = [(source, target_dir / source.name) for source, _ in sources]
+        for source, target in targets:
+            if source == self.root:
+                raise HTTPException(status_code=400, detail="The file manager root cannot be moved")
+            if target.resolve() == source.resolve():
+                continue
+            if source.is_dir():
+                try:
+                    target_dir.resolve().relative_to(source.resolve())
+                except ValueError:
+                    pass
+                else:
+                    raise HTTPException(status_code=400, detail="A folder cannot be moved into itself")
+            if target.exists() and not overwrite:
+                raise HTTPException(status_code=409, detail={"message": "Destination already contains one or more selected items", "conflicts": [item.name for _, item in targets if item.exists()]})
+        moved = []
+        for source, target in targets:
+            if target.resolve() == source.resolve():
+                continue
+            if target.exists() and overwrite:
+                if target.is_dir() and not target.is_symlink():
+                    shutil.rmtree(target)
+                else:
+                    target.unlink()
+            shutil.move(str(source), str(target))
+            self._set_managed_owner(target, recursive=target.is_dir())
+            moved.append(self._entry(target))
+        return moved
+
     def archive(self, paths: list[str], destination: str, name: str) -> FileEntry:
         self._managed_account()
         if not name.endswith(".zip"):
@@ -289,20 +336,7 @@ class FileManagerService:
             raise HTTPException(status_code=404, detail="File not found")
         if len(content.encode()) > 2_000_000:
             raise HTTPException(status_code=400, detail="Files up to 2 MB can be edited")
-        backup = target.with_name(f".{target.name}.serverengine.bak")
-        shutil.copy2(target, backup)
         target.write_text(content)
-        self._set_managed_owner(target)
-        self._set_managed_owner(backup)
-        return self._entry(target)
-
-    def restore_file(self, relative: str) -> FileEntry:
-        self._managed_account()
-        target = self.safe_path(relative)
-        backup = target.with_name(f".{target.name}.serverengine.bak")
-        if not backup.is_file():
-            raise HTTPException(status_code=404, detail="No Server Engine backup exists for this file")
-        shutil.copy2(backup, target)
         self._set_managed_owner(target)
         return self._entry(target)
 

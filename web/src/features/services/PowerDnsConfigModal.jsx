@@ -374,7 +374,10 @@ function Runtime({ current, runtimeStatus, action, onAction, configPath }) {
         <StartupPolicyToggle serviceId="powerdns" />
       </div>
       <div className="space-y-0">
-        <Row label="Status" value={runtimeStatus || current?.status || "unknown"} />
+        <Row
+          label="Status"
+          value={runtimeStatus || current?.status || "unknown"}
+        />
         <Row
           label="Version"
           value={current?.version ? `v${current.version}` : "—"}
@@ -419,7 +422,11 @@ export default function PowerDnsConfigModal({ service, installed, onClose }) {
   const [values, setValues] = React.useState(defaults);
   const [busy, setBusy] = React.useState(false);
   const [logs, setLogs] = React.useState(null);
-  const { status: runtimeStatus, action, setAction } = useServiceSocketStatus("powerdns", current?.status);
+  const {
+    status: runtimeStatus,
+    action,
+    setAction,
+  } = useServiceSocketStatus("powerdns", current?.status);
 
   const loadConfig = React.useCallback(() => {
     apiRequest("/api/v1/services/powerdns/configuration")

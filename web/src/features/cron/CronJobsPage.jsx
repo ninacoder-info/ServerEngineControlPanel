@@ -39,16 +39,48 @@ const emptyForm = {
   enabled: true,
 };
 const cronSchema = z.object({
-  name: z.string().trim().min(1, "Task name is required.").max(120, "Task name is too long."),
+  name: z
+    .string()
+    .trim()
+    .min(1, "Task name is required.")
+    .max(120, "Task name is too long."),
   group: z.enum(["Website", "Backup", "System", "Security"]),
   owner: z.enum(["serverengine", "www-data", "root"]),
-  minute: z.string().trim().min(1, "Minute is required.").regex(/^[0-9*/?,\-]+$/, "Use a valid cron value."),
-  hour: z.string().trim().min(1, "Hour is required.").regex(/^[0-9*/?,\-]+$/, "Use a valid cron value."),
-  day: z.string().trim().min(1, "Day is required.").regex(/^[0-9*/?,\-]+$/, "Use a valid cron value."),
-  month: z.string().trim().min(1, "Month is required.").regex(/^[0-9*/?,\-]+$/, "Use a valid cron value."),
-  weekday: z.string().trim().min(1, "Weekday is required.").regex(/^[0-9*/?,\-]+$/, "Use a valid cron value."),
-  command: z.string().trim().min(1, "Command is required.").max(4096, "Command is too long."),
-  email: z.string().trim().email("Enter a valid notification email.").or(z.literal("")),
+  minute: z
+    .string()
+    .trim()
+    .min(1, "Minute is required.")
+    .regex(/^[0-9*/?,\-]+$/, "Use a valid cron value."),
+  hour: z
+    .string()
+    .trim()
+    .min(1, "Hour is required.")
+    .regex(/^[0-9*/?,\-]+$/, "Use a valid cron value."),
+  day: z
+    .string()
+    .trim()
+    .min(1, "Day is required.")
+    .regex(/^[0-9*/?,\-]+$/, "Use a valid cron value."),
+  month: z
+    .string()
+    .trim()
+    .min(1, "Month is required.")
+    .regex(/^[0-9*/?,\-]+$/, "Use a valid cron value."),
+  weekday: z
+    .string()
+    .trim()
+    .min(1, "Weekday is required.")
+    .regex(/^[0-9*/?,\-]+$/, "Use a valid cron value."),
+  command: z
+    .string()
+    .trim()
+    .min(1, "Command is required.")
+    .max(4096, "Command is too long."),
+  email: z
+    .string()
+    .trim()
+    .email("Enter a valid notification email.")
+    .or(z.literal("")),
   enabled: z.boolean(),
 });
 
@@ -103,7 +135,14 @@ function JobModal({ job, onClose, onSave }) {
             event.preventDefault();
             const validation = cronSchema.safeParse(form);
             if (!validation.success) {
-              setFieldErrors(Object.fromEntries(validation.error.issues.map((issue) => [issue.path[0], issue.message])));
+              setFieldErrors(
+                Object.fromEntries(
+                  validation.error.issues.map((issue) => [
+                    issue.path[0],
+                    issue.message,
+                  ]),
+                ),
+              );
               setError("");
               return;
             }
@@ -121,7 +160,13 @@ function JobModal({ job, onClose, onSave }) {
               <input
                 className={input}
                 value={form.name}
-                onChange={(event) => { set("name", event.target.value); setFieldErrors((current) => ({ ...current, name: undefined })); }}
+                onChange={(event) => {
+                  set("name", event.target.value);
+                  setFieldErrors((current) => ({
+                    ...current,
+                    name: undefined,
+                  }));
+                }}
                 placeholder="Laravel scheduler"
               />
             </FormField>
@@ -155,7 +200,13 @@ function JobModal({ job, onClose, onSave }) {
                 type="email"
                 className={input}
                 value={form.email || ""}
-                onChange={(event) => { set("email", event.target.value); setFieldErrors((current) => ({ ...current, email: undefined })); }}
+                onChange={(event) => {
+                  set("email", event.target.value);
+                  setFieldErrors((current) => ({
+                    ...current,
+                    email: undefined,
+                  }));
+                }}
                 placeholder="Optional"
               />
             </FormField>
@@ -180,7 +231,13 @@ function JobModal({ job, onClose, onSave }) {
                   <input
                     className={input}
                     value={form[key]}
-                    onChange={(event) => { set(key, event.target.value); setFieldErrors((current) => ({ ...current, [key]: undefined })); }}
+                    onChange={(event) => {
+                      set(key, event.target.value);
+                      setFieldErrors((current) => ({
+                        ...current,
+                        [key]: undefined,
+                      }));
+                    }}
                   />
                 </label>
               ))}
@@ -197,7 +254,13 @@ function JobModal({ job, onClose, onSave }) {
               rows={3}
               className={`${input} font-mono`}
               value={form.command}
-              onChange={(event) => { set("command", event.target.value); setFieldErrors((current) => ({ ...current, command: undefined })); }}
+              onChange={(event) => {
+                set("command", event.target.value);
+                setFieldErrors((current) => ({
+                  ...current,
+                  command: undefined,
+                }));
+              }}
               placeholder="cd /server-engine/www/example.com && php artisan schedule:run"
             />
           </FormField>
@@ -248,16 +311,74 @@ function CronJobsSkeleton() {
         <div className="h-10 w-32 rounded-md bg-neutral-200 dark:bg-neutral-800" />
       </header>
       <section className="flex flex-col justify-between gap-3 rounded-lg border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900 sm:flex-row sm:items-center">
-        <div className="flex items-center gap-3"><div className="h-3 w-3 rounded-full bg-neutral-200 dark:bg-neutral-800" /><div className="space-y-2"><div className="h-4 w-40 rounded bg-neutral-200 dark:bg-neutral-800" /><div className="h-3 w-56 rounded bg-neutral-100 dark:bg-neutral-800/70" /></div></div>
-        <div className="flex gap-2"><div className="h-8 w-20 rounded bg-neutral-100 dark:bg-neutral-800/70" /><div className="h-8 w-20 rounded bg-neutral-100 dark:bg-neutral-800/70" /><div className="h-8 w-20 rounded bg-neutral-100 dark:bg-neutral-800/70" /></div>
+        <div className="flex items-center gap-3">
+          <div className="h-3 w-3 rounded-full bg-neutral-200 dark:bg-neutral-800" />
+          <div className="space-y-2">
+            <div className="h-4 w-40 rounded bg-neutral-200 dark:bg-neutral-800" />
+            <div className="h-3 w-56 rounded bg-neutral-100 dark:bg-neutral-800/70" />
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <div className="h-8 w-20 rounded bg-neutral-100 dark:bg-neutral-800/70" />
+          <div className="h-8 w-20 rounded bg-neutral-100 dark:bg-neutral-800/70" />
+          <div className="h-8 w-20 rounded bg-neutral-100 dark:bg-neutral-800/70" />
+        </div>
       </section>
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, index) => <div key={index} className="rounded-lg border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900"><div className="h-5 w-5 rounded bg-neutral-200 dark:bg-neutral-800" /><div className="mt-3 h-7 w-16 rounded bg-neutral-200 dark:bg-neutral-800" /><div className="mt-2 h-3 w-24 rounded bg-neutral-100 dark:bg-neutral-800/70" /></div>)}
+        {Array.from({ length: 4 }).map((_, index) => (
+          <div
+            key={index}
+            className="rounded-lg border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900"
+          >
+            <div className="h-5 w-5 rounded bg-neutral-200 dark:bg-neutral-800" />
+            <div className="mt-3 h-7 w-16 rounded bg-neutral-200 dark:bg-neutral-800" />
+            <div className="mt-2 h-3 w-24 rounded bg-neutral-100 dark:bg-neutral-800/70" />
+          </div>
+        ))}
       </section>
       <section className="overflow-hidden rounded-lg border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
-        <div className="flex gap-6 border-b border-neutral-200 px-4 pt-4 dark:border-neutral-800">{Array.from({ length: 5 }).map((_, index) => <div key={index} className="mb-3 h-4 w-20 rounded bg-neutral-200 dark:bg-neutral-800" />)}</div>
-        <div className="p-4"><div className="flex justify-between gap-4"><div className="space-y-2"><div className="h-5 w-40 rounded bg-neutral-200 dark:bg-neutral-800" /><div className="h-3 w-64 rounded bg-neutral-100 dark:bg-neutral-800/70" /></div><div className="h-9 w-72 rounded bg-neutral-100 dark:bg-neutral-800/70" /></div>
-          <div className="mt-5 overflow-hidden"><div className="grid grid-cols-7 gap-4 border-b border-neutral-200 px-3 py-3 dark:border-neutral-800">{Array.from({ length: 7 }).map((_, index) => <div key={index} className="h-3 rounded bg-neutral-100 dark:bg-neutral-800/70" />)}</div><div className="divide-y divide-neutral-100 dark:divide-neutral-800">{Array.from({ length: 5 }).map((_, index) => <div key={index} className="grid grid-cols-7 items-center gap-4 px-3 py-5"><div className="h-4 w-28 rounded bg-neutral-200 dark:bg-neutral-800" /><div className="h-4 w-20 rounded bg-neutral-100 dark:bg-neutral-800/70" /><div className="h-3 w-32 rounded bg-neutral-100 dark:bg-neutral-800/70" /><div className="h-3 w-24 rounded bg-neutral-100 dark:bg-neutral-800/70" /><div className="h-3 w-24 rounded bg-neutral-100 dark:bg-neutral-800/70" /><div className="h-4 w-16 rounded bg-neutral-100 dark:bg-neutral-800/70" /><div className="ml-auto h-8 w-8 rounded-full bg-neutral-100 dark:bg-neutral-800/70" /></div>)}</div></div>
+        <div className="flex gap-6 border-b border-neutral-200 px-4 pt-4 dark:border-neutral-800">
+          {Array.from({ length: 5 }).map((_, index) => (
+            <div
+              key={index}
+              className="mb-3 h-4 w-20 rounded bg-neutral-200 dark:bg-neutral-800"
+            />
+          ))}
+        </div>
+        <div className="p-4">
+          <div className="flex justify-between gap-4">
+            <div className="space-y-2">
+              <div className="h-5 w-40 rounded bg-neutral-200 dark:bg-neutral-800" />
+              <div className="h-3 w-64 rounded bg-neutral-100 dark:bg-neutral-800/70" />
+            </div>
+            <div className="h-9 w-72 rounded bg-neutral-100 dark:bg-neutral-800/70" />
+          </div>
+          <div className="mt-5 overflow-hidden">
+            <div className="grid grid-cols-7 gap-4 border-b border-neutral-200 px-3 py-3 dark:border-neutral-800">
+              {Array.from({ length: 7 }).map((_, index) => (
+                <div
+                  key={index}
+                  className="h-3 rounded bg-neutral-100 dark:bg-neutral-800/70"
+                />
+              ))}
+            </div>
+            <div className="divide-y divide-neutral-100 dark:divide-neutral-800">
+              {Array.from({ length: 5 }).map((_, index) => (
+                <div
+                  key={index}
+                  className="grid grid-cols-7 items-center gap-4 px-3 py-5"
+                >
+                  <div className="h-4 w-28 rounded bg-neutral-200 dark:bg-neutral-800" />
+                  <div className="h-4 w-20 rounded bg-neutral-100 dark:bg-neutral-800/70" />
+                  <div className="h-3 w-32 rounded bg-neutral-100 dark:bg-neutral-800/70" />
+                  <div className="h-3 w-24 rounded bg-neutral-100 dark:bg-neutral-800/70" />
+                  <div className="h-3 w-24 rounded bg-neutral-100 dark:bg-neutral-800/70" />
+                  <div className="h-4 w-16 rounded bg-neutral-100 dark:bg-neutral-800/70" />
+                  <div className="ml-auto h-8 w-8 rounded-full bg-neutral-100 dark:bg-neutral-800/70" />
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </section>
     </div>
@@ -385,7 +506,9 @@ export default function CronJobsPage() {
   const panelJobs = jobs.filter((job) => job.group !== "Backup");
   const visible = jobs.filter(
     (job) =>
-      (group === "Panel tasks" ? job.group !== "Backup" : job.group === group) &&
+      (group === "Panel tasks"
+        ? job.group !== "Backup"
+        : job.group === group) &&
       (status === "all" ||
         (status === "enabled" ? job.enabled : !job.enabled)) &&
       `${job.name} ${job.command} ${job.owner} ${job.group}`
@@ -459,7 +582,9 @@ export default function CronJobsPage() {
               type="button"
               title={scheduler.running ? "Stop scheduler" : "Start scheduler"}
               className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-neutral-300 px-2.5 py-1.5 text-xs font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
-              onClick={() => schedulerAction(scheduler.running ? "stop" : "start")}
+              onClick={() =>
+                schedulerAction(scheduler.running ? "stop" : "start")
+              }
             >
               {scheduler.running ? <Square size={13} /> : <Play size={13} />}
               {scheduler.running ? "Stop" : "Start"}
@@ -754,13 +879,45 @@ export default function CronJobsPage() {
           <section className="w-full max-w-3xl rounded-xl bg-white shadow-xl dark:bg-neutral-900">
             <div className="flex items-start justify-between gap-4 border-b border-neutral-200 px-5 py-4 dark:border-neutral-800">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Job logs</p>
-                <h2 className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">{logJob.name}</h2>
+                <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">
+                  Job logs
+                </p>
+                <h2 className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">
+                  {logJob.name}
+                </h2>
               </div>
-              <button type="button" aria-label="Close job logs" className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200" onClick={() => setLogJob(null)}><X size={17} /></button>
+              <button
+                type="button"
+                aria-label="Close job logs"
+                className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+                onClick={() => setLogJob(null)}
+              >
+                <X size={17} />
+              </button>
             </div>
             <div className="max-h-[65vh] space-y-3 overflow-y-auto p-5">
-              {jobLogs.length ? jobLogs.map((entry) => <article key={entry.id} className="rounded-md border border-neutral-200 p-3 dark:border-neutral-800"><div className="flex flex-wrap items-center justify-between gap-2 text-xs text-neutral-500 dark:text-neutral-400"><span>{entry.started_at} · exit {entry.exit_code ?? "—"}</span><Result value={entry.status} /></div><pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded bg-neutral-950 p-3 text-xs leading-5 text-neutral-200">{entry.output || "No output recorded."}</pre></article>) : <p className="py-10 text-center text-sm text-neutral-500 dark:text-neutral-400">This job has not run yet.</p>}
+              {jobLogs.length ? (
+                jobLogs.map((entry) => (
+                  <article
+                    key={entry.id}
+                    className="rounded-md border border-neutral-200 p-3 dark:border-neutral-800"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+                      <span>
+                        {entry.started_at} · exit {entry.exit_code ?? "—"}
+                      </span>
+                      <Result value={entry.status} />
+                    </div>
+                    <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded bg-neutral-950 p-3 text-xs leading-5 text-neutral-200">
+                      {entry.output || "No output recorded."}
+                    </pre>
+                  </article>
+                ))
+              ) : (
+                <p className="py-10 text-center text-sm text-neutral-500 dark:text-neutral-400">
+                  This job has not run yet.
+                </p>
+              )}
             </div>
           </section>
         </div>

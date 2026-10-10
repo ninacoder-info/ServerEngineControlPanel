@@ -93,6 +93,11 @@ class WebsiteCreateRequest(BaseModel):
     tags: list[str] = Field(default_factory=list, max_length=30)
 
 
+class WebsiteDomainCheckRequest(BaseModel):
+    domain: str = Field(min_length=3, max_length=253)
+    aliases: list[str] = Field(default_factory=list, max_length=50)
+
+
 class WebsiteDeployRequest(WebsiteCreateRequest):
     """Validated input for a one-click application deployment."""
 

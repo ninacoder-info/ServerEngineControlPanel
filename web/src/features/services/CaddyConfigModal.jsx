@@ -166,7 +166,11 @@ export default function CaddyConfigModal({ service, installed, onClose }) {
   const [caddyVersions, setCaddyVersions] = React.useState([]);
   const [activeCaddyVersion, setActiveCaddyVersion] = React.useState("");
   const [showInstaller, setShowInstaller] = React.useState(false);
-  const { status: runtimeStatus, action, setAction } = useServiceSocketStatus("caddy", current?.status);
+  const {
+    status: runtimeStatus,
+    action,
+    setAction,
+  } = useServiceSocketStatus("caddy", current?.status);
   const loadCaddyVersions = React.useCallback(() => {
     apiRequest("/api/v1/services/caddy/versions")
       .then((response) => (response.ok ? response.json() : null))
@@ -310,7 +314,8 @@ export default function CaddyConfigModal({ service, installed, onClose }) {
                     Caddy versions
                   </h3>
                   <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
-                    Install a prebuilt Caddy binary or build one with the Application Shield adapter. Only the selected default runs.
+                    Install a prebuilt Caddy binary or build one with the
+                    Application Shield adapter. Only the selected default runs.
                   </p>
                 </div>
                 <button
@@ -323,24 +328,47 @@ export default function CaddyConfigModal({ service, installed, onClose }) {
                 </button>
               </div>
               <div className="divide-y divide-neutral-200 border-y border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
-                {caddyVersions.length ? caddyVersions.map((item) => (
-                  <div key={`${item.version}-${item.path}`} className="flex items-center justify-between gap-4 py-4">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="font-medium text-neutral-900 dark:text-neutral-100">Caddy {item.version}</p>
-                        {item.active && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">Default</span>}
-                        <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">{item.install_method === "source" ? "Build from source" : "Prebuilt package"}</span>
+                {caddyVersions.length ? (
+                  caddyVersions.map((item) => (
+                    <div
+                      key={`${item.version}-${item.path}`}
+                      className="flex items-center justify-between gap-4 py-4"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="font-medium text-neutral-900 dark:text-neutral-100">
+                            Caddy {item.version}
+                          </p>
+                          {item.active && (
+                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+                              Default
+                            </span>
+                          )}
+                          <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
+                            {item.install_method === "source"
+                              ? "Build from source"
+                              : "Prebuilt package"}
+                          </span>
+                        </div>
+                        <p className="mt-1 truncate text-xs text-neutral-500 dark:text-neutral-400">
+                          {item.path}
+                        </p>
                       </div>
-                      <p className="mt-1 truncate text-xs text-neutral-500 dark:text-neutral-400">{item.path}</p>
+                      {!item.active && (
+                        <button
+                          type="button"
+                          className="shrink-0 cursor-pointer text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400"
+                          onClick={() => makeDefault(item.version)}
+                        >
+                          Make default
+                        </button>
+                      )}
                     </div>
-                    {!item.active && (
-                      <button type="button" className="shrink-0 cursor-pointer text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400" onClick={() => makeDefault(item.version)}>
-                        Make default
-                      </button>
-                    )}
-                  </div>
-                )) : (
-                  <p className="py-6 text-sm text-neutral-500 dark:text-neutral-400">No managed Caddy versions are available yet.</p>
+                  ))
+                ) : (
+                  <p className="py-6 text-sm text-neutral-500 dark:text-neutral-400">
+                    No managed Caddy versions are available yet.
+                  </p>
                 )}
               </div>
             </div>
@@ -633,7 +661,13 @@ export default function CaddyConfigModal({ service, installed, onClose }) {
       </section>
       {showInstaller && (
         <InstallServiceModal
-          service={service || { id: "caddy", name: "Caddy", install_methods: ["prebuilt", "source"] }}
+          service={
+            service || {
+              id: "caddy",
+              name: "Caddy",
+              install_methods: ["prebuilt", "source"],
+            }
+          }
           onClose={() => {
             setShowInstaller(false);
             loadCaddyVersions();

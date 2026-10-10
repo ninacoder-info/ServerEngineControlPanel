@@ -95,7 +95,7 @@ class ProxyRoute(BaseModel):
 
 
 class ProxyRouteCreateRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=120, pattern=r"^[A-Za-z0-9][A-Za-z0-9 ._-]*$")
+    name: str = Field(default="", max_length=120, pattern=r"^[A-Za-z0-9][A-Za-z0-9 ._-]*$|^$")
     domain: str = Field(min_length=3, max_length=253)
     target: str = Field(min_length=1, max_length=2048)
     path: str = Field(default="/", max_length=2048)
@@ -131,9 +131,11 @@ class ProxyRouteCreateRequest(BaseModel):
 
 
 class ProxyCertificateRequest(BaseModel):
-    method: Literal["upload"] = "upload"
-    certificate: str = Field(min_length=1, max_length=200000)
-    private_key: str = Field(min_length=1, max_length=200000)
+    method: Literal["acme", "upload"] = "upload"
+    email: str = Field(default="", max_length=320)
+    staging: bool = False
+    certificate: str = Field(default="", max_length=200000)
+    private_key: str = Field(default="", max_length=200000)
 
 
 class NodeProjectActionRequest(BaseModel):

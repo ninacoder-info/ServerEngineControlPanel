@@ -9,9 +9,11 @@ export default function PhpRuntimeInfoPage() {
   // DashboardPage renders this screen from its pathname switch, so there is
   // no React Router `:version` param in that path. Read the same URL segment
   // as a fallback for production and development builds.
-  const version = routeVersion || decodeURIComponent(
-    location.pathname.match(/^\/services\/php\/([^/]+)\/info$/)?.[1] || "",
-  );
+  const version =
+    routeVersion ||
+    decodeURIComponent(
+      location.pathname.match(/^\/services\/php\/([^/]+)\/info$/)?.[1] || "",
+    );
   const encodedVersion = encodeURIComponent(version);
   const infoUrl = `/api/v1/services/php/versions/info?version=${encodedVersion}`;
 

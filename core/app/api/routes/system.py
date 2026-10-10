@@ -397,6 +397,7 @@ def server_info(user=Depends(require_user)):
             "total": disk.total,
             "used": disk.total - disk.free,
             "free": disk.free,
+            "percent": round((disk.total - disk.free) / disk.total * 100, 1) if disk.total else 0,
         },
         "server_engine": {"version": APP_VERSION, "python": platform.python_version()},
         "collected_at": datetime.now(timezone.utc),

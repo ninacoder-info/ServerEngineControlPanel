@@ -17,6 +17,7 @@ from app.models.firewall import (
     FirewallRule,
     FirewallRulePatch,
     FirewallRuleRequest,
+    NftablesConfigRequest,
     FirewallAlias,
     FirewallAliasPatch,
     FirewallAliasRequest,
@@ -40,6 +41,11 @@ _DEFAULT_RULES = [
     {"id": "ssh", "enabled": True, "action": "Allow", "protocol": "TCP", "source": "Any", "destination": "Any", "service": "SSH", "port": "22", "interface": "WAN", "states": 8, "note": "Review source restriction"},
     {"id": "blocklist", "enabled": True, "action": "Deny", "protocol": "TCP", "source": "Threat blocklist", "destination": "Any", "service": "All services", "port": "Any", "interface": "WAN", "states": 317, "note": "Automated protection"},
 ]
+_DEFAULT_NFTABLES_CONFIG = {
+    "enabled": True,
+    "input_policy": "accept",
+    "forward_policy": "accept",
+}
 
 
 class FirewallService:
@@ -55,6 +61,7 @@ class FirewallService:
             rules = self._read()
             backend = self._backend_status()
             state = self._read_state()
+            nftables = self._nftables_config_from_state(state)
             forwardings = self._read_forwardings()
             aliases = self._read_aliases()
             blocked_addresses = self._read_blocked_addresses()
@@ -62,8 +69,8 @@ class FirewallService:
             for rule in rules:
                 rule["states"] = counters.get(rule["id"], 0)
             return {
-                "enabled": backend["available"],
-                "status": "protected" if state.get("last_apply") and backend["available"] else "not-applied",
+                "enabled": nftables["enabled"] and backend["available"],
+                "status": "disabled" if not nftables["enabled"] else ("protected" if state.get("last_apply") and backend["available"] else "not-applied"),
                 "last_reload": state.get("last_reload"),
                 "rules": rules,
                 "forwardings": [self._with_forwarding_counter(item, counters) for item in forwardings],
@@ -73,9 +80,45 @@ class FirewallService:
                 "management_access": "restricted" if any(item.get("service") == "Control panel" and item.get("enabled") for item in rules) else "review",
                 "capability": "nftables",
                 "backend": backend,
+                "nftables": self._nftables_config_response(nftables, backend),
                 "last_apply": state.get("last_apply"),
                 "apply_warnings": state.get("apply_warnings", []),
             }
+
+    def nftables_config(self) -> dict:
+        with self._lock:
+            state = self._read_state()
+            backend = self._backend_status()
+            return self._nftables_config_response(
+                self._nftables_config_from_state(state), backend
+            )
+
+    def update_nftables_config(self, payload: NftablesConfigRequest) -> dict:
+        with self._lock:
+            rules = self._read()
+            forwardings = self._read_forwardings()
+            aliases = self._read_aliases()
+            blocked_addresses = self._read_blocked_addresses()
+            config = payload.model_dump()
+            result = self._apply_rules(
+                rules,
+                forwardings,
+                aliases,
+                blocked_addresses,
+                nftables_config=config,
+            )
+            if not result.get("applied") and payload.enabled:
+                raise HTTPException(503, "Unable to apply nftables configuration: " + " ".join(result.get("warnings", [])))
+            self._write(
+                rules,
+                forwardings,
+                aliases,
+                blocked_addresses,
+                reloaded=False,
+                apply_result=result,
+                nftables_config=config,
+            )
+            return self.nftables_config()
 
     def create_rule(self, payload: FirewallRuleRequest) -> FirewallRule:
         self._validate(payload)
@@ -359,7 +402,7 @@ class FirewallService:
         result = self._apply_rules(rules, forwardings, aliases, blocked_addresses)
         self._write(rules, forwardings, aliases, blocked_addresses, reloaded=reloaded, apply_result=result)
 
-    def _write(self, rules: list[dict], forwardings: list[dict], aliases: list[dict], blocked_addresses: list[dict], reloaded: bool, apply_result: dict | None = None):
+    def _write(self, rules: list[dict], forwardings: list[dict], aliases: list[dict], blocked_addresses: list[dict], reloaded: bool, apply_result: dict | None = None, nftables_config: dict | None = None):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         current = self._read_state()
         value = {
@@ -370,6 +413,7 @@ class FirewallService:
             "last_reload": self._now() if reloaded else current.get("last_reload"),
             "last_apply": self._now() if apply_result and apply_result.get("applied") else current.get("last_apply"),
             "apply_warnings": (apply_result or {}).get("warnings", current.get("apply_warnings", [])),
+            "nftables": nftables_config or current.get("nftables", dict(_DEFAULT_NFTABLES_CONFIG)),
         }
         fd, temporary = tempfile.mkstemp(prefix="firewall.", suffix=".tmp", dir=self.path.parent)
         try:
@@ -455,6 +499,50 @@ class FirewallService:
             if same_protocol and same_listener:
                 raise HTTPException(409, "Another enabled forwarding rule already uses this public listener")
 
+    def _nftables_config_from_state(self, state: dict) -> dict:
+        value = state.get("nftables", {}) if isinstance(state, dict) else {}
+        input_policy = value.get("input_policy", _DEFAULT_NFTABLES_CONFIG["input_policy"])
+        forward_policy = value.get("forward_policy", _DEFAULT_NFTABLES_CONFIG["forward_policy"])
+        return {
+            "enabled": bool(value.get("enabled", _DEFAULT_NFTABLES_CONFIG["enabled"])),
+            "input_policy": input_policy if input_policy in {"accept", "drop"} else "accept",
+            "forward_policy": forward_policy if forward_policy in {"accept", "drop"} else "accept",
+        }
+
+    def _nftables_config_response(self, config: dict, backend: dict) -> dict:
+        return {
+            **config,
+            "table_name": self.nft_table,
+            "nat_table_name": f"{self.nft_table}_nat",
+            "available": backend.get("available", False),
+            "provider": backend.get("provider", "none"),
+            "forwarding_enabled": backend.get("forwarding_enabled", False),
+            "backend_message": backend.get("message", ""),
+        }
+
+    def _remove_managed_tables(self) -> dict:
+        warnings = []
+        for family, table in (("ip", f"{self.nft_table}_nat"), ("inet", self.nft_table)):
+            existing = subprocess.run(
+                [self.nft, "list", "table", family, table],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=8,
+            )
+            if existing.returncode != 0:
+                continue
+            removed = subprocess.run(
+                [self.nft, "delete", "table", family, table],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=8,
+            )
+            if removed.returncode != 0:
+                warnings.append(f"Unable to remove managed {family} table {table}: {(removed.stderr or removed.stdout).strip()}")
+        return {"applied": not warnings, "warnings": warnings}
+
     def _backend_status(self) -> dict:
         if not self.nft:
             return {"available": False, "provider": "none", "message": "nftables is not installed."}
@@ -471,18 +559,22 @@ class FirewallService:
             message += " IP forwarding is disabled, so port forwards will not route traffic yet."
         return {"available": True, "provider": "nftables", "forwarding_enabled": forwarding_enabled, "message": message}
 
-    def _apply_rules(self, rules: list[dict], forwardings: list[dict] | None = None, aliases: list[dict] | None = None, blocked_addresses: list[dict] | None = None) -> dict:
+    def _apply_rules(self, rules: list[dict], forwardings: list[dict] | None = None, aliases: list[dict] | None = None, blocked_addresses: list[dict] | None = None, nftables_config: dict | None = None) -> dict:
         forwardings = self._read_forwardings() if forwardings is None else forwardings
         aliases = self._read_aliases() if aliases is None else aliases
         blocked_addresses = self._read_blocked_addresses() if blocked_addresses is None else blocked_addresses
+        config = nftables_config or self._nftables_config_from_state(self._read_state())
         backend = self._backend_status()
         if not backend["available"]:
             return {"applied": False, "warnings": [backend["message"]]}
 
+        if not config["enabled"]:
+            return self._remove_managed_tables()
+
         lines = [
             f"add table inet {self.nft_table}",
-            f"add chain inet {self.nft_table} input {{ type filter hook input priority filter; policy accept; }}",
-            f"add chain inet {self.nft_table} forward {{ type filter hook forward priority filter; policy accept; }}",
+            f"add chain inet {self.nft_table} input {{ type filter hook input priority filter; policy {config['input_policy']}; }}",
+            f"add chain inet {self.nft_table} forward {{ type filter hook forward priority filter; policy {config['forward_policy']}; }}",
             f"add rule inet {self.nft_table} input ct state established,related accept",
             f"add rule inet {self.nft_table} input iif \"lo\" accept",
         ]

@@ -31,7 +31,9 @@ export function applyPanelPreferences(values = {}) {
     document.documentElement.dataset.density = current.panel_density;
   }
   if (typeof current.panel_show_hints === "boolean") {
-    document.documentElement.dataset.showHints = String(current.panel_show_hints);
+    document.documentElement.dataset.showHints = String(
+      current.panel_show_hints,
+    );
   }
   if (current.panel_accent) {
     document.documentElement.dataset.accent = current.panel_accent;
@@ -66,7 +68,9 @@ export function formatPanelDate(value, options = {}) {
     const absolute = Math.abs(seconds);
     if (absolute < 60) return "just now";
     const unit = absolute < 3600 ? "minute" : absolute < 86400 ? "hour" : "day";
-    const amount = Math.round(absolute / (unit === "minute" ? 60 : unit === "hour" ? 3600 : 86400));
+    const amount = Math.round(
+      absolute / (unit === "minute" ? 60 : unit === "hour" ? 3600 : 86400),
+    );
     return `${amount} ${unit}${amount === 1 ? "" : "s"} ${seconds < 0 ? "ago" : "from now"}`;
   }
   return new Intl.DateTimeFormat(undefined, {

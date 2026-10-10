@@ -43,11 +43,16 @@ export default function ActionDialog({ dialog, onClose, onSubmit }) {
           </button>
         </div>
         <div className="mt-6">
-          {dialog.message && (
-            <p className="text-sm leading-6 text-neutral-600 dark:text-neutral-300">
-              {dialog.message}
-            </p>
-          )}
+          {dialog.message &&
+            (typeof dialog.message === "string" ? (
+              <p className="text-sm leading-6 text-neutral-600 dark:text-neutral-300">
+                {dialog.message}
+              </p>
+            ) : (
+              <div className="text-sm text-neutral-600 dark:text-neutral-300">
+                {dialog.message}
+              </div>
+            ))}
           {form && (
             <label className="mt-1 block text-sm font-medium text-neutral-800 dark:text-neutral-200">
               {dialog.label}
@@ -111,7 +116,9 @@ export default function ActionDialog({ dialog, onClose, onSubmit }) {
                               const digits = (dialog.mode || "0644")
                                 .padStart(4, "0")
                                 .split("");
-                              const nextDigit = active ? digit - bit : digit + bit;
+                              const nextDigit = active
+                                ? digit - bit
+                                : digit + bit;
                               digits[groupIndex + 1] = String(nextDigit);
                               dialog.onModeChange(digits.join(""));
                             }}

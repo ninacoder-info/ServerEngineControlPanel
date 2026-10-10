@@ -855,6 +855,27 @@ def installed(user=Depends(require_user)):
             port=2525,
             managed=False,
         ))
+    # ModSecurity is a shared WAF engine rather than a daemon with its own
+    # process. Its installed state must not be inferred from a running
+    # service, otherwise the Services card incorrectly reports "Stopped".
+    modsecurity_root = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / "modsecurity"
+    modsecurity_marker = modsecurity_root / ".serverengine-version"
+    modsecurity_installed = (
+        modsecurity_marker.exists()
+        or (modsecurity_root / "usr/lib/x86_64-linux-gnu/libModSecurity.so.3").exists()
+        or (modsecurity_root / "usr/lib/x86_64-linux-gnu/libmodsecurity.so.3").exists()
+        or (modsecurity_root / "usr/lib/aarch64-linux-gnu/libModSecurity.so.3").exists()
+        or (modsecurity_root / "usr/lib/aarch64-linux-gnu/libmodsecurity.so.3").exists()
+    )
+    if modsecurity_installed:
+        definition = get_service("modsecurity")
+        detected.append(InstalledService(
+            id="modsecurity",
+            name=definition.name if definition else "ModSecurity WAF",
+            version=modsecurity_marker.read_text(errors="replace").strip() if modsecurity_marker.exists() else "installed",
+            status="installed",
+            managed=False,
+        ))
     sqlserver_root = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services")) / "sqlserver"
     sqlserver_marker = sqlserver_root / ".serverengine-version"
     if sqlserver_marker.exists() and shutil.which("docker"):

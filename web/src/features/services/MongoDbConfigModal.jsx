@@ -161,7 +161,11 @@ export default function MongoDbConfigModal({ service, installed, onClose }) {
   const [logs, setLogs] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
   const [toast, setToast] = React.useState(null);
-  const { status: serviceStatus, action, setAction } = useServiceSocketStatus("mongodb", current?.status);
+  const {
+    status: serviceStatus,
+    action,
+    setAction,
+  } = useServiceSocketStatus("mongodb", current?.status);
 
   const loadConfig = React.useCallback(async () => {
     const response = await apiRequest("/api/v1/services/mongodb/configuration");

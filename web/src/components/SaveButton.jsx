@@ -29,7 +29,13 @@ export default function SaveButton({
       disabled={saving || disabled}
       onClick={submit}
     >
-      {saving ? <span>Saving…</span> : saved ? <Check size={15} /> : <Save size={15} />}
+      {saving ? (
+        <span>Saving…</span>
+      ) : saved ? (
+        <Check size={15} />
+      ) : (
+        <Save size={15} />
+      )}
       {saving ? "Saving…" : saved ? savedLabel : children}
     </button>
   );

@@ -454,7 +454,10 @@ function Runtime({ current, runtimeStatus, action, onAction, configPath }) {
         <StartupPolicyToggle serviceId="mariadb" />
       </div>
       <div>
-        <Row label="Status" value={runtimeStatus || current?.status || "unknown"} />
+        <Row
+          label="Status"
+          value={runtimeStatus || current?.status || "unknown"}
+        />
         <Row
           label="Version"
           value={current?.version ? `v${current.version}` : "—"}
@@ -506,7 +509,11 @@ export default function MariaDbConfigModal({ service, installed, onClose }) {
   const [busy, setBusy] = React.useState(false);
   const [message, setMessage] = React.useState("");
   const [logs, setLogs] = React.useState(null);
-  const { status: runtimeStatus, action, setAction } = useServiceSocketStatus("mariadb", current?.status);
+  const {
+    status: runtimeStatus,
+    action,
+    setAction,
+  } = useServiceSocketStatus("mariadb", current?.status);
   const loadConfig = React.useCallback(
     () =>
       apiRequest("/api/v1/services/mariadb/configuration")

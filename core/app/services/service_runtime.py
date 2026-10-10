@@ -661,12 +661,29 @@ def php_cli_path(version: str) -> Path:
 
 
 def php_runtime_library_path(root: Path) -> str:
-    paths = {root / "lib", root / "lib64", root / "usr/lib", root / "usr/lib64"}
-    paths.update(
-        library.parent
-        for library in root.rglob("*.so*")
-        if library.is_file() or library.is_symlink()
-    )
+    # Keep this list deliberately bounded. Recursively exporting every parent
+    # directory containing a shared object can make LD_LIBRARY_PATH larger
+    # than ARG_MAX on PHP packages with many bundled libraries. The dynamic
+    # loader only needs the runtime library roots and their architecture
+    # directories here.
+    paths = {
+        root / "lib",
+        root / "lib64",
+        root / "usr/lib",
+        root / "usr/lib64",
+        root / ".runtime-libraries/lib",
+        root / ".runtime-libraries/usr/lib",
+    }
+    for parent in (
+        root / "lib",
+        root / "lib64",
+        root / "usr/lib",
+        root / "usr/lib64",
+        root / ".runtime-libraries/lib",
+        root / ".runtime-libraries/usr/lib",
+    ):
+        if parent.is_dir():
+            paths.update(child for child in parent.iterdir() if child.is_dir())
     return ":".join(str(path) for path in sorted(paths) if path.exists())
 
 
@@ -722,11 +739,34 @@ def ensure_php_runtime_launcher(version: str) -> Path:
     """Make the copied PHP executable carry its isolated library search path."""
     root = service_root("php", version)
     cli = php_cli_path(version)
-    if not cli.exists() or cli.read_bytes()[:2] == b"#!":
+    if not cli.exists():
         return cli
-    real_cli = cli.with_name(f"{cli.name}.bin")
-    if not real_cli.exists():
-        cli.rename(real_cli)
+    def is_php_binary(candidate: Path) -> bool:
+        try:
+            return candidate.exists() and candidate.is_file() and candidate.read_bytes()[:4] == b"\x7fELF"
+        except OSError:
+            return False
+
+    if is_php_binary(cli):
+        real_cli = cli.with_name(f"{cli.name}.real")
+        if not real_cli.exists():
+            cli.rename(real_cli)
+    else:
+        # Older launchers could be left behind with a missing or recursive
+        # companion. Find an actual ELF PHP binary, never another shell script.
+        candidates = [
+            cli.with_name(f"{cli.name}.real"),
+            cli.with_name(f"{cli.name}.bin"),
+            *sorted(root.glob("usr/bin/php8.*")),
+            *sorted(root.glob("bin/php8.*")),
+            root / "bin/php",
+        ]
+        real_cli = next(
+            (candidate for candidate in candidates if candidate != cli and is_php_binary(candidate)),
+            None,
+        )
+        if real_cli is None:
+            return cli
     libraries = php_runtime_library_path(root)
     cli.write_text(
         "#!/bin/sh\n"
@@ -740,23 +780,10 @@ def ensure_php_runtime_launcher(version: str) -> Path:
 
 def ensure_php_terminal_launcher(version: str) -> Path:
     """Create the isolated version's `php` command without touching the host PATH."""
-    root = service_root("php", version)
-    cli = ensure_php_runtime_launcher(version)
-    launcher = root / "usr/bin/php"
-    if not cli.exists():
-        return launcher
-    launcher.parent.mkdir(parents=True, exist_ok=True)
-    launcher_is_script = launcher.exists() and not launcher.is_symlink() and launcher.is_file() and launcher.read_bytes()[:2] == b"#!"
-    if not launcher.exists() or launcher.is_symlink() or launcher_is_script:
-        libraries = php_runtime_library_path(root)
-        launcher.write_text(
-            "#!/bin/sh\n"
-            f"export LD_LIBRARY_PATH=\"{libraries}:$LD_LIBRARY_PATH\"\n"
-            f"export PHP_INI_SCAN_DIR=\"{root / 'conf/conf.d'}\"\n"
-            f"exec \"{cli}\" -c \"{root / 'conf/php.ini'}\" \"$@\"\n"
-        )
-        launcher.chmod(0o755)
-    return launcher
+    # The runtime launcher already provides the isolated library and ini
+    # environment. Do not wrap it a second time: a second wrapper can select
+    # /usr/bin/php as its own target and recurse until exec reports ARG_MAX.
+    return ensure_php_runtime_launcher(version)
 
 
 def composer_path() -> Path:
@@ -803,9 +830,7 @@ def ensure_composer_launcher() -> Path:
     php_root = service_root("php", php_version)
     php = php_cli_path(php_version)
     ensure_php_fpm_layout(php_version)
-    library_paths = {php_root / "lib", php_root / "lib64", php_root / "usr/lib", php_root / "usr/lib64"}
-    library_paths.update(library.parent for library in php_root.rglob("*.so*") if library.is_file() or library.is_symlink())
-    libraries = ":".join(str(path) for path in library_paths if path.exists())
+    libraries = php_runtime_library_path(php_root)
     extension_dir = next(
         (
             candidate
@@ -822,7 +847,7 @@ def ensure_composer_launcher() -> Path:
     archive = launcher.parent.parent / "composer.phar"
     php_ini = php_root / "conf/php.ini"
     composer_home = ensure_composer_cache()
-    launcher.write_text(f'#!/bin/sh\nexport LD_LIBRARY_PATH="{libraries}:$LD_LIBRARY_PATH"\nexport PHP_INI_SCAN_DIR="{php_root / "conf/conf.d"}"\nexport COMPOSER_HOME="{composer_home}"\nexec "{php}" -c "{php_ini}"{extension_options} "{archive}" "$@"\n')
+    launcher.write_text(f'#!/bin/sh\nexport LD_LIBRARY_PATH="{libraries}:$LD_LIBRARY_PATH"\nexport PHPRC="{php_ini}"\nexport PHP_INI_SCAN_DIR="{php_root / "conf/conf.d"}"\nexport COMPOSER_HOME="{composer_home}"\nexec "{php}" -c "{php_ini}"{extension_options} "{archive}" "$@"\n')
     launcher.chmod(0o755)
     return launcher
 
@@ -860,9 +885,10 @@ PHP_BASELINE_MODULES = {
     "bcmath": ("bcmath",),
     "fileinfo": ("fileinfo",),
     "phar": ("phar",),
+    "tokenizer": ("tokenizer",),
 }
 
-PHP_REQUIRED_EXTENSIONS = ("fileinfo", "mysql", "pgsql", "zip", "curl", "mbstring")
+PHP_REQUIRED_EXTENSIONS = ("fileinfo", "mysql", "pgsql", "zip", "curl", "mbstring", "tokenizer")
 
 
 def php_default_ini(version: str, error_log: Path, root: Path | None = None) -> str:

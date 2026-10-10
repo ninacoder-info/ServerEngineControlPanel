@@ -8,10 +8,12 @@ from app.models.firewall import (
     FirewallAliasRequest,
     FirewallRulePatch,
     FirewallRuleRequest,
+    NftablesConfigRequest,
     PortForwardPatch,
     PortForwardRequest,
 )
 from app.services.firewall_service import firewall_service
+from app.services.job_service import job_store
 
 router = APIRouter(prefix="/api/v1/firewall", tags=["firewall"])
 
@@ -19,6 +21,18 @@ router = APIRouter(prefix="/api/v1/firewall", tags=["firewall"])
 @router.get("")
 def overview(user=Depends(require_user)):
     return firewall_service.overview()
+
+
+@router.get("/config")
+def nftables_config(user=Depends(require_user)):
+    return firewall_service.nftables_config()
+
+
+@router.put("/config")
+def update_nftables_config(payload: NftablesConfigRequest, user=Depends(require_user)):
+    result = firewall_service.update_nftables_config(payload)
+    job_store.publish({"type": "firewall-updated", "action": "nftables-config-updated", "config": result})
+    return result
 
 
 @router.post("/rules", status_code=status.HTTP_201_CREATED)

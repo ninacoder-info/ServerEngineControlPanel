@@ -50,7 +50,8 @@ services:
       /opt/server-engine-venv/bin/pip install -e . &&
       mkdir -p /var/lib/server-engine /opt/server-engine/services /server-engine/www /server-engine/logs /server-engine/backups &&
       mkdir -p /opt/server-engine/services/certbot &&
-      if ! test -x /opt/server-engine/services/certbot/venv/bin/certbot || ! /opt/server-engine/services/certbot/venv/bin/certbot --version >/dev/null 2>&1; then
+      if ! test -x /opt/server-engine/services/certbot/venv/bin/python || ! /opt/server-engine/services/certbot/venv/bin/python -c 'import certbot; from certbot.main import main' >/dev/null 2>&1; then
+        rm -rf /opt/server-engine/services/certbot/venv;
         python3 -m venv /opt/server-engine/services/certbot/venv;
         /opt/server-engine/services/certbot/venv/bin/pip install --disable-pip-version-check --no-cache-dir --upgrade certbot;
       fi &&

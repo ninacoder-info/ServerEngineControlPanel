@@ -1,16 +1,31 @@
 import React from "react";
-import { AlertTriangle, CheckCircle2, X, XCircle } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  LoaderCircle,
+  X,
+  XCircle,
+} from "lucide-react";
 import { toast as sonnerToast } from "sonner";
 
 function ToastCard({ id, message, type }) {
   const success = type === "success";
   const warning = type === "warning";
-  const Icon = success ? CheckCircle2 : warning ? AlertTriangle : XCircle;
+  const info = type === "info";
+  const Icon = success
+    ? CheckCircle2
+    : warning
+      ? AlertTriangle
+      : info
+        ? LoaderCircle
+        : XCircle;
   const iconClass = success
     ? "text-emerald-600 dark:text-emerald-400"
     : warning
       ? "text-amber-600 dark:text-amber-400"
-      : "text-rose-600 dark:text-rose-400";
+      : info
+        ? "animate-spin text-blue-600 dark:text-blue-400"
+        : "text-rose-600 dark:text-rose-400";
 
   return (
     <div

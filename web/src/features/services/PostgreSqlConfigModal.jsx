@@ -431,7 +431,10 @@ function Runtime({ current, runtimeStatus, action, onAction, configPath }) {
         <StartupPolicyToggle serviceId="postgresql" />
       </div>
       <div>
-        <Row label="Status" value={runtimeStatus || current?.status || "unknown"} />
+        <Row
+          label="Status"
+          value={runtimeStatus || current?.status || "unknown"}
+        />
         <Row
           label="Version"
           value={current?.version ? `v${current.version}` : "—"}
@@ -479,7 +482,9 @@ export default function PostgreSqlConfigModal({ installed, onClose }) {
   const current = Array.isArray(installed)
     ? installed.find((item) => item.status === "running") || installed[0]
     : installed;
-  const [runtimeStatus, setRuntimeStatus] = React.useState(current?.status || "stopped");
+  const [runtimeStatus, setRuntimeStatus] = React.useState(
+    current?.status || "stopped",
+  );
   const [tab, setTab] = React.useState("runtime");
   const [config, setConfig] = React.useState(null);
   const [text, setText] = React.useState("");
@@ -506,7 +511,10 @@ export default function PostgreSqlConfigModal({ installed, onClose }) {
       if (!["succeeded", "failed", "cancelled"].includes(detail.status)) return;
 
       if (["failed", "cancelled"].includes(detail.status)) {
-        setMessage(detail.job?.message || `PostgreSQL ${detail.action || "service"} failed.`);
+        setMessage(
+          detail.job?.message ||
+            `PostgreSQL ${detail.action || "service"} failed.`,
+        );
         setAction("");
         return;
       }
@@ -520,7 +528,11 @@ export default function PostgreSqlConfigModal({ installed, onClose }) {
     };
 
     window.addEventListener("serverengine:service-status", updateFromSocket);
-    return () => window.removeEventListener("serverengine:service-status", updateFromSocket);
+    return () =>
+      window.removeEventListener(
+        "serverengine:service-status",
+        updateFromSocket,
+      );
   }, []);
 
   const loadConfig = React.useCallback(() => {
@@ -800,7 +812,11 @@ export default function PostgreSqlConfigModal({ installed, onClose }) {
       </section>
       <Toast
         message={message}
-        type={/failed|error|unable|exited|not become ready/i.test(message) ? "error" : "success"}
+        type={
+          /failed|error|unable|exited|not become ready/i.test(message)
+            ? "error"
+            : "success"
+        }
         onClose={() => setMessage("")}
       />
     </div>

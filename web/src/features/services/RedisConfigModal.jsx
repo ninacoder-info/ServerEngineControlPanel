@@ -454,8 +454,12 @@ export default function RedisConfigModal({ service, installed, onClose }) {
   const [busy, setBusy] = React.useState(false);
   const [action, setAction] = React.useState("");
   const [message, setMessage] = React.useState("");
-  const [runtimeStatus, setRuntimeStatus] = React.useState(current?.status || "stopped");
-  const [runtimeVersion, setRuntimeVersion] = React.useState(current?.version || "");
+  const [runtimeStatus, setRuntimeStatus] = React.useState(
+    current?.status || "stopped",
+  );
+  const [runtimeVersion, setRuntimeVersion] = React.useState(
+    current?.version || "",
+  );
   const [logs, setLogs] = React.useState(null);
   const [redisVersions, setRedisVersions] = React.useState([]);
   const [activeRedisVersion, setActiveRedisVersion] = React.useState("");
@@ -509,7 +513,8 @@ export default function RedisConfigModal({ service, installed, onClose }) {
       setMessage("");
     };
     window.addEventListener("serverengine:service-status", update);
-    return () => window.removeEventListener("serverengine:service-status", update);
+    return () =>
+      window.removeEventListener("serverengine:service-status", update);
   }, []);
   React.useEffect(() => {
     if (tab === "versions") loadRedisVersions();
@@ -519,7 +524,9 @@ export default function RedisConfigModal({ service, installed, onClose }) {
       method: "PUT",
       body: JSON.stringify({ version }),
     });
-    const body = response.ok ? await response.json() : { message: await readApiError(response) };
+    const body = response.ok
+      ? await response.json()
+      : { message: await readApiError(response) };
     setMessage(body.message || "Unable to change the Redis default version.");
     if (response.ok) loadRedisVersions();
   }
@@ -573,7 +580,11 @@ export default function RedisConfigModal({ service, installed, onClose }) {
     // Topbar owns the authenticated jobs WebSocket. It will clear the action
     // and update the live status when this job reaches a final state.
   };
-  const liveCurrent = { ...(current || {}), status: runtimeStatus, version: runtimeVersion };
+  const liveCurrent = {
+    ...(current || {}),
+    status: runtimeStatus,
+    version: runtimeVersion,
+  };
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8">
       <section
@@ -669,7 +680,8 @@ export default function RedisConfigModal({ service, installed, onClose }) {
                     Redis versions
                   </h3>
                   <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
-                    Install multiple Redis releases in separate service directories. Only the selected default runtime is started.
+                    Install multiple Redis releases in separate service
+                    directories. Only the selected default runtime is started.
                   </p>
                 </div>
                 <button
@@ -682,24 +694,47 @@ export default function RedisConfigModal({ service, installed, onClose }) {
                 </button>
               </div>
               <div className="divide-y divide-neutral-200 border-y border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
-                {redisVersions.length ? redisVersions.map((item) => (
-                  <div key={`${item.version}-${item.path}`} className="flex items-center justify-between gap-4 py-4">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="font-medium text-neutral-900 dark:text-neutral-100">Redis {item.version}</p>
-                        {item.active && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">Default</span>}
-                        <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">{item.install_method === "source" ? "Build from source" : "Prebuilt package"}</span>
+                {redisVersions.length ? (
+                  redisVersions.map((item) => (
+                    <div
+                      key={`${item.version}-${item.path}`}
+                      className="flex items-center justify-between gap-4 py-4"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="font-medium text-neutral-900 dark:text-neutral-100">
+                            Redis {item.version}
+                          </p>
+                          {item.active && (
+                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+                              Default
+                            </span>
+                          )}
+                          <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
+                            {item.install_method === "source"
+                              ? "Build from source"
+                              : "Prebuilt package"}
+                          </span>
+                        </div>
+                        <p className="mt-1 truncate text-xs text-neutral-500 dark:text-neutral-400">
+                          {item.path}
+                        </p>
                       </div>
-                      <p className="mt-1 truncate text-xs text-neutral-500 dark:text-neutral-400">{item.path}</p>
+                      {!item.active && (
+                        <button
+                          type="button"
+                          className="shrink-0 cursor-pointer text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400"
+                          onClick={() => makeDefault(item.version)}
+                        >
+                          Make default
+                        </button>
+                      )}
                     </div>
-                    {!item.active && (
-                      <button type="button" className="shrink-0 cursor-pointer text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400" onClick={() => makeDefault(item.version)}>
-                        Make default
-                      </button>
-                    )}
-                  </div>
-                )) : (
-                  <p className="py-6 text-sm text-neutral-500 dark:text-neutral-400">No managed Redis versions are available yet.</p>
+                  ))
+                ) : (
+                  <p className="py-6 text-sm text-neutral-500 dark:text-neutral-400">
+                    No managed Redis versions are available yet.
+                  </p>
                 )}
               </div>
             </div>

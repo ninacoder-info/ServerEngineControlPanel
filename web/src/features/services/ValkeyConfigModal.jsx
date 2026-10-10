@@ -158,7 +158,11 @@ export default function ValkeyConfigModal({ installed, onClose }) {
   const [busy, setBusy] = React.useState(false);
   const [message, setMessage] = React.useState("");
   const [logs, setLogs] = React.useState(null);
-  const { status: runtimeStatus, action, setAction } = useServiceSocketStatus("valkey", current?.status);
+  const {
+    status: runtimeStatus,
+    action,
+    setAction,
+  } = useServiceSocketStatus("valkey", current?.status);
   const loadConfig = React.useCallback(
     () =>
       apiRequest("/api/v1/services/valkey/configuration")

@@ -1,9 +1,24 @@
 import React from "react";
 import Chart from "react-apexcharts";
 import {
-  Activity, AlertTriangle, BarChart3, CheckCircle2, ChevronDown,
-  Globe2, ListFilter, Map, Plus, RefreshCw, Search, ShieldAlert,
-  ShieldCheck, Server, Settings2, SlidersHorizontal, Sparkles, X,
+  Activity,
+  AlertTriangle,
+  BarChart3,
+  CheckCircle2,
+  ChevronDown,
+  Globe2,
+  ListFilter,
+  Map,
+  Plus,
+  RefreshCw,
+  Search,
+  ShieldAlert,
+  ShieldCheck,
+  Server,
+  Settings2,
+  SlidersHorizontal,
+  Sparkles,
+  X,
 } from "lucide-react";
 import { apiRequest, readApiError } from "../../lib/api";
 import Toast, { showToast } from "../../components/Toast";
@@ -17,42 +32,68 @@ import isoEnglish from "i18n-iso-countries/langs/en.json";
 isoCountries.registerLocale(isoEnglish);
 
 const tabs = [
-  ["overview", "Overview", ShieldCheck], ["sites", "Protected sites", Globe2],
-  ["rules", "Request rules", ListFilter], ["lists", "IP lists", SlidersHorizontal],
-  ["regions", "Geo controls", Map], ["traffic", "Traffic", Activity],
-  ["policies", "Custom policies", Sparkles], ["attacks", "Attack map", Map],
+  ["overview", "Overview", ShieldCheck],
+  ["sites", "Protected sites", Globe2],
+  ["rules", "Request rules", ListFilter],
+  ["lists", "IP lists", SlidersHorizontal],
+  ["regions", "Geo controls", Map],
+  ["traffic", "Traffic", Activity],
+  ["policies", "Custom policies", Sparkles],
+  ["attacks", "Attack map", Map],
   ["reports", "Reports", BarChart3],
 ];
-const input = "mt-1.5 block min-h-10 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100";
+const input =
+  "mt-1.5 block min-h-10 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100";
 let currentProtectionActivity = null;
 function statusClass(status) {
   if (status === "attached") return "text-emerald-600 dark:text-emerald-400";
   if (status === "ready") return "text-amber-600 dark:text-amber-400";
   if (status === "available") return "text-blue-600 dark:text-blue-400";
-  if (["failed", "error", "blocked"].includes(status)) return "text-rose-600 dark:text-rose-400";
+  if (["failed", "error", "blocked"].includes(status))
+    return "text-rose-600 dark:text-rose-400";
   return "text-neutral-500 dark:text-neutral-400";
 }
 
 function countryFlag(code) {
-  const normalized = String(code || "").trim().toUpperCase();
+  const normalized = String(code || "")
+    .trim()
+    .toUpperCase();
   if (!/^[A-Z]{2}$/.test(normalized)) return "";
-  return [...normalized].map((letter) => String.fromCodePoint(127397 + letter.charCodeAt(0))).join("");
+  return [...normalized]
+    .map((letter) => String.fromCodePoint(127397 + letter.charCodeAt(0)))
+    .join("");
 }
 
 function countryDisplayName(country) {
-  const code = String(country?.country_code || "").trim().toUpperCase();
+  const code = String(country?.country_code || "")
+    .trim()
+    .toUpperCase();
   const name = String(country?.country_name || "").trim();
   if (name && name.toUpperCase() !== code) return name;
-  try { return isoCountries.getName(code, "en") || code; } catch { return code; }
+  try {
+    return isoCountries.getName(code, "en") || code;
+  } catch {
+    return code;
+  }
 }
 
 function SourceWithCountry({ event }) {
   const country = event.country;
   const flag = countryFlag(country?.country_code);
-  return <span className="inline-flex items-center gap-2" title={country?.country_name || "Country unavailable"}>
-    <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-neutral-100 text-sm leading-none dark:bg-neutral-800" aria-hidden="true">{flag || <Globe2 size={12} className="text-neutral-400" />}</span>
-    <span>{event.source_ip || "Unknown"}</span>
-  </span>;
+  return (
+    <span
+      className="inline-flex items-center gap-2"
+      title={country?.country_name || "Country unavailable"}
+    >
+      <span
+        className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-neutral-100 text-sm leading-none dark:bg-neutral-800"
+        aria-hidden="true"
+      >
+        {flag || <Globe2 size={12} className="text-neutral-400" />}
+      </span>
+      <span>{event.source_ip || "Unknown"}</span>
+    </span>
+  );
 }
 
 function trafficTime(value) {
@@ -63,66 +104,463 @@ function trafficTime(value) {
 
 function Section({ title, description, actions, children }) {
   if (title === "Quick controls") return null;
-  if (title === "Protection activity") children = <ActivityBars data={currentProtectionActivity} />;
-  return <section className="rounded-lg border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900"><div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start"><div><h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">{title}</h3>{description && <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">{description}</p>}</div>{actions}</div><div className="mt-5">{children}</div></section>;
+  if (title === "Protection activity")
+    children = <ActivityBars data={currentProtectionActivity} />;
+  return (
+    <section className="rounded-lg border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
+      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+        <div>
+          <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
+            {title}
+          </h3>
+          {description && (
+            <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+              {description}
+            </p>
+          )}
+        </div>
+        {actions}
+      </div>
+      <div className="mt-5">{children}</div>
+    </section>
+  );
 }
 
 function Stat({ label, value, detail, icon: Icon, tone = "slate" }) {
-  const tones = { slate: "bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300", blue: "bg-blue-50 text-blue-600 dark:bg-blue-950/30 dark:text-blue-400", amber: "bg-amber-50 text-amber-600 dark:bg-amber-950/30 dark:text-amber-400", emerald: "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-400" };
+  const tones = {
+    slate:
+      "bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300",
+    blue: "bg-blue-50 text-blue-600 dark:bg-blue-950/30 dark:text-blue-400",
+    amber:
+      "bg-amber-50 text-amber-600 dark:bg-amber-950/30 dark:text-amber-400",
+    emerald:
+      "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-400",
+  };
   const loading = value === null || value === undefined;
-  return <div className="rounded-lg border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900"><div className="flex items-start justify-between gap-3"><span className={`grid h-9 w-9 place-items-center rounded-md ${tones[tone]}`}><Icon size={18} /></span><strong className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">{loading ? <span className="inline-block h-7 w-20 animate-pulse rounded bg-neutral-200 dark:bg-neutral-700" aria-label="Loading" /> : value}</strong></div><p className="mt-3 text-sm font-medium text-neutral-700 dark:text-neutral-300">{label}</p><p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">{loading ? <span className="inline-block h-3 w-32 animate-pulse rounded bg-neutral-200 dark:bg-neutral-700" /> : detail}</p></div>;
+  return (
+    <div className="rounded-lg border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
+      <div className="flex items-start justify-between gap-3">
+        <span
+          className={`grid h-9 w-9 place-items-center rounded-md ${tones[tone]}`}
+        >
+          <Icon size={18} />
+        </span>
+        <strong className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">
+          {loading ? (
+            <span
+              className="inline-block h-7 w-20 animate-pulse rounded bg-neutral-200 dark:bg-neutral-700"
+              aria-label="Loading"
+            />
+          ) : (
+            value
+          )}
+        </strong>
+      </div>
+      <p className="mt-3 text-sm font-medium text-neutral-700 dark:text-neutral-300">
+        {label}
+      </p>
+      <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+        {loading ? (
+          <span className="inline-block h-3 w-32 animate-pulse rounded bg-neutral-200 dark:bg-neutral-700" />
+        ) : (
+          detail
+        )}
+      </p>
+    </div>
+  );
 }
 
 function RuleModal({ rule, onClose, onSave }) {
-  const [form, setForm] = React.useState(rule || { name: "", match: "", scope: "All protected sites", action: "Block", enabled: true });
-  const set = (key, value) => setForm((current) => ({ ...current, [key]: value }));
-  return <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8"><section className="w-full max-w-2xl rounded-xl bg-white shadow-xl dark:bg-neutral-900"><div className="flex items-start justify-between gap-4 border-b border-neutral-200 px-5 py-4 dark:border-neutral-800"><div><p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Request protection</p><h2 className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">{rule ? "Edit protection rule" : "Create protection rule"}</h2></div><button type="button" aria-label="Close protection rule" className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800" onClick={onClose}><X size={17} /></button></div><form className="space-y-5 p-5" onSubmit={(event) => { event.preventDefault(); onSave({ ...form, hits: rule?.hits || 0, id: rule?.id || Date.now() }); }}><div className="grid gap-4 sm:grid-cols-2"><label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Rule name<input required className={input} value={form.name} onChange={(event) => set("name", event.target.value)} placeholder="Block exposed admin paths" /></label><label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Applies to<input required className={input} value={form.scope} onChange={(event) => set("scope", event.target.value)} placeholder="All protected sites or shield.test" /></label></div><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Match condition<textarea required className={`${input} min-h-24`} value={form.match} onChange={(event) => set("match", event.target.value)} placeholder="URI contains /.env or request method is POST" /><span className="mt-1 block text-xs font-normal text-neutral-500 dark:text-neutral-400">Supported conditions: <code>URI contains /path</code> or <code>Request method is POST</code>.</span></label><div className="grid gap-4 sm:grid-cols-2"><label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Response<select className={input} value={form.action} onChange={(event) => set("action", event.target.value)}><option>Block</option><option>Challenge</option><option>Log only</option><option>Allow</option></select></label><label className="flex cursor-pointer items-center gap-3 self-end pb-2 text-sm font-medium text-neutral-700 dark:text-neutral-300"><input type="checkbox" className="h-4 w-4 cursor-pointer accent-blue-600" checked={form.enabled} onChange={(event) => set("enabled", event.target.checked)} />Enable this rule</label></div><p className="text-xs leading-5 text-neutral-500 dark:text-neutral-400">Start with Log only when testing a new rule. Review matches before switching production traffic to Block.</p><div className="flex justify-end gap-3 border-t border-neutral-200 pt-4 dark:border-neutral-800"><button type="button" className="cursor-pointer rounded-md px-4 py-2 text-sm text-neutral-600 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800" onClick={onClose}>Cancel</button><button type="submit" className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"><CheckCircle2 size={16} />{rule ? "Save rule" : "Create rule"}</button></div></form></section></div>;
+  const [form, setForm] = React.useState(
+    rule || {
+      name: "",
+      match: "",
+      scope: "All protected sites",
+      action: "Block",
+      enabled: true,
+    },
+  );
+  const set = (key, value) =>
+    setForm((current) => ({ ...current, [key]: value }));
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8">
+      <section className="w-full max-w-2xl rounded-xl bg-white shadow-xl dark:bg-neutral-900">
+        <div className="flex items-start justify-between gap-4 border-b border-neutral-200 px-5 py-4 dark:border-neutral-800">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">
+              Request protection
+            </p>
+            <h2 className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">
+              {rule ? "Edit protection rule" : "Create protection rule"}
+            </h2>
+          </div>
+          <button
+            type="button"
+            aria-label="Close protection rule"
+            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+            onClick={onClose}
+          >
+            <X size={17} />
+          </button>
+        </div>
+        <form
+          className="space-y-5 p-5"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onSave({
+              ...form,
+              hits: rule?.hits || 0,
+              id: rule?.id || Date.now(),
+            });
+          }}
+        >
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
+              Rule name
+              <input
+                required
+                className={input}
+                value={form.name}
+                onChange={(event) => set("name", event.target.value)}
+                placeholder="Block exposed admin paths"
+              />
+            </label>
+            <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
+              Applies to
+              <input
+                required
+                className={input}
+                value={form.scope}
+                onChange={(event) => set("scope", event.target.value)}
+                placeholder="All protected sites or shield.test"
+              />
+            </label>
+          </div>
+          <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+            Match condition
+            <textarea
+              required
+              className={`${input} min-h-24`}
+              value={form.match}
+              onChange={(event) => set("match", event.target.value)}
+              placeholder="URI contains /.env or request method is POST"
+            />
+            <span className="mt-1 block text-xs font-normal text-neutral-500 dark:text-neutral-400">
+              Supported conditions: <code>URI contains /path</code> or{" "}
+              <code>Request method is POST</code>.
+            </span>
+          </label>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
+              Response
+              <select
+                className={input}
+                value={form.action}
+                onChange={(event) => set("action", event.target.value)}
+              >
+                <option>Block</option>
+                <option>Challenge</option>
+                <option>Log only</option>
+                <option>Allow</option>
+              </select>
+            </label>
+            <label className="flex cursor-pointer items-center gap-3 self-end pb-2 text-sm font-medium text-neutral-700 dark:text-neutral-300">
+              <input
+                type="checkbox"
+                className="h-4 w-4 cursor-pointer accent-blue-600"
+                checked={form.enabled}
+                onChange={(event) => set("enabled", event.target.checked)}
+              />
+              Enable this rule
+            </label>
+          </div>
+          <p className="text-xs leading-5 text-neutral-500 dark:text-neutral-400">
+            Start with Log only when testing a new rule. Review matches before
+            switching production traffic to Block.
+          </p>
+          <div className="flex justify-end gap-3 border-t border-neutral-200 pt-4 dark:border-neutral-800">
+            <button
+              type="button"
+              className="cursor-pointer rounded-md px-4 py-2 text-sm text-neutral-600 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800"
+              onClick={onClose}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+            >
+              <CheckCircle2 size={16} />
+              {rule ? "Save rule" : "Create rule"}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
 }
 
 function ActivityBars({ data }) {
   const buckets = data?.buckets || Array.from({ length: 24 }, () => null);
-  const dark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
+  const dark =
+    typeof document !== "undefined" &&
+    document.documentElement.classList.contains("dark");
   const labels = buckets.map((bucket, index) => {
     if (!bucket?.timestamp) return `${24 - buckets.length + index}h`;
     const date = new Date(bucket.timestamp);
-    return Number.isNaN(date.getTime()) ? `${index + 1}h` : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return Number.isNaN(date.getTime())
+      ? `${index + 1}h`
+      : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   });
   const options = {
-    chart: { type: "area", toolbar: { show: false }, zoom: { enabled: false }, fontFamily: "inherit", foreColor: dark ? "#a3a3a3" : "#737373", animations: { enabled: true, speed: 350 } },
+    chart: {
+      type: "area",
+      toolbar: { show: false },
+      zoom: { enabled: false },
+      fontFamily: "inherit",
+      foreColor: dark ? "#a3a3a3" : "#737373",
+      animations: { enabled: true, speed: 350 },
+    },
     colors: ["#3b82f6", "#f43f5e"],
     dataLabels: { enabled: false },
     stroke: { curve: "smooth", width: 2 },
-    fill: { type: "gradient", gradient: { shadeIntensity: 1, opacityFrom: 0.35, opacityTo: 0.04, stops: [0, 95, 100] } },
-    grid: { borderColor: dark ? "#262626" : "#e5e5e5", strokeDashArray: 4, padding: { left: 8, right: 8 } },
-    xaxis: { categories: labels, axisBorder: { color: dark ? "#404040" : "#d4d4d4" }, axisTicks: { color: dark ? "#404040" : "#d4d4d4" }, labels: { hideOverlappingLabels: true, rotate: 0, formatter: (value, timestamp, index) => index % Math.max(1, Math.ceil(labels.length / 6)) === 0 ? value : "" } },
-    yaxis: { min: 0, forceNiceScale: true, labels: { formatter: (value) => Math.round(value).toLocaleString() } },
-    tooltip: { shared: true, intersect: false, theme: dark ? "dark" : "light", x: { show: true }, y: { formatter: (value) => `${Number(value || 0).toLocaleString()} requests` } },
-    legend: { position: "top", horizontalAlign: "right", labels: { colors: dark ? "#d4d4d4" : "#525252" } },
+    fill: {
+      type: "gradient",
+      gradient: {
+        shadeIntensity: 1,
+        opacityFrom: 0.35,
+        opacityTo: 0.04,
+        stops: [0, 95, 100],
+      },
+    },
+    grid: {
+      borderColor: dark ? "#262626" : "#e5e5e5",
+      strokeDashArray: 4,
+      padding: { left: 8, right: 8 },
+    },
+    xaxis: {
+      categories: labels,
+      axisBorder: { color: dark ? "#404040" : "#d4d4d4" },
+      axisTicks: { color: dark ? "#404040" : "#d4d4d4" },
+      labels: {
+        hideOverlappingLabels: true,
+        rotate: 0,
+        formatter: (value, timestamp, index) =>
+          index % Math.max(1, Math.ceil(labels.length / 6)) === 0 ? value : "",
+      },
+    },
+    yaxis: {
+      min: 0,
+      forceNiceScale: true,
+      labels: { formatter: (value) => Math.round(value).toLocaleString() },
+    },
+    tooltip: {
+      shared: true,
+      intersect: false,
+      theme: dark ? "dark" : "light",
+      x: { show: true },
+      y: {
+        formatter: (value) => `${Number(value || 0).toLocaleString()} requests`,
+      },
+    },
+    legend: {
+      position: "top",
+      horizontalAlign: "right",
+      labels: { colors: dark ? "#d4d4d4" : "#525252" },
+    },
   };
-  return <div className="min-h-56"><Chart type="area" height={250} width="100%" options={options} series={[{ name: "Requests", data: buckets.map((bucket) => Number(bucket?.requests || 0)) }, { name: "Blocked", data: buckets.map((bucket) => Number(bucket?.blocked || 0)) }]} /></div>;
+  return (
+    <div className="min-h-56">
+      <Chart
+        type="area"
+        height={250}
+        width="100%"
+        options={options}
+        series={[
+          {
+            name: "Requests",
+            data: buckets.map((bucket) => Number(bucket?.requests || 0)),
+          },
+          {
+            name: "Blocked",
+            data: buckets.map((bucket) => Number(bucket?.blocked || 0)),
+          },
+        ]}
+      />
+    </div>
+  );
 }
 
-function Overview({ onTab, onReinstall = () => window.dispatchEvent(new Event("serverengine:shield-install")) }) {
+function Overview({
+  onTab,
+  onReinstall = () =>
+    window.dispatchEvent(new Event("serverengine:shield-install")),
+}) {
   const [metrics, setMetrics] = React.useState(null);
   const [activity, setActivity] = React.useState(null);
   const refreshMetrics = React.useCallback(() => {
     let active = true;
-    apiRequest("/api/v1/application-shield/metrics").then(async (response) => {
-      if (active && response.ok) setMetrics(await response.json());
-    }).catch(() => {});
-    return () => { active = false; };
+    apiRequest("/api/v1/application-shield/metrics")
+      .then(async (response) => {
+        if (active && response.ok) setMetrics(await response.json());
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
   }, []);
   React.useEffect(() => {
     refreshMetrics();
   }, [refreshMetrics]);
   React.useEffect(() => {
-    apiRequest("/api/v1/application-shield/activity?hours=24").then(async (response) => {
-      if (response.ok) setActivity(await response.json());
-    }).catch(() => {});
+    apiRequest("/api/v1/application-shield/activity?hours=24")
+      .then(async (response) => {
+        if (response.ok) setActivity(await response.json());
+      })
+      .catch(() => {});
   }, []);
   currentProtectionActivity = activity;
   const status = metrics?.protection_status;
-  return <div className="space-y-5"><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Stat icon={ShieldCheck} label="Protection status" value={status || null} detail={status ? (status === "Active" ? "Policy and connector are active" : "Policy or connector is disabled") : "Loading live protection state"} tone="emerald" /><Stat icon={ShieldAlert} label="Requests blocked" value={metrics ? Number(metrics.requests_blocked || 0).toLocaleString() : null} detail={metrics?.window || "Loading observed log data"} tone="amber" /><Stat icon={Globe2} label="Protected sites" value={metrics ? Number(metrics.protected_sites || 0).toLocaleString() : null} detail="Enabled websites using an attached provider" tone="blue" /><Stat icon={Activity} label="Inspection rate" value={metrics ? (metrics.inspection_rate == null ? "—" : `${metrics.inspection_rate}%`) : null} detail={metrics?.inspection_rate_label || "Loading traffic data"} /></div><div className="grid gap-5 xl:grid-cols-[1.4fr_1fr]"><Section title="Protection activity" description="Blocked and challenged requests over the selected period."><div className="flex h-44 items-end gap-2 border-b border-l border-neutral-200 px-3 dark:border-neutral-800">{[32, 48, 38, 62, 44, 76, 56, 82, 68, 91, 64, 74, 52, 86, 70, 94, 58, 78].map((height, index) => <div key={index} className="flex-1 rounded-t bg-blue-500/80" style={{ height: `${height}%` }} />)}</div><div className="mt-3 flex justify-between text-xs text-neutral-500 dark:text-neutral-400"><span>24 hours ago</span><span>Now</span></div></Section><Section title="Protection coverage" description="Core protections currently enabled."><div className="space-y-4">{[["Managed threat rules", "OWASP-aligned request checks"], ["Abuse rate limits", "Login and API burst controls"], ["IP reputation", "Known hostile sources"], ["Sensitive path blocking", "Secrets and admin scans"]].map(([label, detail]) => <div key={label} className="flex items-start gap-3"><CheckCircle2 size={17} className="mt-0.5 shrink-0 text-emerald-500" /><div><p className="text-sm font-medium text-neutral-800 dark:text-neutral-200">{label}</p><p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">{detail}</p></div></div>)}</div></Section></div><Section title="Quick controls" description="Jump directly to common protection tasks."><div className="flex flex-wrap gap-2"><button type="button" className="cursor-pointer rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800" onClick={() => onTab("lists")}>Review IP lists</button><button type="button" className="cursor-pointer rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800" onClick={() => onTab("traffic")}>Inspect traffic</button><button type="button" className="cursor-pointer rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800" onClick={() => onTab("reports")}>Open reports</button><button type="button" className="cursor-pointer rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800" onClick={onReinstall}><ShieldCheck size={15} />Reinstall Application Shield</button></div></Section></div>;
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Stat
+          icon={ShieldCheck}
+          label="Protection status"
+          value={status || null}
+          detail={
+            status
+              ? status === "Active"
+                ? "Policy and connector are active"
+                : "Policy or connector is disabled"
+              : "Loading live protection state"
+          }
+          tone="emerald"
+        />
+        <Stat
+          icon={ShieldAlert}
+          label="Requests blocked"
+          value={
+            metrics
+              ? Number(metrics.requests_blocked || 0).toLocaleString()
+              : null
+          }
+          detail={metrics?.window || "Loading observed log data"}
+          tone="amber"
+        />
+        <Stat
+          icon={Globe2}
+          label="Protected sites"
+          value={
+            metrics
+              ? Number(metrics.protected_sites || 0).toLocaleString()
+              : null
+          }
+          detail="Enabled websites using an attached provider"
+          tone="blue"
+        />
+        <Stat
+          icon={Activity}
+          label="Inspection rate"
+          value={
+            metrics
+              ? metrics.inspection_rate == null
+                ? "—"
+                : `${metrics.inspection_rate}%`
+              : null
+          }
+          detail={metrics?.inspection_rate_label || "Loading traffic data"}
+        />
+      </div>
+      <div className="grid gap-5 xl:grid-cols-[1.4fr_1fr]">
+        <Section
+          title="Protection activity"
+          description="Blocked and challenged requests over the selected period."
+        >
+          <div className="flex h-44 items-end gap-2 border-b border-l border-neutral-200 px-3 dark:border-neutral-800">
+            {[
+              32, 48, 38, 62, 44, 76, 56, 82, 68, 91, 64, 74, 52, 86, 70, 94,
+              58, 78,
+            ].map((height, index) => (
+              <div
+                key={index}
+                className="flex-1 rounded-t bg-blue-500/80"
+                style={{ height: `${height}%` }}
+              />
+            ))}
+          </div>
+          <div className="mt-3 flex justify-between text-xs text-neutral-500 dark:text-neutral-400">
+            <span>24 hours ago</span>
+            <span>Now</span>
+          </div>
+        </Section>
+        <Section
+          title="Protection coverage"
+          description="Core protections currently enabled."
+        >
+          <div className="space-y-4">
+            {[
+              ["Managed threat rules", "OWASP-aligned request checks"],
+              ["Abuse rate limits", "Login and API burst controls"],
+              ["IP reputation", "Known hostile sources"],
+              ["Sensitive path blocking", "Secrets and admin scans"],
+            ].map(([label, detail]) => (
+              <div key={label} className="flex items-start gap-3">
+                <CheckCircle2
+                  size={17}
+                  className="mt-0.5 shrink-0 text-emerald-500"
+                />
+                <div>
+                  <p className="text-sm font-medium text-neutral-800 dark:text-neutral-200">
+                    {label}
+                  </p>
+                  <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                    {detail}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Section>
+      </div>
+      <Section
+        title="Quick controls"
+        description="Jump directly to common protection tasks."
+      >
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="cursor-pointer rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+            onClick={() => onTab("lists")}
+          >
+            Review IP lists
+          </button>
+          <button
+            type="button"
+            className="cursor-pointer rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+            onClick={() => onTab("traffic")}
+          >
+            Inspect traffic
+          </button>
+          <button
+            type="button"
+            className="cursor-pointer rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+            onClick={() => onTab("reports")}
+          >
+            Open reports
+          </button>
+          <button
+            type="button"
+            className="cursor-pointer rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+            onClick={onReinstall}
+          >
+            <ShieldCheck size={15} />
+            Reinstall Application Shield
+          </button>
+        </div>
+      </Section>
+    </div>
+  );
 }
 
 function SitesTab() {
@@ -133,10 +571,15 @@ function SitesTab() {
     setError("");
     return apiRequest("/api/v1/application-shield/protected-sites")
       .then(async (response) => {
-        if (!response.ok) throw new Error(await readApiError(response, "Unable to load protected sites."));
+        if (!response.ok)
+          throw new Error(
+            await readApiError(response, "Unable to load protected sites."),
+          );
         setSites((await response.json()).sites || []);
       })
-      .catch((reason) => setError(reason.message || "Unable to load protected sites."));
+      .catch((reason) =>
+        setError(reason.message || "Unable to load protected sites."),
+      );
   }, []);
   React.useEffect(() => {
     load();
@@ -146,23 +589,271 @@ function SitesTab() {
     setError("");
     const response = await apiRequest(`/api/v1/websites/${site.id}`);
     if (response.ok) setConfigureSite(await response.json());
-    else setError(await readApiError(response, "Unable to open website configuration."));
+    else
+      setError(
+        await readApiError(response, "Unable to open website configuration."),
+      );
   };
   const saveWebsite = async () => {
     setConfigureSite(null);
     await load();
     window.dispatchEvent(new CustomEvent("serverengine:websites-updated"));
   };
-  return <Section title="Protected sites" description="Live website profiles currently receiving Application Shield inspection." actions={<button type="button" onClick={load} className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"><RefreshCw size={15} />Refresh</button>}>
-    {error && <p className="mb-4 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300">{error}</p>}
-    {sites === null ? <div className="space-y-3">{[1, 2].map((item) => <div key={item} className="h-16 animate-pulse rounded-md bg-neutral-100 dark:bg-neutral-800" />)}</div> : sites.length === 0 ? <div className="rounded-md border border-dashed border-neutral-300 px-5 py-12 text-center dark:border-neutral-700"><ShieldCheck className="mx-auto text-neutral-400" size={28} /><h4 className="mt-3 text-sm font-semibold text-neutral-900 dark:text-neutral-100">No protected sites</h4><p className="mx-auto mt-1 max-w-md text-sm text-neutral-500 dark:text-neutral-400">Enable a website and attach its web-server connector to show it here.</p></div> : <div className="overflow-x-auto"><table className="w-full min-w-[780px] text-left"><thead><tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400"><th className="px-3 py-3">Website</th><th className="px-3 py-3">Provider</th><th className="px-3 py-3">Runtime</th><th className="px-3 py-3">Protection</th><th className="px-3 py-3">Observed requests</th><th className="px-3 py-3" /></tr></thead><tbody>{sites.map((site) => <tr key={site.id} className="border-b border-neutral-100 last:border-0 dark:border-neutral-800"><td className="px-3 py-4"><p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{site.domain}</p><p className="mt-1 max-w-xs truncate text-xs text-neutral-500 dark:text-neutral-400">{site.project_path}</p></td><td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">{site.provider_name}</td><td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">{site.runtime}</td><td className="px-3 py-4"><span className={`text-xs font-semibold ${site.status === "Protected" ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}>{site.status}</span><span className="mt-1 block text-xs text-neutral-500 dark:text-neutral-400">{site.mode === "detection" ? "Detection only" : site.mode === "blocking" ? "Blocking" : "Off"}</span></td><td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">{Number(site.requests_observed || 0).toLocaleString()}</td><td className="px-3 py-4 text-right"><button type="button" onClick={() => openWebsite(site)} className="cursor-pointer text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400">Configure</button></td></tr>)}</tbody></table></div>}
-    {configureSite && <WebsiteFormModal site={configureSite} defaultRoot="/server-engine/www" phpVersions={[]} serverType={configureSite.server_type} webServerOptions={[{ id: configureSite.server_type, name: configureSite.server_type }]} onClose={() => setConfigureSite(null)} onSaved={saveWebsite} />}
-  </Section>;
+  return (
+    <Section
+      title="Protected sites"
+      description="Live website profiles currently receiving Application Shield inspection."
+      actions={
+        <button
+          type="button"
+          onClick={load}
+          className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+        >
+          <RefreshCw size={15} />
+          Refresh
+        </button>
+      }
+    >
+      {error && (
+        <p className="mb-4 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300">
+          {error}
+        </p>
+      )}
+      {sites === null ? (
+        <div className="space-y-3">
+          {[1, 2].map((item) => (
+            <div
+              key={item}
+              className="h-16 animate-pulse rounded-md bg-neutral-100 dark:bg-neutral-800"
+            />
+          ))}
+        </div>
+      ) : sites.length === 0 ? (
+        <div className="rounded-md border border-dashed border-neutral-300 px-5 py-12 text-center dark:border-neutral-700">
+          <ShieldCheck className="mx-auto text-neutral-400" size={28} />
+          <h4 className="mt-3 text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+            No protected sites
+          </h4>
+          <p className="mx-auto mt-1 max-w-md text-sm text-neutral-500 dark:text-neutral-400">
+            Enable a website and attach its web-server connector to show it
+            here.
+          </p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[780px] text-left">
+            <thead>
+              <tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
+                <th className="px-3 py-3">Website</th>
+                <th className="px-3 py-3">Provider</th>
+                <th className="px-3 py-3">Runtime</th>
+                <th className="px-3 py-3">Protection</th>
+                <th className="px-3 py-3">Observed requests</th>
+                <th className="px-3 py-3" />
+              </tr>
+            </thead>
+            <tbody>
+              {sites.map((site) => (
+                <tr
+                  key={site.id}
+                  className="border-b border-neutral-100 last:border-0 dark:border-neutral-800"
+                >
+                  <td className="px-3 py-4">
+                    <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                      {site.domain}
+                    </p>
+                    <p className="mt-1 max-w-xs truncate text-xs text-neutral-500 dark:text-neutral-400">
+                      {site.project_path}
+                    </p>
+                  </td>
+                  <td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">
+                    {site.provider_name}
+                  </td>
+                  <td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">
+                    {site.runtime}
+                  </td>
+                  <td className="px-3 py-4">
+                    <span
+                      className={`text-xs font-semibold ${site.status === "Protected" ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}
+                    >
+                      {site.status}
+                    </span>
+                    <span className="mt-1 block text-xs text-neutral-500 dark:text-neutral-400">
+                      {site.mode === "detection"
+                        ? "Detection only"
+                        : site.mode === "blocking"
+                          ? "Blocking"
+                          : "Off"}
+                    </span>
+                  </td>
+                  <td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">
+                    {Number(site.requests_observed || 0).toLocaleString()}
+                  </td>
+                  <td className="px-3 py-4 text-right">
+                    <button
+                      type="button"
+                      onClick={() => openWebsite(site)}
+                      className="cursor-pointer text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400"
+                    >
+                      Configure
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {configureSite && (
+        <WebsiteFormModal
+          site={configureSite}
+          defaultRoot="/server-engine/www"
+          phpVersions={[]}
+          serverType={configureSite.server_type}
+          webServerOptions={[
+            { id: configureSite.server_type, name: configureSite.server_type },
+          ]}
+          onClose={() => setConfigureSite(null)}
+          onSaved={saveWebsite}
+        />
+      )}
+    </Section>
+  );
 }
 
-function RulesTab({ rules, query, setQuery, onEdit, onCreate, onToggle, onDelete }) {
-  const visible = rules.filter((rule) => `${rule.name} ${rule.match} ${rule.scope}`.toLowerCase().includes(query.toLowerCase()));
-  return <Section title="Request rules" description="Inspect and control the rules that evaluate incoming web requests." actions={<button type="button" className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700" onClick={onCreate}><Plus size={15} />Create rule</button>}><label className="flex max-w-md items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-neutral-400 dark:border-neutral-700"><Search size={15} /><input className="w-full bg-transparent text-sm text-neutral-900 outline-none dark:text-neutral-100" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search protection rules" /></label><div className="mt-4 overflow-x-auto"><table className="w-full min-w-[850px] text-left"><thead><tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400"><th className="px-3 py-3">Rule</th><th className="px-3 py-3">Match</th><th className="px-3 py-3">Action</th><th className="px-3 py-3">Matches</th><th className="px-3 py-3">Status</th><th className="px-3 py-3" /></tr></thead><tbody>{visible.map((rule) => <tr key={rule.id} className="border-b border-neutral-100 dark:border-neutral-800"><td className="px-3 py-4"><p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{rule.name}</p><p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">{rule.scope}</p></td><td className="max-w-sm px-3 py-4"><code className="block truncate text-xs text-neutral-600 dark:text-neutral-400">{rule.match}</code></td><td className="px-3 py-4"><span className={`rounded-full px-2 py-1 text-xs font-medium ${rule.action === "Allow" ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300" : rule.action === "Challenge" ? "bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300" : "bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-300"}`}>{rule.action}</span></td><td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">{rule.hits.toLocaleString()}</td><td className="px-3 py-4 text-xs font-medium text-emerald-600 dark:text-emerald-400">{rule.enabled ? "Enabled" : "Disabled"}</td><td className="px-3 py-4 text-right"><div className="flex justify-end gap-3"><button type="button" className="cursor-pointer text-sm font-semibold text-blue-600 dark:text-blue-400" onClick={() => onEdit(rule)}>Edit</button><button type="button" className="cursor-pointer text-sm text-neutral-500" onClick={() => onToggle(rule)}>{rule.enabled ? "Disable" : "Enable"}</button><button type="button" className="cursor-pointer text-sm text-rose-600 dark:text-rose-400" onClick={() => onDelete(rule.id)}>Delete</button></div></td></tr>)}{visible.length === 0 && <tr><td colSpan="6" className="px-3 py-12"><div className="grid min-h-40 place-items-center text-center text-sm text-neutral-500 dark:text-neutral-400"><div><ListFilter className="mx-auto text-neutral-400" size={28} /><p className="mt-3">{query ? "No matching request rules." : "No request rules have been created yet."}</p></div></div></td></tr>}</tbody></table></div></Section>;
+function RulesTab({
+  rules,
+  query,
+  setQuery,
+  onEdit,
+  onCreate,
+  onToggle,
+  onDelete,
+}) {
+  const visible = rules.filter((rule) =>
+    `${rule.name} ${rule.match} ${rule.scope}`
+      .toLowerCase()
+      .includes(query.toLowerCase()),
+  );
+  return (
+    <Section
+      title="Request rules"
+      description="Inspect and control the rules that evaluate incoming web requests."
+      actions={
+        <button
+          type="button"
+          className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+          onClick={onCreate}
+        >
+          <Plus size={15} />
+          Create rule
+        </button>
+      }
+    >
+      <label className="flex max-w-md items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-neutral-400 dark:border-neutral-700">
+        <Search size={15} />
+        <input
+          className="w-full bg-transparent text-sm text-neutral-900 outline-none dark:text-neutral-100"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search protection rules"
+        />
+      </label>
+      <div className="mt-4 overflow-x-auto">
+        <table className="w-full min-w-[850px] text-left">
+          <thead>
+            <tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
+              <th className="px-3 py-3">Rule</th>
+              <th className="px-3 py-3">Match</th>
+              <th className="px-3 py-3">Action</th>
+              <th className="px-3 py-3">Matches</th>
+              <th className="px-3 py-3">Status</th>
+              <th className="px-3 py-3" />
+            </tr>
+          </thead>
+          <tbody>
+            {visible.map((rule) => (
+              <tr
+                key={rule.id}
+                className="border-b border-neutral-100 dark:border-neutral-800"
+              >
+                <td className="px-3 py-4">
+                  <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                    {rule.name}
+                  </p>
+                  <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                    {rule.scope}
+                  </p>
+                </td>
+                <td className="max-w-sm px-3 py-4">
+                  <code className="block truncate text-xs text-neutral-600 dark:text-neutral-400">
+                    {rule.match}
+                  </code>
+                </td>
+                <td className="px-3 py-4">
+                  <span
+                    className={`rounded-full px-2 py-1 text-xs font-medium ${rule.action === "Allow" ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300" : rule.action === "Challenge" ? "bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300" : "bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-300"}`}
+                  >
+                    {rule.action}
+                  </span>
+                </td>
+                <td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">
+                  {rule.hits.toLocaleString()}
+                </td>
+                <td className="px-3 py-4 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                  {rule.enabled ? "Enabled" : "Disabled"}
+                </td>
+                <td className="px-3 py-4 text-right">
+                  <div className="flex justify-end gap-3">
+                    <button
+                      type="button"
+                      className="cursor-pointer text-sm font-semibold text-blue-600 dark:text-blue-400"
+                      onClick={() => onEdit(rule)}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      className="cursor-pointer text-sm text-neutral-500"
+                      onClick={() => onToggle(rule)}
+                    >
+                      {rule.enabled ? "Disable" : "Enable"}
+                    </button>
+                    <button
+                      type="button"
+                      className="cursor-pointer text-sm text-rose-600 dark:text-rose-400"
+                      onClick={() => onDelete(rule.id)}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {visible.length === 0 && (
+              <tr>
+                <td colSpan="6" className="px-3 py-12">
+                  <div className="grid min-h-40 place-items-center text-center text-sm text-neutral-500 dark:text-neutral-400">
+                    <div>
+                      <ListFilter
+                        className="mx-auto text-neutral-400"
+                        size={28}
+                      />
+                      <p className="mt-3">
+                        {query
+                          ? "No matching request rules."
+                          : "No request rules have been created yet."}
+                      </p>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </Section>
+  );
 }
 
 function LegacyApplicationShieldConfigModal({ overview, onClose, onSaved }) {
@@ -172,31 +863,56 @@ function LegacyApplicationShieldConfigModal({ overview, onClose, onSaved }) {
   const [message, setMessage] = React.useState("");
   const [toast, setToast] = React.useState(null);
   const [logs, setLogs] = React.useState(null);
-  const set = (key, value) => setPolicy((current) => ({ ...current, [key]: value }));
+  const set = (key, value) =>
+    setPolicy((current) => ({ ...current, [key]: value }));
   const loadLogs = React.useCallback(async () => {
-    const response = await apiRequest("/api/v1/application-shield/logs?lines=160");
+    const response = await apiRequest(
+      "/api/v1/application-shield/logs?lines=160",
+    );
     if (response.ok) setLogs(await response.json());
     else {
-      const detail = await readApiError(response, "Unable to load Application Shield logs.");
+      const detail = await readApiError(
+        response,
+        "Unable to load Application Shield logs.",
+      );
       setMessage(detail);
       setToast({ type: "error", message: detail });
     }
   }, []);
-  React.useEffect(() => { if (tab === "logs") loadLogs(); }, [tab, loadLogs]);
   React.useEffect(() => {
-    const connectorReady = overview.connectors.some((connector) => connector.attached === true);
+    if (tab === "logs") loadLogs();
+  }, [tab, loadLogs]);
+  React.useEffect(() => {
+    const connectorReady = overview.connectors.some(
+      (connector) => connector.attached === true,
+    );
     const applyPolicyLayout = () => {
-      const policyForm = Array.from(document.querySelectorAll("form")).find((form) => form.querySelector('input[type="number"]'));
+      const policyForm = Array.from(document.querySelectorAll("form")).find(
+        (form) => form.querySelector('input[type="number"]'),
+      );
       if (!policyForm) return;
       policyForm.classList.add("text-left");
-      policyForm.querySelectorAll("label").forEach((label) => label.classList.add("text-left"));
-      const inspectionLabel = Array.from(policyForm.querySelectorAll("label")).find((label) => label.textContent?.includes("Enable request inspection"));
+      policyForm
+        .querySelectorAll("label")
+        .forEach((label) => label.classList.add("text-left"));
+      const inspectionLabel = Array.from(
+        policyForm.querySelectorAll("label"),
+      ).find((label) =>
+        label.textContent?.includes("Enable request inspection"),
+      );
       // Keep the policy control visible. The backend validates connector
       // readiness and returns the real error instead of silently hiding the
       // setting from the operator.
       if (inspectionLabel) inspectionLabel.hidden = false;
-      const emergencyButton = Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.includes("Disable Application Shield"));
-      if (emergencyButton?.parentElement) emergencyButton.parentElement.hidden = !(policy.enabled && connectorReady);
+      const emergencyButton = Array.from(
+        document.querySelectorAll("button"),
+      ).find((button) =>
+        button.textContent?.includes("Disable Application Shield"),
+      );
+      if (emergencyButton?.parentElement)
+        emergencyButton.parentElement.hidden = !(
+          policy.enabled && connectorReady
+        );
     };
     applyPolicyLayout();
     const observer = new MutationObserver(applyPolicyLayout);
@@ -204,29 +920,54 @@ function LegacyApplicationShieldConfigModal({ overview, onClose, onSaved }) {
     return () => observer.disconnect();
   }, [tab, overview.connectors]);
   React.useEffect(() => {
-    const heading = Array.from(document.querySelectorAll("h2")).find((element) => element.textContent?.includes("Application Shield configuration"));
+    const heading = Array.from(document.querySelectorAll("h2")).find(
+      (element) =>
+        element.textContent?.includes("Application Shield configuration"),
+    );
     heading?.closest("section")?.classList.add("text-left");
-    const policyTab = Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "Policy");
+    const policyTab = Array.from(document.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Policy",
+    );
     if (policyTab?.parentElement) policyTab.parentElement.prepend(policyTab);
   }, []);
   React.useEffect(() => {
-    const title = Array.from(document.querySelectorAll("p")).find((element) => element.textContent?.trim() === "Emergency protection switch");
+    const title = Array.from(document.querySelectorAll("p")).find(
+      (element) =>
+        element.textContent?.trim() === "Emergency protection switch",
+    );
     const panel = title?.parentElement;
-    const active = policy.enabled && overview.connectors.some((connector) => connector.attached);
+    const active =
+      policy.enabled &&
+      overview.connectors.some((connector) => connector.attached);
     if (panel) panel.hidden = !active;
   }, [policy.enabled, overview.connectors]);
   const connectorAction = async (connector) => {
     setBusy(true);
     setMessage("");
     const action = connector.attached ? "detach" : "attach";
-    const response = await apiRequest(`/api/v1/application-shield/connectors/${connector.provider}/${action}`, { method: "POST" });
+    const response = await apiRequest(
+      `/api/v1/application-shield/connectors/${connector.provider}/${action}`,
+      { method: "POST" },
+    );
     if (!response.ok) {
-      const detail = await readApiError(response, `Unable to ${action} the ${connector.name} connector.`);
-      if (action === "attach" && connector.provider === "nginx" && detail.toLowerCase().includes("no compatible native connector")) {
-        const installResponse = await apiRequest("/api/v1/application-shield/install", { method: "POST" });
+      const detail = await readApiError(
+        response,
+        `Unable to ${action} the ${connector.name} connector.`,
+      );
+      if (
+        action === "attach" &&
+        connector.provider === "nginx" &&
+        detail.toLowerCase().includes("no compatible native connector")
+      ) {
+        const installResponse = await apiRequest(
+          "/api/v1/application-shield/install",
+          { method: "POST" },
+        );
         if (installResponse.ok) {
           const installResult = await installResponse.json();
-          setMessage(`Nginx connector installation queued. ${installResult.message || "Watch the installation job."}`);
+          setMessage(
+            `Nginx connector installation queued. ${installResult.message || "Watch the installation job."}`,
+          );
           window.dispatchEvent(new CustomEvent("serverengine:jobs-updated"));
         } else {
           setMessage(detail);
@@ -236,8 +977,7 @@ function LegacyApplicationShieldConfigModal({ overview, onClose, onSaved }) {
         setMessage(detail);
         showToast(detail, "error");
       }
-    }
-    else {
+    } else {
       const updated = await response.json();
       onSaved(updated);
       const success = `${connector.name} connector ${action}ed.`;
@@ -261,22 +1001,306 @@ function LegacyApplicationShieldConfigModal({ overview, onClose, onSaved }) {
       }),
     });
     if (!response.ok) {
-      const detail = await readApiError(response, "Unable to save Application Shield policy.");
+      const detail = await readApiError(
+        response,
+        "Unable to save Application Shield policy.",
+      );
       setMessage(detail);
       setToast({ type: "error", message: detail });
-    }
-    else {
+    } else {
       const saved = await response.json();
       setPolicy(saved);
       onSaved({ ...overview, policy: saved });
       setMessage("Policy saved.");
-      setToast({ type: "success", message: "Application Shield policy saved." });
+      setToast({
+        type: "success",
+        message: "Application Shield policy saved.",
+      });
       window.dispatchEvent(new CustomEvent("serverengine:shield-updated"));
     }
     setBusy(false);
   };
-  const statusClass = (status) => status === "attached" ? "text-emerald-600 dark:text-emerald-400" : status === "ready" ? "text-amber-600 dark:text-amber-400" : "text-neutral-500 dark:text-neutral-400";
-  return <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8"><section className="w-full max-w-3xl rounded-xl bg-white shadow-xl dark:bg-neutral-900"><div className="flex items-start justify-between gap-4 border-b border-neutral-200 px-6 py-5 dark:border-neutral-800"><div><p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Application protection</p><h2 className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">Application Shield configuration</h2><p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">Manage the engine, CRS policy, and provider connectors from one workspace.</p></div><button type="button" aria-label="Close Application Shield configuration" className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800" onClick={onClose}><X size={18} /></button></div><div className="flex gap-5 overflow-x-auto border-b border-neutral-200 px-6 dark:border-neutral-800">{[["connectors", "Connectors", Server], ["policy", "Policy", Settings2], ["logs", "Logs", Activity]].map(([key, label, Icon]) => <button type="button" key={key} onClick={() => setTab(key)} className={`inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium ${tab === key ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200"}`}><Icon size={15} />{label}</button>)}</div><div className="max-h-[calc(100vh-14rem)] overflow-y-auto p-6">{tab === "connectors" && <div className="space-y-5"><div className="grid gap-3 sm:grid-cols-2"><div className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800"><p className="text-xs uppercase tracking-wide text-neutral-500">Shield engine</p><p className={`mt-2 text-sm font-semibold ${overview.engine.installed ? "text-emerald-600 dark:text-emerald-400" : "text-neutral-500 dark:text-neutral-400"}`}>{overview.engine.status}</p><code className="mt-2 block break-all text-xs text-neutral-500">{overview.engine.root}</code></div><div className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800"><p className="text-xs uppercase tracking-wide text-neutral-500">OWASP CRS</p><p className={`mt-2 text-sm font-semibold ${overview.policy.crs_version === "installed" ? "text-emerald-600 dark:text-emerald-400" : "text-neutral-500 dark:text-neutral-400"}`}>{overview.policy.crs_version}</p><p className="mt-2 text-xs text-neutral-500">Rules are managed with the Application Shield bundle.</p></div></div><div className="overflow-x-auto rounded-lg border border-neutral-200 dark:border-neutral-800"><table className="w-full min-w-[620px] text-left text-sm"><thead className="border-b border-neutral-200 bg-neutral-50 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:bg-neutral-950"><tr><th className="px-4 py-3">Provider</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Configuration</th><th className="px-4 py-3 text-right">Action</th></tr></thead><tbody>{overview.connectors.map((connector) => <tr key={connector.provider} className="border-b border-neutral-100 last:border-0 dark:border-neutral-800"><td className="px-4 py-4 font-medium text-neutral-900 dark:text-neutral-100">{connector.name}</td><td className={`px-4 py-4 font-semibold ${statusClass(connector.status)}`}>{connector.status}</td><td className="max-w-xs px-4 py-4"><code className="block truncate text-xs text-neutral-500" title={connector.config_path || ""}>{connector.config_path || "—"}</code></td><td className="px-4 py-4 text-right"><button type="button" disabled={busy || ["not-installed", "available"].includes(connector.status)} onClick={() => connectorAction(connector)} className="cursor-pointer text-xs font-semibold text-blue-600 disabled:cursor-not-allowed disabled:text-neutral-400 dark:text-blue-400">{connector.attached ? "Detach" : connector.status === "ready" ? "Attach" : "Unavailable"}</button></td></tr>)}</tbody></table></div></div>}{tab === "policy" && <form className="space-y-5" onSubmit={save}><div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/50 dark:bg-amber-950/20"><p className="text-sm font-semibold text-amber-800 dark:text-amber-200">Emergency protection switch</p><p className="mt-1 text-xs leading-5 text-amber-700 dark:text-amber-300">Disable request inspection immediately if a rule or connector causes a production problem. This keeps the configuration installed but stops the policy from being active.</p><button type="button" disabled={busy || !policy.enabled} onClick={() => save(null, { ...policy, enabled: false, mode: "off" })} className="mt-3 inline-flex cursor-pointer items-center gap-2 rounded-md border border-rose-300 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-rose-900 dark:text-rose-300 dark:hover:bg-rose-950/30"><ShieldAlert size={14} />Disable Application Shield</button></div><label className="flex cursor-pointer items-start gap-3"><input type="checkbox" className="mt-1 h-4 w-4 accent-blue-600" checked={policy.enabled} onChange={(event) => set("enabled", event.target.checked)} /><span><span className="block text-sm font-semibold text-neutral-900 dark:text-neutral-100">Enable request inspection</span><span className="mt-1 block text-xs text-neutral-500">Keep the policy disabled while connectors are being prepared.</span></span></label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Protection mode<select className={input} value={policy.mode} onChange={(event) => set("mode", event.target.value)}><option value="detection">Detection only</option><option value="blocking">Blocking</option><option value="off">Off</option></select></label><label className="flex cursor-pointer items-start gap-3"><input type="checkbox" className="mt-1 h-4 w-4 accent-blue-600" checked={policy.crs_enabled} onChange={(event) => set("crs_enabled", event.target.checked)} /><span><span className="block text-sm font-semibold text-neutral-900 dark:text-neutral-100">Enable OWASP CRS</span><span className="mt-1 block text-xs text-neutral-500">Use maintained generic rules for common web attacks.</span></span></label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Request body limit<input className={input} type="number" min="1024" value={policy.request_body_limit} onChange={(event) => set("request_body_limit", event.target.value)} /></label>{message && <p className="text-sm text-neutral-600 dark:text-neutral-300">{message}</p>}<div className="flex justify-end"><button type="submit" disabled={busy} className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"><ShieldCheck size={15} />{busy ? "Saving…" : "Save policy"}</button></div></form>}{tab === "logs" && <div className="overflow-hidden rounded-lg border border-neutral-200 dark:border-neutral-800"><div className="flex items-center justify-between border-b border-neutral-200 bg-neutral-50 px-4 py-3 dark:border-neutral-800 dark:bg-neutral-950"><div><p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Request audit tail</p><p className="mt-1 text-xs text-neutral-500">{logs?.path || "Loading audit log…"}</p></div><button type="button" onClick={loadLogs} className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-xs font-semibold text-neutral-700 hover:bg-white dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-900"><RefreshCw size={14} />Reload</button></div>{logs?.available ? <pre className="max-h-96 overflow-auto bg-neutral-950 p-4 text-xs leading-6 text-emerald-300">{logs.lines.join("\n")}</pre> : <div className="px-5 py-12 text-center"><Activity className="mx-auto text-neutral-400" size={28} /><h3 className="mt-3 text-sm font-semibold text-neutral-900 dark:text-neutral-100">No audit events yet</h3><p className="mx-auto mt-1 max-w-md text-sm leading-6 text-neutral-500 dark:text-neutral-400">{logs?.message || "The audit log will appear here after a connector records a request."}</p></div>}</div>}</div></section><Toast message={toast?.message} type={toast?.type} onClose={() => setToast(null)} /></div>;
+  const statusClass = (status) =>
+    status === "attached"
+      ? "text-emerald-600 dark:text-emerald-400"
+      : status === "ready"
+        ? "text-amber-600 dark:text-amber-400"
+        : "text-neutral-500 dark:text-neutral-400";
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8">
+      <section className="w-full max-w-3xl rounded-xl bg-white shadow-xl dark:bg-neutral-900">
+        <div className="flex items-start justify-between gap-4 border-b border-neutral-200 px-6 py-5 dark:border-neutral-800">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">
+              Application protection
+            </p>
+            <h2 className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">
+              Application Shield configuration
+            </h2>
+            <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+              Manage the engine, CRS policy, and provider connectors from one
+              workspace.
+            </p>
+          </div>
+          <button
+            type="button"
+            aria-label="Close Application Shield configuration"
+            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+            onClick={onClose}
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div className="flex gap-5 overflow-x-auto border-b border-neutral-200 px-6 dark:border-neutral-800">
+          {[
+            ["connectors", "Connectors", Server],
+            ["policy", "Policy", Settings2],
+            ["logs", "Logs", Activity],
+          ].map(([key, label, Icon]) => (
+            <button
+              type="button"
+              key={key}
+              onClick={() => setTab(key)}
+              className={`inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium ${tab === key ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200"}`}
+            >
+              <Icon size={15} />
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="max-h-[calc(100vh-14rem)] overflow-y-auto p-6">
+          {tab === "connectors" && (
+            <div className="space-y-5">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+                  <p className="text-xs uppercase tracking-wide text-neutral-500">
+                    Shield engine
+                  </p>
+                  <p
+                    className={`mt-2 text-sm font-semibold ${overview.engine.installed ? "text-emerald-600 dark:text-emerald-400" : "text-neutral-500 dark:text-neutral-400"}`}
+                  >
+                    {overview.engine.status}
+                  </p>
+                  <code className="mt-2 block break-all text-xs text-neutral-500">
+                    {overview.engine.root}
+                  </code>
+                </div>
+                <div className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+                  <p className="text-xs uppercase tracking-wide text-neutral-500">
+                    OWASP CRS
+                  </p>
+                  <p
+                    className={`mt-2 text-sm font-semibold ${overview.policy.crs_version === "installed" ? "text-emerald-600 dark:text-emerald-400" : "text-neutral-500 dark:text-neutral-400"}`}
+                  >
+                    {overview.policy.crs_version}
+                  </p>
+                  <p className="mt-2 text-xs text-neutral-500">
+                    Rules are managed with the Application Shield bundle.
+                  </p>
+                </div>
+              </div>
+              <div className="overflow-x-auto rounded-lg border border-neutral-200 dark:border-neutral-800">
+                <table className="w-full min-w-[620px] text-left text-sm">
+                  <thead className="border-b border-neutral-200 bg-neutral-50 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:bg-neutral-950">
+                    <tr>
+                      <th className="px-4 py-3">Provider</th>
+                      <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3">Configuration</th>
+                      <th className="px-4 py-3 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {overview.connectors.map((connector) => (
+                      <tr
+                        key={connector.provider}
+                        className="border-b border-neutral-100 last:border-0 dark:border-neutral-800"
+                      >
+                        <td className="px-4 py-4 font-medium text-neutral-900 dark:text-neutral-100">
+                          {connector.name}
+                        </td>
+                        <td
+                          className={`px-4 py-4 font-semibold ${statusClass(connector.status)}`}
+                        >
+                          {connector.status}
+                        </td>
+                        <td className="max-w-xs px-4 py-4">
+                          <code
+                            className="block truncate text-xs text-neutral-500"
+                            title={connector.config_path || ""}
+                          >
+                            {connector.config_path || "—"}
+                          </code>
+                        </td>
+                        <td className="px-4 py-4 text-right">
+                          <button
+                            type="button"
+                            disabled={
+                              busy ||
+                              ["not-installed", "available"].includes(
+                                connector.status,
+                              )
+                            }
+                            onClick={() => connectorAction(connector)}
+                            className="cursor-pointer text-xs font-semibold text-blue-600 disabled:cursor-not-allowed disabled:text-neutral-400 dark:text-blue-400"
+                          >
+                            {connector.attached
+                              ? "Detach"
+                              : connector.status === "ready"
+                                ? "Attach"
+                                : "Unavailable"}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+          {tab === "policy" && (
+            <form className="space-y-5" onSubmit={save}>
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/50 dark:bg-amber-950/20">
+                <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">
+                  Emergency protection switch
+                </p>
+                <p className="mt-1 text-xs leading-5 text-amber-700 dark:text-amber-300">
+                  Disable request inspection immediately if a rule or connector
+                  causes a production problem. This keeps the configuration
+                  installed but stops the policy from being active.
+                </p>
+                <button
+                  type="button"
+                  disabled={busy || !policy.enabled}
+                  onClick={() =>
+                    save(null, { ...policy, enabled: false, mode: "off" })
+                  }
+                  className="mt-3 inline-flex cursor-pointer items-center gap-2 rounded-md border border-rose-300 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-rose-900 dark:text-rose-300 dark:hover:bg-rose-950/30"
+                >
+                  <ShieldAlert size={14} />
+                  Disable Application Shield
+                </button>
+              </div>
+              <label className="flex cursor-pointer items-start gap-3">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 accent-blue-600"
+                  checked={policy.enabled}
+                  onChange={(event) => set("enabled", event.target.checked)}
+                />
+                <span>
+                  <span className="block text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                    Enable request inspection
+                  </span>
+                  <span className="mt-1 block text-xs text-neutral-500">
+                    Keep the policy disabled while connectors are being
+                    prepared.
+                  </span>
+                </span>
+              </label>
+              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                Protection mode
+                <select
+                  className={input}
+                  value={policy.mode}
+                  onChange={(event) => set("mode", event.target.value)}
+                >
+                  <option value="detection">Detection only</option>
+                  <option value="blocking">Blocking</option>
+                  <option value="off">Off</option>
+                </select>
+              </label>
+              <label className="flex cursor-pointer items-start gap-3">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 accent-blue-600"
+                  checked={policy.crs_enabled}
+                  onChange={(event) => set("crs_enabled", event.target.checked)}
+                />
+                <span>
+                  <span className="block text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                    Enable OWASP CRS
+                  </span>
+                  <span className="mt-1 block text-xs text-neutral-500">
+                    Use maintained generic rules for common web attacks.
+                  </span>
+                </span>
+              </label>
+              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                Request body limit
+                <input
+                  className={input}
+                  type="number"
+                  min="1024"
+                  value={policy.request_body_limit}
+                  onChange={(event) =>
+                    set("request_body_limit", event.target.value)
+                  }
+                />
+              </label>
+              {message && (
+                <p className="text-sm text-neutral-600 dark:text-neutral-300">
+                  {message}
+                </p>
+              )}
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  disabled={busy}
+                  className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                >
+                  <ShieldCheck size={15} />
+                  {busy ? "Saving…" : "Save policy"}
+                </button>
+              </div>
+            </form>
+          )}
+          {tab === "logs" && (
+            <div className="overflow-hidden rounded-lg border border-neutral-200 dark:border-neutral-800">
+              <div className="flex items-center justify-between border-b border-neutral-200 bg-neutral-50 px-4 py-3 dark:border-neutral-800 dark:bg-neutral-950">
+                <div>
+                  <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                    Request audit tail
+                  </p>
+                  <p className="mt-1 text-xs text-neutral-500">
+                    {logs?.path || "Loading audit log…"}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={loadLogs}
+                  className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-xs font-semibold text-neutral-700 hover:bg-white dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-900"
+                >
+                  <RefreshCw size={14} />
+                  Reload
+                </button>
+              </div>
+              {logs?.available ? (
+                <pre className="max-h-96 overflow-auto bg-neutral-950 p-4 text-xs leading-6 text-emerald-300">
+                  {logs.lines.join("\n")}
+                </pre>
+              ) : (
+                <div className="px-5 py-12 text-center">
+                  <Activity className="mx-auto text-neutral-400" size={28} />
+                  <h3 className="mt-3 text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                    No audit events yet
+                  </h3>
+                  <p className="mx-auto mt-1 max-w-md text-sm leading-6 text-neutral-500 dark:text-neutral-400">
+                    {logs?.message ||
+                      "The audit log will appear here after a connector records a request."}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </section>
+      <Toast
+        message={toast?.message}
+        type={toast?.type}
+        onClose={() => setToast(null)}
+      />
+    </div>
+  );
 }
 
 function LegacyApplicationShieldConfigModalV2({ overview, onClose, onSaved }) {
@@ -289,14 +1313,22 @@ function LegacyApplicationShieldConfigModalV2({ overview, onClose, onSaved }) {
 
   const install = async () => {
     setBusy(true);
-    const response = await apiRequest("/api/v1/application-shield/install", { method: "POST" });
+    const response = await apiRequest("/api/v1/application-shield/install", {
+      method: "POST",
+    });
     if (response.ok) {
       const result = await response.json();
       setMessage(result.message || "Application Shield reinstall queued.");
-      setToast({ type: "success", message: "Application Shield reinstall queued." });
+      setToast({
+        type: "success",
+        message: "Application Shield reinstall queued.",
+      });
       window.dispatchEvent(new CustomEvent("serverengine:jobs-updated"));
     } else {
-      const detail = await readApiError(response, "Unable to reinstall Application Shield.");
+      const detail = await readApiError(
+        response,
+        "Unable to reinstall Application Shield.",
+      );
       setMessage(detail);
       setToast({ type: "error", message: detail });
     }
@@ -304,7 +1336,9 @@ function LegacyApplicationShieldConfigModalV2({ overview, onClose, onSaved }) {
   };
 
   const loadLogs = async () => {
-    const response = await apiRequest("/api/v1/application-shield/logs?lines=160");
+    const response = await apiRequest(
+      "/api/v1/application-shield/logs?lines=160",
+    );
     if (response.ok) setLogs(await response.json());
   };
 
@@ -313,15 +1347,27 @@ function LegacyApplicationShieldConfigModalV2({ overview, onClose, onSaved }) {
     setBusy(true);
     const response = await apiRequest("/api/v1/application-shield/policy", {
       method: "PATCH",
-      body: JSON.stringify({ ...policy, request_body_limit: Number(policy.request_body_limit) }),
+      body: JSON.stringify({
+        ...policy,
+        request_body_limit: Number(policy.request_body_limit),
+      }),
     });
     if (response.ok) {
       const saved = await response.json();
       setPolicy(saved);
       onSaved({ ...overview, policy: saved });
-      setToast({ type: "success", message: "Application Shield policy saved." });
+      setToast({
+        type: "success",
+        message: "Application Shield policy saved.",
+      });
     } else {
-      setToast({ type: "error", message: await readApiError(response, "Unable to save Application Shield policy.") });
+      setToast({
+        type: "error",
+        message: await readApiError(
+          response,
+          "Unable to save Application Shield policy.",
+        ),
+      });
     }
     setBusy(false);
   };
@@ -330,10 +1376,256 @@ function LegacyApplicationShieldConfigModalV2({ overview, onClose, onSaved }) {
     if (tab === "logs") loadLogs();
   }, [tab]);
 
-  return <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8"><section className="w-full max-w-3xl rounded-xl bg-white shadow-xl dark:bg-neutral-900"><div className="flex items-start justify-between gap-4 border-b border-neutral-200 px-6 py-5 dark:border-neutral-800"><div><p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Application protection</p><h2 className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">Application Shield configuration</h2></div><button type="button" aria-label="Close Application Shield configuration" className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800" onClick={onClose}><X size={18} /></button></div><div className="flex gap-5 overflow-x-auto border-b border-neutral-200 px-6 dark:border-neutral-800">{[["connectors", "Connectors", Server], ["policy", "Policy", Settings2], ["install", "Reinstall", RefreshCw], ["logs", "Logs", Activity]].map(([key, label, Icon]) => <button type="button" key={key} onClick={() => setTab(key)} className={`inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium ${tab === key ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200"}`}><Icon size={15} />{label}</button>)}</div><div className="max-h-[calc(100vh-14rem)] overflow-y-auto p-6">{tab === "connectors" && <div className="space-y-4"><div className="grid gap-3 sm:grid-cols-2"><div className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800"><p className="text-xs uppercase tracking-wide text-neutral-500">Shield engine</p><p className="mt-2 text-sm font-semibold text-emerald-600 dark:text-emerald-400">{overview.engine.status}</p></div><div className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800"><p className="text-xs uppercase tracking-wide text-neutral-500">OWASP CRS</p><p className="mt-2 text-sm font-semibold text-emerald-600 dark:text-emerald-400">{overview.policy.crs_version}</p></div></div><div className="overflow-x-auto"><table className="w-full min-w-[620px] text-left text-sm"><thead><tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800"><th className="px-3 py-3">Provider</th><th className="px-3 py-3">Status</th><th className="px-3 py-3">Configuration</th></tr></thead><tbody>{overview.connectors.map((connector) => <tr key={connector.provider} className="border-b border-neutral-100 dark:border-neutral-800"><td className="px-3 py-4 font-medium text-neutral-900 dark:text-neutral-100">{connector.name}</td><td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">{connector.status}</td><td className="px-3 py-4"><code className="block truncate text-xs text-neutral-500">{connector.config_path || "—"}</code></td></tr>)}</tbody></table></div></div>}{tab === "policy" && <form className="space-y-5" onSubmit={savePolicy}><label className="flex items-center gap-3 text-sm font-medium text-neutral-700 dark:text-neutral-300"><input type="checkbox" className="h-4 w-4 accent-blue-600" checked={policy.enabled} onChange={(event) => setPolicy({ ...policy, enabled: event.target.checked })} />Enable request inspection</label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Protection mode<select className={input} value={policy.mode} onChange={(event) => setPolicy({ ...policy, mode: event.target.value })}><option value="detection">Detection only</option><option value="blocking">Blocking</option><option value="off">Off</option></select></label><label className="flex items-center gap-3 text-sm font-medium text-neutral-700 dark:text-neutral-300"><input type="checkbox" className="h-4 w-4 accent-blue-600" checked={policy.crs_enabled} onChange={(event) => setPolicy({ ...policy, crs_enabled: event.target.checked })} />Enable OWASP CRS</label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Request body limit<input className={input} type="number" min="1024" value={policy.request_body_limit} onChange={(event) => setPolicy({ ...policy, request_body_limit: event.target.value })} /></label><div className="flex justify-end"><button type="submit" disabled={busy} className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"><ShieldCheck size={15} />{busy ? "Saving…" : "Save policy"}</button></div></form>}{tab === "install" && <div className="space-y-5"><div><h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Reinstall Application Shield</h3><p className="mt-1 text-sm leading-6 text-neutral-500 dark:text-neutral-400">Refresh the managed ModSecurity engine, OWASP CRS, and compatible provider connectors. Existing policy settings remain stored.</p></div><div className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800"><dl className="space-y-3 text-sm"><div className="flex justify-between gap-4"><dt className="text-neutral-500">Engine</dt><dd className="font-medium text-neutral-900 dark:text-neutral-100">{overview.engine.status}</dd></div><div className="flex justify-between gap-4"><dt className="text-neutral-500">Ruleset</dt><dd className="font-medium text-neutral-900 dark:text-neutral-100">{overview.policy.crs_version}</dd></div><div className="flex justify-between gap-4"><dt className="text-neutral-500">Providers</dt><dd className="font-medium text-neutral-900 dark:text-neutral-100">{overview.connectors.length}</dd></div></dl></div><button type="button" disabled={busy} onClick={install} className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"><RefreshCw size={15} />{busy ? "Queuing…" : "Reinstall Application Shield"}</button>{message && <p className="text-sm text-neutral-600 dark:text-neutral-300">{message}</p>}</div>}{tab === "logs" && <div className="overflow-hidden rounded-lg border border-neutral-200 dark:border-neutral-800"><div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3"><p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Request audit tail</p><button type="button" onClick={loadLogs} className="inline-flex cursor-pointer items-center gap-2 text-sm font-semibold text-blue-600 dark:text-blue-400"><RefreshCw size={14} />Reload</button></div>{logs?.available ? <pre className="max-h-96 overflow-auto bg-neutral-950 p-4 text-xs leading-6 text-emerald-300">{logs.lines.join("\n")}</pre> : <p className="px-5 py-12 text-center text-sm text-neutral-500">No audit events yet.</p>}</div>}</div></section><Toast message={toast?.message} type={toast?.type} onClose={() => setToast(null)} /></div>;
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8">
+      <section className="w-full max-w-3xl rounded-xl bg-white shadow-xl dark:bg-neutral-900">
+        <div className="flex items-start justify-between gap-4 border-b border-neutral-200 px-6 py-5 dark:border-neutral-800">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">
+              Application protection
+            </p>
+            <h2 className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">
+              Application Shield configuration
+            </h2>
+          </div>
+          <button
+            type="button"
+            aria-label="Close Application Shield configuration"
+            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+            onClick={onClose}
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div className="flex gap-5 overflow-x-auto border-b border-neutral-200 px-6 dark:border-neutral-800">
+          {[
+            ["connectors", "Connectors", Server],
+            ["policy", "Policy", Settings2],
+            ["install", "Reinstall", RefreshCw],
+            ["logs", "Logs", Activity],
+          ].map(([key, label, Icon]) => (
+            <button
+              type="button"
+              key={key}
+              onClick={() => setTab(key)}
+              className={`inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium ${tab === key ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200"}`}
+            >
+              <Icon size={15} />
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="max-h-[calc(100vh-14rem)] overflow-y-auto p-6">
+          {tab === "connectors" && (
+            <div className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+                  <p className="text-xs uppercase tracking-wide text-neutral-500">
+                    Shield engine
+                  </p>
+                  <p className="mt-2 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+                    {overview.engine.status}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+                  <p className="text-xs uppercase tracking-wide text-neutral-500">
+                    OWASP CRS
+                  </p>
+                  <p className="mt-2 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+                    {overview.policy.crs_version}
+                  </p>
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[620px] text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800">
+                      <th className="px-3 py-3">Provider</th>
+                      <th className="px-3 py-3">Status</th>
+                      <th className="px-3 py-3">Configuration</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {overview.connectors.map((connector) => (
+                      <tr
+                        key={connector.provider}
+                        className="border-b border-neutral-100 dark:border-neutral-800"
+                      >
+                        <td className="px-3 py-4 font-medium text-neutral-900 dark:text-neutral-100">
+                          {connector.name}
+                        </td>
+                        <td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">
+                          {connector.status}
+                        </td>
+                        <td className="px-3 py-4">
+                          <code className="block truncate text-xs text-neutral-500">
+                            {connector.config_path || "—"}
+                          </code>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+          {tab === "policy" && (
+            <form className="space-y-5" onSubmit={savePolicy}>
+              <label className="flex items-center gap-3 text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-blue-600"
+                  checked={policy.enabled}
+                  onChange={(event) =>
+                    setPolicy({ ...policy, enabled: event.target.checked })
+                  }
+                />
+                Enable request inspection
+              </label>
+              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                Protection mode
+                <select
+                  className={input}
+                  value={policy.mode}
+                  onChange={(event) =>
+                    setPolicy({ ...policy, mode: event.target.value })
+                  }
+                >
+                  <option value="detection">Detection only</option>
+                  <option value="blocking">Blocking</option>
+                  <option value="off">Off</option>
+                </select>
+              </label>
+              <label className="flex items-center gap-3 text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-blue-600"
+                  checked={policy.crs_enabled}
+                  onChange={(event) =>
+                    setPolicy({ ...policy, crs_enabled: event.target.checked })
+                  }
+                />
+                Enable OWASP CRS
+              </label>
+              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                Request body limit
+                <input
+                  className={input}
+                  type="number"
+                  min="1024"
+                  value={policy.request_body_limit}
+                  onChange={(event) =>
+                    setPolicy({
+                      ...policy,
+                      request_body_limit: event.target.value,
+                    })
+                  }
+                />
+              </label>
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  disabled={busy}
+                  className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+                >
+                  <ShieldCheck size={15} />
+                  {busy ? "Saving…" : "Save policy"}
+                </button>
+              </div>
+            </form>
+          )}
+          {tab === "install" && (
+            <div className="space-y-5">
+              <div>
+                <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">
+                  Reinstall Application Shield
+                </h3>
+                <p className="mt-1 text-sm leading-6 text-neutral-500 dark:text-neutral-400">
+                  Refresh the managed ModSecurity engine, OWASP CRS, and
+                  compatible provider connectors. Existing policy settings
+                  remain stored.
+                </p>
+              </div>
+              <div className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+                <dl className="space-y-3 text-sm">
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-neutral-500">Engine</dt>
+                    <dd className="font-medium text-neutral-900 dark:text-neutral-100">
+                      {overview.engine.status}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-neutral-500">Ruleset</dt>
+                    <dd className="font-medium text-neutral-900 dark:text-neutral-100">
+                      {overview.policy.crs_version}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-neutral-500">Providers</dt>
+                    <dd className="font-medium text-neutral-900 dark:text-neutral-100">
+                      {overview.connectors.length}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={install}
+                className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <RefreshCw size={15} />
+                {busy ? "Queuing…" : "Reinstall Application Shield"}
+              </button>
+              {message && (
+                <p className="text-sm text-neutral-600 dark:text-neutral-300">
+                  {message}
+                </p>
+              )}
+            </div>
+          )}
+          {tab === "logs" && (
+            <div className="overflow-hidden rounded-lg border border-neutral-200 dark:border-neutral-800">
+              <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3">
+                <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                  Request audit tail
+                </p>
+                <button
+                  type="button"
+                  onClick={loadLogs}
+                  className="inline-flex cursor-pointer items-center gap-2 text-sm font-semibold text-blue-600 dark:text-blue-400"
+                >
+                  <RefreshCw size={14} />
+                  Reload
+                </button>
+              </div>
+              {logs?.available ? (
+                <pre className="max-h-96 overflow-auto bg-neutral-950 p-4 text-xs leading-6 text-emerald-300">
+                  {logs.lines.join("\n")}
+                </pre>
+              ) : (
+                <p className="px-5 py-12 text-center text-sm text-neutral-500">
+                  No audit events yet.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      </section>
+      <Toast
+        message={toast?.message}
+        type={toast?.type}
+        onClose={() => setToast(null)}
+      />
+    </div>
+  );
 }
 
-function ApplicationShieldConfigModal({ overview: initialOverview, onClose, onSaved }) {
+function ApplicationShieldConfigModal({
+  overview: initialOverview,
+  onClose,
+  onSaved,
+}) {
   const [overview, setOverview] = React.useState(initialOverview);
   const [tab, setTab] = React.useState("connectors");
   const [busy, setBusy] = React.useState(false);
@@ -343,14 +1635,27 @@ function ApplicationShieldConfigModal({ overview: initialOverview, onClose, onSa
   const [logs, setLogs] = React.useState(null);
   const [connectorJob, setConnectorJob] = React.useState(null);
   React.useEffect(() => {
-    const cells = document.querySelectorAll("section.w-full.max-w-3xl tbody tr td:nth-child(2)");
+    const cells = document.querySelectorAll(
+      "section.w-full.max-w-3xl tbody tr td:nth-child(2)",
+    );
     cells.forEach((cell) => {
       cell.classList.remove(
-        "text-emerald-600", "dark:text-emerald-400", "text-amber-600", "dark:text-amber-400",
-        "text-blue-600", "dark:text-blue-400", "text-rose-600", "dark:text-rose-400",
-        "text-neutral-500", "dark:text-neutral-400", "text-neutral-600", "dark:text-neutral-600",
+        "text-emerald-600",
+        "dark:text-emerald-400",
+        "text-amber-600",
+        "dark:text-amber-400",
+        "text-blue-600",
+        "dark:text-blue-400",
+        "text-rose-600",
+        "dark:text-rose-400",
+        "text-neutral-500",
+        "dark:text-neutral-400",
+        "text-neutral-600",
+        "dark:text-neutral-600",
       );
-      statusClass(cell.textContent.trim()).split(" ").forEach((className) => cell.classList.add(className));
+      statusClass(cell.textContent.trim())
+        .split(" ")
+        .forEach((className) => cell.classList.add(className));
     });
   }, [overview]);
 
@@ -358,7 +1663,13 @@ function ApplicationShieldConfigModal({ overview: initialOverview, onClose, onSa
     const response = await apiRequest("/api/v1/jobs");
     if (!response.ok) return;
     const jobs = await response.json();
-    const active = jobs.find((job) => job.type?.startsWith("Prepare ") && job.type?.endsWith(" Application Shield connector") && ["queued", "running"].includes(job.status)) || null;
+    const active =
+      jobs.find(
+        (job) =>
+          job.type?.startsWith("Prepare ") &&
+          job.type?.endsWith(" Application Shield connector") &&
+          ["queued", "running"].includes(job.status),
+      ) || null;
     setConnectorJob(active);
     if (!active) setBusy(false);
   }, []);
@@ -366,7 +1677,11 @@ function ApplicationShieldConfigModal({ overview: initialOverview, onClose, onSa
   React.useEffect(() => {
     refreshConnectorJob();
     window.addEventListener("serverengine:jobs-updated", refreshConnectorJob);
-    return () => window.removeEventListener("serverengine:jobs-updated", refreshConnectorJob);
+    return () =>
+      window.removeEventListener(
+        "serverengine:jobs-updated",
+        refreshConnectorJob,
+      );
   }, [refreshConnectorJob]);
 
   React.useEffect(() => {
@@ -389,15 +1704,30 @@ function ApplicationShieldConfigModal({ overview: initialOverview, onClose, onSa
   const connectorAction = async (connector) => {
     const action = connector.attached ? "detach" : "attach";
     setBusy(true);
-    const response = await apiRequest(`/api/v1/application-shield/connectors/${connector.provider}/${action}`, { method: "POST" });
+    const response = await apiRequest(
+      `/api/v1/application-shield/connectors/${connector.provider}/${action}`,
+      { method: "POST" },
+    );
     if (!response.ok) {
-      setToast({ type: "error", message: await readApiError(response, `Unable to ${action} the connector.`) });
+      setToast({
+        type: "error",
+        message: await readApiError(
+          response,
+          `Unable to ${action} the connector.`,
+        ),
+      });
       setBusy(false);
     } else {
       const updated = await response.json();
       setOverview(updated);
       onSaved(updated);
-      setToast({ type: "success", message: updated.status === "queued" ? updated.message : `${connector.name} connector ${action}ed.` });
+      setToast({
+        type: "success",
+        message:
+          updated.status === "queued"
+            ? updated.message
+            : `${connector.name} connector ${action}ed.`,
+      });
       if (updated.status === "queued") {
         await refreshConnectorJob();
         window.dispatchEvent(new CustomEvent("serverengine:jobs-updated"));
@@ -410,98 +1740,801 @@ function ApplicationShieldConfigModal({ overview: initialOverview, onClose, onSa
 
   const reinstall = async () => {
     setBusy(true);
-    const response = await apiRequest("/api/v1/application-shield/install", { method: "POST" });
+    const response = await apiRequest("/api/v1/application-shield/install", {
+      method: "POST",
+    });
     if (response.ok) {
-      setMessage((await response.json()).message || "Application Shield reinstall queued.");
-      setToast({ type: "success", message: "Application Shield reinstall queued." });
+      setMessage(
+        (await response.json()).message ||
+          "Application Shield reinstall queued.",
+      );
+      setToast({
+        type: "success",
+        message: "Application Shield reinstall queued.",
+      });
       window.dispatchEvent(new CustomEvent("serverengine:jobs-updated"));
-    } else setToast({ type: "error", message: await readApiError(response, "Unable to reinstall Application Shield.") });
+    } else
+      setToast({
+        type: "error",
+        message: await readApiError(
+          response,
+          "Unable to reinstall Application Shield.",
+        ),
+      });
     setBusy(false);
   };
 
   const savePolicy = async (event) => {
     event.preventDefault();
     setBusy(true);
-    const response = await apiRequest("/api/v1/application-shield/policy", { method: "PATCH", body: JSON.stringify({ ...policy, request_body_limit: Number(policy.request_body_limit) }) });
+    const response = await apiRequest("/api/v1/application-shield/policy", {
+      method: "PATCH",
+      body: JSON.stringify({
+        ...policy,
+        request_body_limit: Number(policy.request_body_limit),
+      }),
+    });
     if (response.ok) {
       const saved = await response.json();
       setPolicy(saved);
       setOverview({ ...overview, policy: saved });
       onSaved({ ...overview, policy: saved });
-      setToast({ type: "success", message: "Application Shield policy saved." });
-    } else setToast({ type: "error", message: await readApiError(response, "Unable to save Application Shield policy.") });
+      setToast({
+        type: "success",
+        message: "Application Shield policy saved.",
+      });
+    } else
+      setToast({
+        type: "error",
+        message: await readApiError(
+          response,
+          "Unable to save Application Shield policy.",
+        ),
+      });
     setBusy(false);
   };
 
   const loadLogs = async () => {
-    const response = await apiRequest("/api/v1/application-shield/logs?lines=160");
+    const response = await apiRequest(
+      "/api/v1/application-shield/logs?lines=160",
+    );
     if (response.ok) setLogs(await response.json());
   };
 
-  React.useEffect(() => { if (tab === "logs") loadLogs(); }, [tab]);
+  React.useEffect(() => {
+    if (tab === "logs") loadLogs();
+  }, [tab]);
 
-  return <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8"><section className="w-full max-w-3xl rounded-xl bg-white shadow-xl dark:bg-neutral-900"><div className="flex items-start justify-between gap-4 border-b border-neutral-200 px-6 py-5 dark:border-neutral-800"><div><p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Application protection</p><h2 className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">Application Shield configuration</h2></div><button type="button" aria-label="Close Application Shield configuration" className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800" onClick={onClose}><X size={18} /></button></div><div className="flex gap-5 overflow-x-auto border-b border-neutral-200 px-6 dark:border-neutral-800">{[["connectors", "Connectors", Server], ["policy", "Policy", Settings2], ["install", "Reinstall", RefreshCw], ["logs", "Logs", Activity]].map(([key, label, Icon]) => <button type="button" key={key} onClick={() => setTab(key)} className={`inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium ${tab === key ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200"}`}><Icon size={15} />{label}</button>)}</div><div className="max-h-[calc(100vh-14rem)] overflow-y-auto p-6">{tab === "connectors" && <div className="space-y-4"><div className="grid gap-3 sm:grid-cols-2"><div className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800"><p className="text-xs uppercase tracking-wide text-neutral-500">Shield engine</p><p className="mt-2 text-sm font-semibold text-emerald-600 dark:text-emerald-400">{overview.engine.status}</p></div><div className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800"><p className="text-xs uppercase tracking-wide text-neutral-500">OWASP CRS</p><p className="mt-2 text-sm font-semibold text-emerald-600 dark:text-emerald-400">{overview.policy.crs_version}</p></div></div><div className="overflow-x-auto"><table className="w-full min-w-[700px] text-left text-sm"><thead><tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800"><th className="px-3 py-3">Provider</th><th className="px-3 py-3">Status</th><th className="px-3 py-3">Configuration</th><th className="px-3 py-3 text-right">Action</th></tr></thead><tbody>{overview.connectors.map((connector) => <tr key={connector.provider} className="border-b border-neutral-100 dark:border-neutral-800"><td className="px-3 py-4 font-medium text-neutral-900 dark:text-neutral-100">{connector.name}</td><td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">{connector.status}</td><td className="px-3 py-4"><code className="block max-w-xs truncate text-xs text-neutral-500">{connector.config_path || "—"}</code></td><td className="px-3 py-4 text-right"><button type="button" disabled={busy || ["not-installed", "available"].includes(connector.status)} onClick={() => connectorAction(connector)} className="cursor-pointer text-xs font-semibold text-blue-600 disabled:cursor-not-allowed disabled:text-neutral-400 dark:text-blue-400">{connector.attached ? "Detach" : connector.status === "ready" ? "Attach" : "Unavailable"}</button></td></tr>)}</tbody></table></div></div>}{tab === "policy" && <form className="space-y-5" onSubmit={savePolicy}><label className="flex items-center gap-3 text-sm font-medium text-neutral-700 dark:text-neutral-300"><input type="checkbox" className="h-4 w-4 accent-blue-600" checked={policy.enabled} onChange={(event) => setPolicy({ ...policy, enabled: event.target.checked })} />Enable request inspection</label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Protection mode<select className={input} value={policy.mode} onChange={(event) => setPolicy({ ...policy, mode: event.target.value })}><option value="detection">Detection only</option><option value="blocking">Blocking</option><option value="off">Off</option></select></label><label className="flex items-center gap-3 text-sm font-medium text-neutral-700 dark:text-neutral-300"><input type="checkbox" className="h-4 w-4 accent-blue-600" checked={policy.crs_enabled} onChange={(event) => setPolicy({ ...policy, crs_enabled: event.target.checked })} />Enable OWASP CRS</label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Request body limit<input className={input} type="number" min="1024" value={policy.request_body_limit} onChange={(event) => setPolicy({ ...policy, request_body_limit: event.target.value })} /></label><div className="flex justify-end"><button type="submit" disabled={busy} className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"><ShieldCheck size={15} />{busy ? "Saving…" : "Save policy"}</button></div></form>}{tab === "install" && <div className="space-y-5"><div><h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Reinstall Application Shield</h3><p className="mt-1 text-sm leading-6 text-neutral-500 dark:text-neutral-400">Refresh the managed ModSecurity engine, OWASP CRS, and compatible provider connectors. Existing policy settings remain stored.</p></div><div className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800"><dl className="space-y-3 text-sm"><div className="flex justify-between gap-4"><dt className="text-neutral-500">Engine</dt><dd className="font-medium text-neutral-900 dark:text-neutral-100">{overview.engine.status}</dd></div><div className="flex justify-between gap-4"><dt className="text-neutral-500">Ruleset</dt><dd className="font-medium text-neutral-900 dark:text-neutral-100">{overview.policy.crs_version}</dd></div><div className="flex justify-between gap-4"><dt className="text-neutral-500">Providers</dt><dd className="font-medium text-neutral-900 dark:text-neutral-100">{overview.connectors.length}</dd></div></dl></div><button type="button" disabled={busy} onClick={reinstall} className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"><RefreshCw size={15} />{busy ? "Queuing…" : "Reinstall Application Shield"}</button>{message && <p className="text-sm text-neutral-600 dark:text-neutral-300">{message}</p>}</div>}{tab === "logs" && <div className="overflow-hidden rounded-lg border border-neutral-200 dark:border-neutral-800"><div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3"><p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Request audit tail</p><button type="button" onClick={loadLogs} className="inline-flex cursor-pointer items-center gap-2 text-sm font-semibold text-blue-600 dark:text-blue-400"><RefreshCw size={14} />Reload</button></div>{logs?.available ? <pre className="max-h-96 overflow-auto bg-neutral-950 p-4 text-xs leading-6 text-emerald-300">{logs.lines.join("\n")}</pre> : <p className="px-5 py-12 text-center text-sm text-neutral-500">No audit events yet.</p>}</div>}</div></section><Toast message={toast?.message} type={toast?.type} onClose={() => setToast(null)} /></div>;
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8">
+      <section className="w-full max-w-3xl rounded-xl bg-white shadow-xl dark:bg-neutral-900">
+        <div className="flex items-start justify-between gap-4 border-b border-neutral-200 px-6 py-5 dark:border-neutral-800">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">
+              Application protection
+            </p>
+            <h2 className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">
+              Application Shield configuration
+            </h2>
+          </div>
+          <button
+            type="button"
+            aria-label="Close Application Shield configuration"
+            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+            onClick={onClose}
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div className="flex gap-5 overflow-x-auto border-b border-neutral-200 px-6 dark:border-neutral-800">
+          {[
+            ["connectors", "Connectors", Server],
+            ["policy", "Policy", Settings2],
+            ["install", "Reinstall", RefreshCw],
+            ["logs", "Logs", Activity],
+          ].map(([key, label, Icon]) => (
+            <button
+              type="button"
+              key={key}
+              onClick={() => setTab(key)}
+              className={`inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium ${tab === key ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200"}`}
+            >
+              <Icon size={15} />
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="max-h-[calc(100vh-14rem)] overflow-y-auto p-6">
+          {tab === "connectors" && (
+            <div className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+                  <p className="text-xs uppercase tracking-wide text-neutral-500">
+                    Shield engine
+                  </p>
+                  <p className="mt-2 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+                    {overview.engine.status}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+                  <p className="text-xs uppercase tracking-wide text-neutral-500">
+                    OWASP CRS
+                  </p>
+                  <p className="mt-2 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+                    {overview.policy.crs_version}
+                  </p>
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[700px] text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800">
+                      <th className="px-3 py-3">Provider</th>
+                      <th className="px-3 py-3">Status</th>
+                      <th className="px-3 py-3">Configuration</th>
+                      <th className="px-3 py-3 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {overview.connectors.map((connector) => (
+                      <tr
+                        key={connector.provider}
+                        className="border-b border-neutral-100 dark:border-neutral-800"
+                      >
+                        <td className="px-3 py-4 font-medium text-neutral-900 dark:text-neutral-100">
+                          {connector.name}
+                        </td>
+                        <td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">
+                          {connector.status}
+                        </td>
+                        <td className="px-3 py-4">
+                          <code className="block max-w-xs truncate text-xs text-neutral-500">
+                            {connector.config_path || "—"}
+                          </code>
+                        </td>
+                        <td className="px-3 py-4 text-right">
+                          <button
+                            type="button"
+                            disabled={
+                              busy ||
+                              ["not-installed", "available"].includes(
+                                connector.status,
+                              )
+                            }
+                            onClick={() => connectorAction(connector)}
+                            className="cursor-pointer text-xs font-semibold text-blue-600 disabled:cursor-not-allowed disabled:text-neutral-400 dark:text-blue-400"
+                          >
+                            {connector.attached
+                              ? "Detach"
+                              : connector.status === "ready"
+                                ? "Attach"
+                                : "Unavailable"}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+          {tab === "policy" && (
+            <form className="space-y-5" onSubmit={savePolicy}>
+              <label className="flex items-center gap-3 text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-blue-600"
+                  checked={policy.enabled}
+                  onChange={(event) =>
+                    setPolicy({ ...policy, enabled: event.target.checked })
+                  }
+                />
+                Enable request inspection
+              </label>
+              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                Protection mode
+                <select
+                  className={input}
+                  value={policy.mode}
+                  onChange={(event) =>
+                    setPolicy({ ...policy, mode: event.target.value })
+                  }
+                >
+                  <option value="detection">Detection only</option>
+                  <option value="blocking">Blocking</option>
+                  <option value="off">Off</option>
+                </select>
+              </label>
+              <label className="flex items-center gap-3 text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-blue-600"
+                  checked={policy.crs_enabled}
+                  onChange={(event) =>
+                    setPolicy({ ...policy, crs_enabled: event.target.checked })
+                  }
+                />
+                Enable OWASP CRS
+              </label>
+              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                Request body limit
+                <input
+                  className={input}
+                  type="number"
+                  min="1024"
+                  value={policy.request_body_limit}
+                  onChange={(event) =>
+                    setPolicy({
+                      ...policy,
+                      request_body_limit: event.target.value,
+                    })
+                  }
+                />
+              </label>
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  disabled={busy}
+                  className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+                >
+                  <ShieldCheck size={15} />
+                  {busy ? "Saving…" : "Save policy"}
+                </button>
+              </div>
+            </form>
+          )}
+          {tab === "install" && (
+            <div className="space-y-5">
+              <div>
+                <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">
+                  Reinstall Application Shield
+                </h3>
+                <p className="mt-1 text-sm leading-6 text-neutral-500 dark:text-neutral-400">
+                  Refresh the managed ModSecurity engine, OWASP CRS, and
+                  compatible provider connectors. Existing policy settings
+                  remain stored.
+                </p>
+              </div>
+              <div className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+                <dl className="space-y-3 text-sm">
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-neutral-500">Engine</dt>
+                    <dd className="font-medium text-neutral-900 dark:text-neutral-100">
+                      {overview.engine.status}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-neutral-500">Ruleset</dt>
+                    <dd className="font-medium text-neutral-900 dark:text-neutral-100">
+                      {overview.policy.crs_version}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-neutral-500">Providers</dt>
+                    <dd className="font-medium text-neutral-900 dark:text-neutral-100">
+                      {overview.connectors.length}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={reinstall}
+                className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <RefreshCw size={15} />
+                {busy ? "Queuing…" : "Reinstall Application Shield"}
+              </button>
+              {message && (
+                <p className="text-sm text-neutral-600 dark:text-neutral-300">
+                  {message}
+                </p>
+              )}
+            </div>
+          )}
+          {tab === "logs" && (
+            <div className="overflow-hidden rounded-lg border border-neutral-200 dark:border-neutral-800">
+              <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3">
+                <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                  Request audit tail
+                </p>
+                <button
+                  type="button"
+                  onClick={loadLogs}
+                  className="inline-flex cursor-pointer items-center gap-2 text-sm font-semibold text-blue-600 dark:text-blue-400"
+                >
+                  <RefreshCw size={14} />
+                  Reload
+                </button>
+              </div>
+              {logs?.available ? (
+                <pre className="max-h-96 overflow-auto bg-neutral-950 p-4 text-xs leading-6 text-emerald-300">
+                  {logs.lines.join("\n")}
+                </pre>
+              ) : (
+                <p className="px-5 py-12 text-center text-sm text-neutral-500">
+                  No audit events yet.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      </section>
+      <Toast
+        message={toast?.message}
+        type={toast?.type}
+        onClose={() => setToast(null)}
+      />
+    </div>
+  );
 }
 
 function IpEntryModal({ entry, onClose, onSaved }) {
-  const [form, setForm] = React.useState({ address: entry?.address || "", decision: entry?.decision || "Block", reason: entry?.reason || "", expires_at: entry?.expires_at ? entry.expires_at.slice(0, 16) : "" });
+  const [form, setForm] = React.useState({
+    address: entry?.address || "",
+    decision: entry?.decision || "Block",
+    reason: entry?.reason || "",
+    expires_at: entry?.expires_at ? entry.expires_at.slice(0, 16) : "",
+  });
   const [error, setError] = React.useState("");
   const [busy, setBusy] = React.useState(false);
-  const set = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+  const set = (key, value) =>
+    setForm((current) => ({ ...current, [key]: value }));
   async function submit(event) {
-    event.preventDefault(); setBusy(true); setError("");
-    const payload = { ...form, expires_at: form.expires_at ? new Date(form.expires_at).toISOString() : null };
-    const response = await apiRequest(entry ? `/api/v1/application-shield/ip-lists/${entry.id}` : "/api/v1/application-shield/ip-lists", { method: entry ? "PATCH" : "POST", body: JSON.stringify(payload) });
-    if (response.ok) onSaved(await response.json()); else setError(await readApiError(response, "Unable to save IP list entry."));
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    const payload = {
+      ...form,
+      expires_at: form.expires_at
+        ? new Date(form.expires_at).toISOString()
+        : null,
+    };
+    const response = await apiRequest(
+      entry
+        ? `/api/v1/application-shield/ip-lists/${entry.id}`
+        : "/api/v1/application-shield/ip-lists",
+      { method: entry ? "PATCH" : "POST", body: JSON.stringify(payload) },
+    );
+    if (response.ok) onSaved(await response.json());
+    else
+      setError(await readApiError(response, "Unable to save IP list entry."));
     setBusy(false);
   }
-  return <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8"><section className="w-full max-w-lg rounded-xl bg-white shadow-xl dark:bg-neutral-900"><div className="flex items-center justify-between border-b border-neutral-200 px-5 py-4 dark:border-neutral-800"><div><p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Application Shield</p><h2 className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">{entry ? "Edit IP entry" : "Add IP entry"}</h2></div><button type="button" onClick={onClose} className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"><X size={17} /></button></div><form onSubmit={submit} className="space-y-4 p-5"><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Address or network<input required className={input} value={form.address} onChange={(event) => set("address", event.target.value)} placeholder="203.0.113.42 or 198.51.100.0/24" /></label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Decision<select className={input} value={form.decision} onChange={(event) => set("decision", event.target.value)}><option>Block</option><option>Allow</option></select></label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Reason<input required className={input} value={form.reason} onChange={(event) => set("reason", event.target.value)} placeholder="Repeated credential attacks" /></label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Expires at <span className="font-normal text-neutral-500">(optional)</span><input type="datetime-local" className={input} value={form.expires_at} onChange={(event) => set("expires_at", event.target.value)} /></label>{error && <p className="text-sm text-rose-600 dark:text-rose-400">{error}</p>}<div className="flex justify-end gap-2 border-t border-neutral-200 pt-4 dark:border-neutral-800"><button type="button" onClick={onClose} className="cursor-pointer rounded-md px-4 py-2 text-sm text-neutral-600 dark:text-neutral-300">Cancel</button><button disabled={busy} className="cursor-pointer rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">{busy ? "Saving…" : "Save entry"}</button></div></form></section></div>;
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8">
+      <section className="w-full max-w-lg rounded-xl bg-white shadow-xl dark:bg-neutral-900">
+        <div className="flex items-center justify-between border-b border-neutral-200 px-5 py-4 dark:border-neutral-800">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">
+              Application Shield
+            </p>
+            <h2 className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">
+              {entry ? "Edit IP entry" : "Add IP entry"}
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+          >
+            <X size={17} />
+          </button>
+        </div>
+        <form onSubmit={submit} className="space-y-4 p-5">
+          <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+            Address or network
+            <input
+              required
+              className={input}
+              value={form.address}
+              onChange={(event) => set("address", event.target.value)}
+              placeholder="203.0.113.42 or 198.51.100.0/24"
+            />
+          </label>
+          <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+            Decision
+            <select
+              className={input}
+              value={form.decision}
+              onChange={(event) => set("decision", event.target.value)}
+            >
+              <option>Block</option>
+              <option>Allow</option>
+            </select>
+          </label>
+          <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+            Reason
+            <input
+              required
+              className={input}
+              value={form.reason}
+              onChange={(event) => set("reason", event.target.value)}
+              placeholder="Repeated credential attacks"
+            />
+          </label>
+          <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+            Expires at{" "}
+            <span className="font-normal text-neutral-500">(optional)</span>
+            <input
+              type="datetime-local"
+              className={input}
+              value={form.expires_at}
+              onChange={(event) => set("expires_at", event.target.value)}
+            />
+          </label>
+          {error && (
+            <p className="text-sm text-rose-600 dark:text-rose-400">{error}</p>
+          )}
+          <div className="flex justify-end gap-2 border-t border-neutral-200 pt-4 dark:border-neutral-800">
+            <button
+              type="button"
+              onClick={onClose}
+              className="cursor-pointer rounded-md px-4 py-2 text-sm text-neutral-600 dark:text-neutral-300"
+            >
+              Cancel
+            </button>
+            <button
+              disabled={busy}
+              className="cursor-pointer rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+            >
+              {busy ? "Saving…" : "Save entry"}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
 }
 
 function ListsTab() {
   const [entries, setEntries] = React.useState(null);
   const [modal, setModal] = React.useState(null);
   const [error, setError] = React.useState("");
-  const load = React.useCallback(() => apiRequest("/api/v1/application-shield/ip-lists").then(async (response) => { if (!response.ok) throw new Error(await readApiError(response, "Unable to load IP lists.")); setEntries((await response.json()).entries || []); }).catch((reason) => setError(reason.message || "Unable to load IP lists.")), []);
-  React.useEffect(() => { load(); }, [load]);
-  const save = async () => { setModal(null); await load(); window.dispatchEvent(new CustomEvent("serverengine:shield-updated")); };
-  const remove = async (entry) => { const response = await apiRequest(`/api/v1/application-shield/ip-lists/${entry.id}`, { method: "DELETE" }); if (response.ok) load(); else setError(await readApiError(response, "Unable to remove IP entry.")); };
+  const load = React.useCallback(
+    () =>
+      apiRequest("/api/v1/application-shield/ip-lists")
+        .then(async (response) => {
+          if (!response.ok)
+            throw new Error(
+              await readApiError(response, "Unable to load IP lists."),
+            );
+          setEntries((await response.json()).entries || []);
+        })
+        .catch((reason) =>
+          setError(reason.message || "Unable to load IP lists."),
+        ),
+    [],
+  );
+  React.useEffect(() => {
+    load();
+  }, [load]);
+  const save = async () => {
+    setModal(null);
+    await load();
+    window.dispatchEvent(new CustomEvent("serverengine:shield-updated"));
+  };
+  const remove = async (entry) => {
+    const response = await apiRequest(
+      `/api/v1/application-shield/ip-lists/${entry.id}`,
+      { method: "DELETE" },
+    );
+    if (response.ok) load();
+    else setError(await readApiError(response, "Unable to remove IP entry."));
+  };
   const allowed = entries?.filter((item) => item.decision === "Allow").length;
   const blocked = entries?.filter((item) => item.decision === "Block").length;
   const expiring = entries?.filter((item) => item.expires_at).length;
-  return <Section title="IP lists" description="Manage trusted sources and addresses denied before request rules are evaluated." actions={<button type="button" onClick={() => setModal({})} className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"><Plus size={15} />Add address</button>}>{error && <p className="mb-4 text-sm text-rose-600 dark:text-rose-400">{error}</p>}<div className="grid gap-3 sm:grid-cols-3"><Stat icon={ShieldCheck} label="Allowed sources" value={allowed ?? null} detail="Skip threat inspection" tone="emerald" /><Stat icon={ShieldAlert} label="Blocked sources" value={blocked ?? null} detail="Active deny entries" tone="amber" /><Stat icon={RefreshCw} label="Auto-expiring" value={expiring ?? null} detail="Entries with an expiry" /></div>{entries?.length === 0 ? <div className="mt-5 rounded-md border border-dashed border-neutral-300 px-5 py-12 text-center dark:border-neutral-700"><ShieldCheck className="mx-auto text-neutral-400" size={28} /><h4 className="mt-3 text-sm font-semibold text-neutral-900 dark:text-neutral-100">No IP entries</h4><p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">Add a trusted or blocked address to manage it here.</p></div> : <div className="mt-5 overflow-x-auto"><table className="w-full min-w-[760px] text-left"><thead><tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400"><th className="px-3 py-3">Address or range</th><th className="px-3 py-3">Decision</th><th className="px-3 py-3">Reason</th><th className="px-3 py-3">Expiry</th><th className="px-3 py-3" /></tr></thead><tbody>{entries?.map((entry) => <tr key={entry.id} className="border-b border-neutral-100 dark:border-neutral-800"><td className="px-3 py-4"><code className="text-sm text-neutral-700 dark:text-neutral-300">{entry.address}</code></td><td className="px-3 py-4"><span className={`text-xs font-semibold ${entry.decision === "Allow" ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>{entry.decision}</span></td><td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">{entry.reason}</td><td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">{entry.expires_at ? new Date(entry.expires_at).toLocaleString() : "Never"}</td><td className="px-3 py-4 text-right"><div className="flex justify-end gap-3"><button type="button" onClick={() => setModal(entry)} className="cursor-pointer text-sm font-semibold text-blue-600 dark:text-blue-400">Edit</button><button type="button" onClick={() => remove(entry)} className="cursor-pointer text-sm font-semibold text-rose-600 dark:text-rose-400">Delete</button></div></td></tr>)}</tbody></table></div>}{modal && <IpEntryModal entry={modal.id ? modal : null} onClose={() => setModal(null)} onSaved={save} />}</Section>;
+  return (
+    <Section
+      title="IP lists"
+      description="Manage trusted sources and addresses denied before request rules are evaluated."
+      actions={
+        <button
+          type="button"
+          onClick={() => setModal({})}
+          className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+        >
+          <Plus size={15} />
+          Add address
+        </button>
+      }
+    >
+      {error && (
+        <p className="mb-4 text-sm text-rose-600 dark:text-rose-400">{error}</p>
+      )}
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Stat
+          icon={ShieldCheck}
+          label="Allowed sources"
+          value={allowed ?? null}
+          detail="Skip threat inspection"
+          tone="emerald"
+        />
+        <Stat
+          icon={ShieldAlert}
+          label="Blocked sources"
+          value={blocked ?? null}
+          detail="Active deny entries"
+          tone="amber"
+        />
+        <Stat
+          icon={RefreshCw}
+          label="Auto-expiring"
+          value={expiring ?? null}
+          detail="Entries with an expiry"
+        />
+      </div>
+      {entries?.length === 0 ? (
+        <div className="mt-5 rounded-md border border-dashed border-neutral-300 px-5 py-12 text-center dark:border-neutral-700">
+          <ShieldCheck className="mx-auto text-neutral-400" size={28} />
+          <h4 className="mt-3 text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+            No IP entries
+          </h4>
+          <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+            Add a trusted or blocked address to manage it here.
+          </p>
+        </div>
+      ) : (
+        <div className="mt-5 overflow-x-auto">
+          <table className="w-full min-w-[760px] text-left">
+            <thead>
+              <tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
+                <th className="px-3 py-3">Address or range</th>
+                <th className="px-3 py-3">Decision</th>
+                <th className="px-3 py-3">Reason</th>
+                <th className="px-3 py-3">Expiry</th>
+                <th className="px-3 py-3" />
+              </tr>
+            </thead>
+            <tbody>
+              {entries?.map((entry) => (
+                <tr
+                  key={entry.id}
+                  className="border-b border-neutral-100 dark:border-neutral-800"
+                >
+                  <td className="px-3 py-4">
+                    <code className="text-sm text-neutral-700 dark:text-neutral-300">
+                      {entry.address}
+                    </code>
+                  </td>
+                  <td className="px-3 py-4">
+                    <span
+                      className={`text-xs font-semibold ${entry.decision === "Allow" ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}
+                    >
+                      {entry.decision}
+                    </span>
+                  </td>
+                  <td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">
+                    {entry.reason}
+                  </td>
+                  <td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">
+                    {entry.expires_at
+                      ? new Date(entry.expires_at).toLocaleString()
+                      : "Never"}
+                  </td>
+                  <td className="px-3 py-4 text-right">
+                    <div className="flex justify-end gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setModal(entry)}
+                        className="cursor-pointer text-sm font-semibold text-blue-600 dark:text-blue-400"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => remove(entry)}
+                        className="cursor-pointer text-sm font-semibold text-rose-600 dark:text-rose-400"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {modal && (
+        <IpEntryModal
+          entry={modal.id ? modal : null}
+          onClose={() => setModal(null)}
+          onSaved={save}
+        />
+      )}
+    </Section>
+  );
 }
 
 function CountryPolicyModal({ entry, onClose, onSaved }) {
-  const initial = entry ? [{ code: entry.country_code, name: entry.country_name }] : [];
+  const initial = entry
+    ? [{ code: entry.country_code, name: entry.country_name }]
+    : [];
   const [selected, setSelected] = React.useState(initial);
   const [query, setQuery] = React.useState("");
   const [decision, setDecision] = React.useState(entry?.decision || "Block");
   const [enabled, setEnabled] = React.useState(entry?.enabled ?? true);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState("");
-  const visibleCountries = countries.filter((country) => `${country.name} ${country.code}`.toLowerCase().includes(query.toLowerCase())).slice(0, 80);
-  const toggleCountry = (country) => setSelected((current) => current.some((item) => item.code === country.code) ? current.filter((item) => item.code !== country.code) : [...current, country]);
+  const visibleCountries = countries
+    .filter((country) =>
+      `${country.name} ${country.code}`
+        .toLowerCase()
+        .includes(query.toLowerCase()),
+    )
+    .slice(0, 80);
+  const toggleCountry = (country) =>
+    setSelected((current) =>
+      current.some((item) => item.code === country.code)
+        ? current.filter((item) => item.code !== country.code)
+        : [...current, country],
+    );
   const save = async (event) => {
     event.preventDefault();
-    if (!selected.length) { setError("Select at least one country."); return; }
+    if (!selected.length) {
+      setError("Select at least one country.");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
       for (const [index, country] of selected.entries()) {
         const editing = Boolean(entry && index === 0);
-        const response = await apiRequest(editing ? `/api/v1/application-shield/geo-controls/${entry.id}` : "/api/v1/application-shield/geo-controls", { method: editing ? "PATCH" : "POST", body: JSON.stringify({ country_code: country.code, country_name: country.name, decision, enabled }) });
-        if (!response.ok) throw new Error(await readApiError(response, `Unable to save ${country.name}.`));
+        const response = await apiRequest(
+          editing
+            ? `/api/v1/application-shield/geo-controls/${entry.id}`
+            : "/api/v1/application-shield/geo-controls",
+          {
+            method: editing ? "PATCH" : "POST",
+            body: JSON.stringify({
+              country_code: country.code,
+              country_name: country.name,
+              decision,
+              enabled,
+            }),
+          },
+        );
+        if (!response.ok)
+          throw new Error(
+            await readApiError(response, `Unable to save ${country.name}.`),
+          );
       }
       onSaved();
-      showToast(`${selected.length} ${selected.length === 1 ? "country policy" : "country policies"} saved`, "success");
+      showToast(
+        `${selected.length} ${selected.length === 1 ? "country policy" : "country policies"} saved`,
+        "success",
+      );
     } catch (reason) {
       setError(reason.message || "Unable to save country policies.");
     } finally {
       setSaving(false);
     }
   };
-  return <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8"><section className="w-full max-w-2xl rounded-xl bg-white shadow-xl dark:bg-neutral-900"><div className="flex items-center justify-between border-b border-neutral-200 px-5 py-4 dark:border-neutral-800"><div><p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Geo controls</p><h2 className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">{entry ? "Edit country policy" : "Add country policy"}</h2></div><button type="button" onClick={onClose} className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"><X size={17} /></button></div><form className="space-y-5 p-5" onSubmit={save}><div><label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Countries</label><div className="mt-1.5 flex min-h-11 flex-wrap gap-2 rounded-md border border-neutral-300 bg-white p-2 dark:border-neutral-700 dark:bg-neutral-950">{selected.map((country) => <span key={country.code} className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">{country.name}<button type="button" onClick={() => toggleCountry(country)} className="cursor-pointer text-blue-500 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-100" aria-label={`Remove ${country.name}`}><X size={13} /></button></span>)}{!selected.length && <span className="px-1 text-sm text-neutral-400">Choose one or more countries below</span>}</div><input className={input} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search countries…" /></div><div className="max-h-64 overflow-y-auto rounded-md border border-neutral-200 p-2 dark:border-neutral-800"><div className="grid gap-1 sm:grid-cols-2">{visibleCountries.map((country) => { const active = selected.some((item) => item.code === country.code); return <button type="button" key={country.code} onClick={() => toggleCountry(country)} className={`flex cursor-pointer items-center justify-between rounded-md px-3 py-2 text-left text-sm ${active ? "bg-blue-50 font-semibold text-blue-700 dark:bg-blue-950/40 dark:text-blue-300" : "text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800"}`}><span>{country.name}</span><span className="font-mono text-xs text-neutral-400">{country.code}</span></button>; })}</div></div><div className="grid gap-4 sm:grid-cols-2"><label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Decision<select className={input} value={decision} onChange={(event) => setDecision(event.target.value)}><option value="Block">Block</option><option value="Allow">Allow</option></select></label><label className="flex items-center gap-3 self-end pb-2 text-sm font-medium text-neutral-700 dark:text-neutral-300"><input type="checkbox" className="h-4 w-4 cursor-pointer accent-blue-600" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />Enable this policy</label></div>{error && <p className="text-sm text-rose-600 dark:text-rose-400">{error}</p>}<div className="flex justify-end gap-2 border-t border-neutral-200 pt-4 dark:border-neutral-800"><button type="button" onClick={onClose} className="cursor-pointer rounded-md px-3 py-2 text-sm text-neutral-600 dark:text-neutral-300">Cancel</button><button type="submit" disabled={saving} className="cursor-pointer rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-wait disabled:opacity-50">{saving ? "Saving…" : "Save policy"}</button></div></form></section></div>;
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8">
+      <section className="w-full max-w-2xl rounded-xl bg-white shadow-xl dark:bg-neutral-900">
+        <div className="flex items-center justify-between border-b border-neutral-200 px-5 py-4 dark:border-neutral-800">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">
+              Geo controls
+            </p>
+            <h2 className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">
+              {entry ? "Edit country policy" : "Add country policy"}
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+          >
+            <X size={17} />
+          </button>
+        </div>
+        <form className="space-y-5 p-5" onSubmit={save}>
+          <div>
+            <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
+              Countries
+            </label>
+            <div className="mt-1.5 flex min-h-11 flex-wrap gap-2 rounded-md border border-neutral-300 bg-white p-2 dark:border-neutral-700 dark:bg-neutral-950">
+              {selected.map((country) => (
+                <span
+                  key={country.code}
+                  className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 dark:bg-blue-950/40 dark:text-blue-300"
+                >
+                  {country.name}
+                  <button
+                    type="button"
+                    onClick={() => toggleCountry(country)}
+                    className="cursor-pointer text-blue-500 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-100"
+                    aria-label={`Remove ${country.name}`}
+                  >
+                    <X size={13} />
+                  </button>
+                </span>
+              ))}
+              {!selected.length && (
+                <span className="px-1 text-sm text-neutral-400">
+                  Choose one or more countries below
+                </span>
+              )}
+            </div>
+            <input
+              className={input}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search countries…"
+            />
+          </div>
+          <div className="max-h-64 overflow-y-auto rounded-md border border-neutral-200 p-2 dark:border-neutral-800">
+            <div className="grid gap-1 sm:grid-cols-2">
+              {visibleCountries.map((country) => {
+                const active = selected.some(
+                  (item) => item.code === country.code,
+                );
+                return (
+                  <button
+                    type="button"
+                    key={country.code}
+                    onClick={() => toggleCountry(country)}
+                    className={`flex cursor-pointer items-center justify-between rounded-md px-3 py-2 text-left text-sm ${active ? "bg-blue-50 font-semibold text-blue-700 dark:bg-blue-950/40 dark:text-blue-300" : "text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800"}`}
+                  >
+                    <span>{country.name}</span>
+                    <span className="font-mono text-xs text-neutral-400">
+                      {country.code}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
+              Decision
+              <select
+                className={input}
+                value={decision}
+                onChange={(event) => setDecision(event.target.value)}
+              >
+                <option value="Block">Block</option>
+                <option value="Allow">Allow</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-3 self-end pb-2 text-sm font-medium text-neutral-700 dark:text-neutral-300">
+              <input
+                type="checkbox"
+                className="h-4 w-4 cursor-pointer accent-blue-600"
+                checked={enabled}
+                onChange={(event) => setEnabled(event.target.checked)}
+              />
+              Enable this policy
+            </label>
+          </div>
+          {error && (
+            <p className="text-sm text-rose-600 dark:text-rose-400">{error}</p>
+          )}
+          <div className="flex justify-end gap-2 border-t border-neutral-200 pt-4 dark:border-neutral-800">
+            <button
+              type="button"
+              onClick={onClose}
+              className="cursor-pointer rounded-md px-3 py-2 text-sm text-neutral-600 dark:text-neutral-300"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="cursor-pointer rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-wait disabled:opacity-50"
+            >
+              {saving ? "Saving…" : "Save policy"}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
 }
 
 function RegionsTabV2() {
@@ -509,15 +2542,235 @@ function RegionsTabV2() {
   const [traffic, setTraffic] = React.useState(null);
   const [error, setError] = React.useState("");
   const [form, setForm] = React.useState(null);
-  const load = React.useCallback(() => apiRequest("/api/v1/application-shield/geo-controls").then(async (response) => { if (!response.ok) throw new Error(await readApiError(response, "Unable to load Geo controls.")); setData(await response.json()); }).catch((reason) => setError(reason.message || "Unable to load Geo controls.")), []);
-  const loadTrafficSources = React.useCallback(() => apiRequest("/api/v1/application-shield/traffic?limit=200").then(async (response) => { if (response.ok) setTraffic(await response.json()); }).catch(() => {}), []);
-  React.useEffect(() => { load(); }, [load]);
-  React.useEffect(() => { loadTrafficSources(); }, [loadTrafficSources]);
+  const load = React.useCallback(
+    () =>
+      apiRequest("/api/v1/application-shield/geo-controls")
+        .then(async (response) => {
+          if (!response.ok)
+            throw new Error(
+              await readApiError(response, "Unable to load Geo controls."),
+            );
+          setData(await response.json());
+        })
+        .catch((reason) =>
+          setError(reason.message || "Unable to load Geo controls."),
+        ),
+    [],
+  );
+  const loadTrafficSources = React.useCallback(
+    () =>
+      apiRequest("/api/v1/application-shield/traffic?limit=200")
+        .then(async (response) => {
+          if (response.ok) setTraffic(await response.json());
+        })
+        .catch(() => {}),
+    [],
+  );
+  React.useEffect(() => {
+    load();
+  }, [load]);
+  React.useEffect(() => {
+    loadTrafficSources();
+  }, [loadTrafficSources]);
   const entries = data?.entries || [];
   const database = data?.database;
-  const sources = Object.entries((traffic?.events || []).reduce((groups, event) => { const source = event.source_ip || "Unknown"; const current = groups[source] || { count: 0, country: event.country }; groups[source] = { count: current.count + 1, country: current.country || event.country }; return groups; }, {})).sort((a, b) => b[1].count - a[1].count).slice(0, 8);
-  const remove = async (entry) => { const response = await apiRequest(`/api/v1/application-shield/geo-controls/${entry.id}`, { method: "DELETE" }); if (!response.ok) { setError(await readApiError(response, "Unable to remove Geo policy.")); return; } await load(); showToast("Country policy removed", "success"); };
-  return <div className="space-y-5">{error && <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300">{error}</p>}<Section title="Geo controls" description="Choose multiple countries and apply one allow or block policy to all of them." actions={<div className="flex gap-2"><button type="button" onClick={load} className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 dark:border-neutral-700 dark:text-neutral-300"><RefreshCw size={14} />Refresh</button><button type="button" onClick={() => setForm({})} disabled={!database?.ready} className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"><Plus size={15} />Add country policy</button></div>}><div className={`rounded-md p-4 ${database?.ready ? "bg-emerald-50 dark:bg-emerald-950/20" : "bg-amber-50 dark:bg-amber-950/20"}`}><p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{database?.ready ? "Country database ready" : "Country database unavailable"}</p><p className="mt-1 text-xs text-neutral-600 dark:text-neutral-400">{database?.ready ? `${database.provider || "DB-IP Lite"} · ${entries.length} policy entries` : database?.message || "Download the country database before creating Geo policies."}</p></div></Section><Section title="Country policies" description="Active allow and block decisions applied to requests resolved to these countries.">{entries.length === 0 ? <div className="rounded-md border border-dashed border-neutral-300 px-5 py-12 text-center dark:border-neutral-700"><Map className="mx-auto text-neutral-400" size={28} /><p className="mt-3 text-sm font-semibold text-neutral-700 dark:text-neutral-300">No country policies</p></div> : <div className="overflow-x-auto"><table className="w-full min-w-[680px] text-left"><thead><tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400"><th className="px-3 py-3">Country</th><th className="px-3 py-3">Decision</th><th className="px-3 py-3">State</th><th className="px-3 py-3 text-right">Actions</th></tr></thead><tbody>{entries.map((entry) => <tr key={entry.id} className="border-b border-neutral-100 dark:border-neutral-800"><td className="px-3 py-4"><span className="font-semibold text-neutral-800 dark:text-neutral-200">{entry.country_name}</span><span className="ml-2 font-mono text-xs text-neutral-400">{entry.country_code}</span></td><td className={`px-3 py-4 text-sm font-semibold ${entry.decision === "Block" ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}`}>{entry.decision}</td><td className="px-3 py-4 text-sm text-neutral-500 dark:text-neutral-400">{entry.enabled ? "Active" : "Disabled"}</td><td className="px-3 py-4 text-right"><button type="button" onClick={() => setForm(entry)} className="mr-3 cursor-pointer text-sm font-semibold text-blue-600 dark:text-blue-400">Edit</button><button type="button" onClick={() => remove(entry)} className="cursor-pointer text-sm font-semibold text-rose-600 dark:text-rose-400">Delete</button></td></tr>)}</tbody></table></div>}</Section><Section title="Top sources" description="Sources with the most recent audited traffic."><div className="overflow-x-auto"><table className="w-full min-w-[520px] text-left"><thead><tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400"><th className="px-3 py-3">Source</th><th className="px-3 py-3">Events</th></tr></thead><tbody>{sources.map(([source, item]) => <tr key={source} className="border-b border-neutral-100 dark:border-neutral-800"><td className="px-3 py-4"><span className="text-base" aria-hidden="true">{countryFlag(item.country?.country_code) || "🌐"}</span><code className="text-sm text-neutral-700 dark:text-neutral-300">{source}</code></td><td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">{item.count}</td></tr>)}{traffic && !sources.length && <tr><td colSpan="2" className="px-3 py-8 text-center text-sm text-neutral-500 dark:text-neutral-400">No audited sources yet.</td></tr>}</tbody></table></div></Section>{form && <CountryPolicyModal entry={form.id ? form : null} onClose={() => setForm(null)} onSaved={async () => { setForm(null); await load(); }} />}</div>;
+  const sources = Object.entries(
+    (traffic?.events || []).reduce((groups, event) => {
+      const source = event.source_ip || "Unknown";
+      const current = groups[source] || { count: 0, country: event.country };
+      groups[source] = {
+        count: current.count + 1,
+        country: current.country || event.country,
+      };
+      return groups;
+    }, {}),
+  )
+    .sort((a, b) => b[1].count - a[1].count)
+    .slice(0, 8);
+  const remove = async (entry) => {
+    const response = await apiRequest(
+      `/api/v1/application-shield/geo-controls/${entry.id}`,
+      { method: "DELETE" },
+    );
+    if (!response.ok) {
+      setError(await readApiError(response, "Unable to remove Geo policy."));
+      return;
+    }
+    await load();
+    showToast("Country policy removed", "success");
+  };
+  return (
+    <div className="space-y-5">
+      {error && (
+        <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300">
+          {error}
+        </p>
+      )}
+      <Section
+        title="Geo controls"
+        description="Choose multiple countries and apply one allow or block policy to all of them."
+        actions={
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={load}
+              className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 dark:border-neutral-700 dark:text-neutral-300"
+            >
+              <RefreshCw size={14} />
+              Refresh
+            </button>
+            <button
+              type="button"
+              onClick={() => setForm({})}
+              disabled={!database?.ready}
+              className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Plus size={15} />
+              Add country policy
+            </button>
+          </div>
+        }
+      >
+        <div
+          className={`rounded-md p-4 ${database?.ready ? "bg-emerald-50 dark:bg-emerald-950/20" : "bg-amber-50 dark:bg-amber-950/20"}`}
+        >
+          <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+            {database?.ready
+              ? "Country database ready"
+              : "Country database unavailable"}
+          </p>
+          <p className="mt-1 text-xs text-neutral-600 dark:text-neutral-400">
+            {database?.ready
+              ? `${database.provider || "DB-IP Lite"} · ${entries.length} policy entries`
+              : database?.message ||
+                "Download the country database before creating Geo policies."}
+          </p>
+        </div>
+      </Section>
+      <Section
+        title="Country policies"
+        description="Active allow and block decisions applied to requests resolved to these countries."
+      >
+        {entries.length === 0 ? (
+          <div className="rounded-md border border-dashed border-neutral-300 px-5 py-12 text-center dark:border-neutral-700">
+            <Map className="mx-auto text-neutral-400" size={28} />
+            <p className="mt-3 text-sm font-semibold text-neutral-700 dark:text-neutral-300">
+              No country policies
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[680px] text-left">
+              <thead>
+                <tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
+                  <th className="px-3 py-3">Country</th>
+                  <th className="px-3 py-3">Decision</th>
+                  <th className="px-3 py-3">State</th>
+                  <th className="px-3 py-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {entries.map((entry) => (
+                  <tr
+                    key={entry.id}
+                    className="border-b border-neutral-100 dark:border-neutral-800"
+                  >
+                    <td className="px-3 py-4">
+                      <span className="font-semibold text-neutral-800 dark:text-neutral-200">
+                        {entry.country_name}
+                      </span>
+                      <span className="ml-2 font-mono text-xs text-neutral-400">
+                        {entry.country_code}
+                      </span>
+                    </td>
+                    <td
+                      className={`px-3 py-4 text-sm font-semibold ${entry.decision === "Block" ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}`}
+                    >
+                      {entry.decision}
+                    </td>
+                    <td className="px-3 py-4 text-sm text-neutral-500 dark:text-neutral-400">
+                      {entry.enabled ? "Active" : "Disabled"}
+                    </td>
+                    <td className="px-3 py-4 text-right">
+                      <button
+                        type="button"
+                        onClick={() => setForm(entry)}
+                        className="mr-3 cursor-pointer text-sm font-semibold text-blue-600 dark:text-blue-400"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => remove(entry)}
+                        className="cursor-pointer text-sm font-semibold text-rose-600 dark:text-rose-400"
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Section>
+      <Section
+        title="Top sources"
+        description="Sources with the most recent audited traffic."
+      >
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[520px] text-left">
+            <thead>
+              <tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
+                <th className="px-3 py-3">Source</th>
+                <th className="px-3 py-3">Events</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sources.map(([source, item]) => (
+                <tr
+                  key={source}
+                  className="border-b border-neutral-100 dark:border-neutral-800"
+                >
+                  <td className="px-3 py-4">
+                    <span className="text-base" aria-hidden="true">
+                      {countryFlag(item.country?.country_code) || "🌐"}
+                    </span>
+                    <code className="text-sm text-neutral-700 dark:text-neutral-300">
+                      {source}
+                    </code>
+                  </td>
+                  <td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">
+                    {item.count}
+                  </td>
+                </tr>
+              ))}
+              {traffic && !sources.length && (
+                <tr>
+                  <td
+                    colSpan="2"
+                    className="px-3 py-8 text-center text-sm text-neutral-500 dark:text-neutral-400"
+                  >
+                    No audited sources yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Section>
+      {form && (
+        <CountryPolicyModal
+          entry={form.id ? form : null}
+          onClose={() => setForm(null)}
+          onSaved={async () => {
+            setForm(null);
+            await load();
+          }}
+        />
+      )}
+    </div>
+  );
 }
 
 function RegionsTab() {
@@ -526,15 +2779,382 @@ function RegionsTab() {
   const [form, setForm] = React.useState(null);
   const [saving, setSaving] = React.useState(false);
   const [downloading, setDownloading] = React.useState(false);
-  const load = React.useCallback(() => apiRequest("/api/v1/application-shield/geo-controls").then(async (response) => { if (!response.ok) throw new Error(await readApiError(response, "Unable to load Geo controls.")); setData(await response.json()); }).catch((reason) => setError(reason.message || "Unable to load Geo controls.")), []);
-  React.useEffect(() => { load(); }, [load]);
-  const save = async (event) => { event.preventDefault(); setSaving(true); setError(""); const editing = Boolean(form.id); const response = await apiRequest(editing ? `/api/v1/application-shield/geo-controls/${form.id}` : "/api/v1/application-shield/geo-controls", { method: editing ? "PATCH" : "POST", body: JSON.stringify({ country_code: form.country_code, country_name: form.country_name, decision: form.decision, enabled: form.enabled }) }); setSaving(false); if (!response.ok) { setError(await readApiError(response, "Unable to save Geo policy.")); return; } setForm(null); await load(); showToast("Geo policy saved", "success"); };
-  const remove = async (entry) => { const response = await apiRequest(`/api/v1/application-shield/geo-controls/${entry.id}`, { method: "DELETE" }); if (!response.ok) { setError(await readApiError(response, "Unable to remove Geo policy.")); return; } await load(); showToast("Geo policy removed", "success"); };
-  const downloadDatabase = async () => { setDownloading(true); setError(""); const response = await apiRequest("/api/v1/application-shield/geo-controls/database", { method: "POST" }); setDownloading(false); if (!response.ok) { setError(await readApiError(response, "Unable to download the country database.")); return; } await load(); showToast("Country database is ready", "success"); };
+  const load = React.useCallback(
+    () =>
+      apiRequest("/api/v1/application-shield/geo-controls")
+        .then(async (response) => {
+          if (!response.ok)
+            throw new Error(
+              await readApiError(response, "Unable to load Geo controls."),
+            );
+          setData(await response.json());
+        })
+        .catch((reason) =>
+          setError(reason.message || "Unable to load Geo controls."),
+        ),
+    [],
+  );
+  React.useEffect(() => {
+    load();
+  }, [load]);
+  const save = async (event) => {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    const editing = Boolean(form.id);
+    const response = await apiRequest(
+      editing
+        ? `/api/v1/application-shield/geo-controls/${form.id}`
+        : "/api/v1/application-shield/geo-controls",
+      {
+        method: editing ? "PATCH" : "POST",
+        body: JSON.stringify({
+          country_code: form.country_code,
+          country_name: form.country_name,
+          decision: form.decision,
+          enabled: form.enabled,
+        }),
+      },
+    );
+    setSaving(false);
+    if (!response.ok) {
+      setError(await readApiError(response, "Unable to save Geo policy."));
+      return;
+    }
+    setForm(null);
+    await load();
+    showToast("Geo policy saved", "success");
+  };
+  const remove = async (entry) => {
+    const response = await apiRequest(
+      `/api/v1/application-shield/geo-controls/${entry.id}`,
+      { method: "DELETE" },
+    );
+    if (!response.ok) {
+      setError(await readApiError(response, "Unable to remove Geo policy."));
+      return;
+    }
+    await load();
+    showToast("Geo policy removed", "success");
+  };
+  const downloadDatabase = async () => {
+    setDownloading(true);
+    setError("");
+    const response = await apiRequest(
+      "/api/v1/application-shield/geo-controls/database",
+      { method: "POST" },
+    );
+    setDownloading(false);
+    if (!response.ok) {
+      setError(
+        await readApiError(
+          response,
+          "Unable to download the country database.",
+        ),
+      );
+      return;
+    }
+    await load();
+    showToast("Country database is ready", "success");
+  };
   const database = data?.database;
   const observed = data?.observed_countries || [];
   const entries = data?.entries || [];
-  return <div className="space-y-5">{error && <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300">{error}</p>}<Section title="Geo controls" description="Use the offline DB-IP country database to identify request origins and enforce country allow/block rules on attached providers." actions={<div className="flex gap-2">{!database?.ready && <button type="button" onClick={downloadDatabase} disabled={downloading} className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-300"><RefreshCw className={downloading ? "animate-spin" : ""} size={14} />{downloading ? "Downloading…" : "Download database"}</button>}<button type="button" onClick={() => setForm({ country_code: "", country_name: "", decision: "Block", enabled: true })} disabled={!database?.ready} className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"><Plus size={15} />Add country rule</button></div>}><div className={`flex items-start gap-3 rounded-md p-4 ${database?.ready ? "bg-emerald-50 dark:bg-emerald-950/20" : "bg-amber-50 dark:bg-amber-950/20"}`}><Map size={18} className={`mt-0.5 ${database?.ready ? "text-emerald-600" : "text-amber-600"}`} /><div><p className={`text-sm font-semibold ${database?.ready ? "text-emerald-800 dark:text-emerald-200" : "text-amber-800 dark:text-amber-200"}`}>{database?.ready ? "Country database ready" : "Country database unavailable"}</p><p className="mt-1 text-xs leading-5 text-neutral-600 dark:text-neutral-400">{database?.ready ? `${database.provider || "DB-IP Lite"} · ${database.path} · ${entries.filter((entry) => entry.enabled).length} active rule(s)` : database?.message || "Install or download the optional DB-IP country database before creating Geo policies."}</p></div></div><div className="mt-5 grid gap-3 sm:grid-cols-3"><Stat icon={Globe2} label="Countries observed" value={data ? observed.length.toLocaleString() : null} detail="From actual audit-log requests" tone="blue" /><Stat icon={ShieldAlert} label="Country rules" value={data ? entries.filter((entry) => entry.enabled).length.toLocaleString() : null} detail="Persisted active policies" tone="amber" /><Stat icon={CheckCircle2} label="Database status" value={database ? (database.ready ? "Ready" : "Unavailable") : null} detail={database?.build_epoch ? `Build ${new Date(database.build_epoch * 1000).toLocaleDateString()}` : "Loading database status"} tone={database?.ready ? "emerald" : "amber"} /></div></Section><Section title="Country policies" description="Block specific countries, or create an allow list. Allow rules take precedence as a global country allow list." actions={<button type="button" onClick={load} className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 dark:border-neutral-700 dark:text-neutral-300"><RefreshCw size={14} />Refresh</button>}>{entries.length === 0 ? <div className="rounded-md border border-dashed border-neutral-300 px-5 py-12 text-center dark:border-neutral-700"><Map className="mx-auto text-neutral-400" size={28} /><h4 className="mt-3 text-sm font-semibold text-neutral-900 dark:text-neutral-100">No country rules</h4><p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">Requests are allowed by default. Add a country rule to generate provider-level CIDR rules.</p></div> : <div className="overflow-x-auto"><table className="w-full min-w-[680px] text-left"><thead><tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400"><th className="px-3 py-3">Country</th><th className="px-3 py-3">Decision</th><th className="px-3 py-3">State</th><th className="px-3 py-3 text-right">Actions</th></tr></thead><tbody>{entries.map((entry) => <tr key={entry.id} className="border-b border-neutral-100 dark:border-neutral-800"><td className="px-3 py-4"><span className="font-semibold text-neutral-800 dark:text-neutral-200">{entry.country_name}</span><span className="ml-2 rounded bg-neutral-100 px-1.5 py-0.5 font-mono text-xs text-neutral-500 dark:bg-neutral-800">{entry.country_code}</span></td><td className={`px-3 py-4 text-sm font-semibold ${entry.decision === "Block" ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}`}>{entry.decision}</td><td className="px-3 py-4 text-sm text-neutral-500 dark:text-neutral-400">{entry.enabled ? "Active" : "Disabled"}</td><td className="px-3 py-4 text-right"><button type="button" onClick={() => setForm(entry)} className="mr-3 cursor-pointer text-sm font-semibold text-blue-600 dark:text-blue-400">Edit</button><button type="button" onClick={() => remove(entry)} className="cursor-pointer text-sm font-semibold text-rose-600 dark:text-rose-400">Delete</button></td></tr>)}</tbody></table></div>}</Section><Section title="Observed countries" description="Countries resolved from real Application Shield audit events. This is not fabricated traffic data.">{observed.length === 0 ? <p className="py-8 text-center text-sm text-neutral-500 dark:text-neutral-400">No country-resolvable audit events yet.</p> : <div className="flex flex-wrap gap-2">{observed.map((country) => <span key={country.country_code} className="rounded-md bg-neutral-100 px-3 py-2 text-sm text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300">{country.country_name} ({country.country_code}) · {country.requests}</span>)}</div>}</Section>{form && <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8"><section className="w-full max-w-lg rounded-xl bg-white p-5 shadow-xl dark:bg-neutral-900"><div className="flex items-center justify-between"><h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">{form.id ? "Edit country policy" : "Add country policy"}</h3><button type="button" onClick={() => setForm(null)} className="cursor-pointer text-neutral-400"><X size={18} /></button></div><form className="mt-5 space-y-4" onSubmit={save}><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Country code<input required maxLength="2" className={input} value={form.country_code} onChange={(event) => setForm({ ...form, country_code: event.target.value.toUpperCase() })} placeholder="US" /></label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Country name<input required className={input} value={form.country_name} onChange={(event) => setForm({ ...form, country_name: event.target.value })} placeholder="United States" /></label><label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Decision<select className={input} value={form.decision} onChange={(event) => setForm({ ...form, decision: event.target.value })}><option value="Block">Block</option><option value="Allow">Allow</option></select></label><label className="flex items-center gap-3 text-sm font-medium text-neutral-700 dark:text-neutral-300"><input type="checkbox" className="h-4 w-4 accent-blue-600" checked={form.enabled} onChange={(event) => setForm({ ...form, enabled: event.target.checked })} />Enable this policy</label><div className="flex justify-end gap-2 border-t border-neutral-200 pt-4 dark:border-neutral-800"><button type="button" onClick={() => setForm(null)} className="cursor-pointer rounded-md px-3 py-2 text-sm text-neutral-600 dark:text-neutral-300">Cancel</button><button type="submit" disabled={saving || !database?.ready} className="cursor-pointer rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{saving ? "Saving…" : "Save policy"}</button></div></form></section></div>}</div>;
+  return (
+    <div className="space-y-5">
+      {error && (
+        <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300">
+          {error}
+        </p>
+      )}
+      <Section
+        title="Geo controls"
+        description="Use the offline DB-IP country database to identify request origins and enforce country allow/block rules on attached providers."
+        actions={
+          <div className="flex gap-2">
+            {!database?.ready && (
+              <button
+                type="button"
+                onClick={downloadDatabase}
+                disabled={downloading}
+                className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-300"
+              >
+                <RefreshCw
+                  className={downloading ? "animate-spin" : ""}
+                  size={14}
+                />
+                {downloading ? "Downloading…" : "Download database"}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() =>
+                setForm({
+                  country_code: "",
+                  country_name: "",
+                  decision: "Block",
+                  enabled: true,
+                })
+              }
+              disabled={!database?.ready}
+              className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Plus size={15} />
+              Add country rule
+            </button>
+          </div>
+        }
+      >
+        <div
+          className={`flex items-start gap-3 rounded-md p-4 ${database?.ready ? "bg-emerald-50 dark:bg-emerald-950/20" : "bg-amber-50 dark:bg-amber-950/20"}`}
+        >
+          <Map
+            size={18}
+            className={`mt-0.5 ${database?.ready ? "text-emerald-600" : "text-amber-600"}`}
+          />
+          <div>
+            <p
+              className={`text-sm font-semibold ${database?.ready ? "text-emerald-800 dark:text-emerald-200" : "text-amber-800 dark:text-amber-200"}`}
+            >
+              {database?.ready
+                ? "Country database ready"
+                : "Country database unavailable"}
+            </p>
+            <p className="mt-1 text-xs leading-5 text-neutral-600 dark:text-neutral-400">
+              {database?.ready
+                ? `${database.provider || "DB-IP Lite"} · ${database.path} · ${entries.filter((entry) => entry.enabled).length} active rule(s)`
+                : database?.message ||
+                  "Install or download the optional DB-IP country database before creating Geo policies."}
+            </p>
+          </div>
+        </div>
+        <div className="mt-5 grid gap-3 sm:grid-cols-3">
+          <Stat
+            icon={Globe2}
+            label="Countries observed"
+            value={data ? observed.length.toLocaleString() : null}
+            detail="From actual audit-log requests"
+            tone="blue"
+          />
+          <Stat
+            icon={ShieldAlert}
+            label="Country rules"
+            value={
+              data
+                ? entries
+                    .filter((entry) => entry.enabled)
+                    .length.toLocaleString()
+                : null
+            }
+            detail="Persisted active policies"
+            tone="amber"
+          />
+          <Stat
+            icon={CheckCircle2}
+            label="Database status"
+            value={database ? (database.ready ? "Ready" : "Unavailable") : null}
+            detail={
+              database?.build_epoch
+                ? `Build ${new Date(database.build_epoch * 1000).toLocaleDateString()}`
+                : "Loading database status"
+            }
+            tone={database?.ready ? "emerald" : "amber"}
+          />
+        </div>
+      </Section>
+      <Section
+        title="Country policies"
+        description="Block specific countries, or create an allow list. Allow rules take precedence as a global country allow list."
+        actions={
+          <button
+            type="button"
+            onClick={load}
+            className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 dark:border-neutral-700 dark:text-neutral-300"
+          >
+            <RefreshCw size={14} />
+            Refresh
+          </button>
+        }
+      >
+        {entries.length === 0 ? (
+          <div className="rounded-md border border-dashed border-neutral-300 px-5 py-12 text-center dark:border-neutral-700">
+            <Map className="mx-auto text-neutral-400" size={28} />
+            <h4 className="mt-3 text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+              No country rules
+            </h4>
+            <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+              Requests are allowed by default. Add a country rule to generate
+              provider-level CIDR rules.
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[680px] text-left">
+              <thead>
+                <tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
+                  <th className="px-3 py-3">Country</th>
+                  <th className="px-3 py-3">Decision</th>
+                  <th className="px-3 py-3">State</th>
+                  <th className="px-3 py-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {entries.map((entry) => (
+                  <tr
+                    key={entry.id}
+                    className="border-b border-neutral-100 dark:border-neutral-800"
+                  >
+                    <td className="px-3 py-4">
+                      <span className="font-semibold text-neutral-800 dark:text-neutral-200">
+                        {entry.country_name}
+                      </span>
+                      <span className="ml-2 rounded bg-neutral-100 px-1.5 py-0.5 font-mono text-xs text-neutral-500 dark:bg-neutral-800">
+                        {entry.country_code}
+                      </span>
+                    </td>
+                    <td
+                      className={`px-3 py-4 text-sm font-semibold ${entry.decision === "Block" ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}`}
+                    >
+                      {entry.decision}
+                    </td>
+                    <td className="px-3 py-4 text-sm text-neutral-500 dark:text-neutral-400">
+                      {entry.enabled ? "Active" : "Disabled"}
+                    </td>
+                    <td className="px-3 py-4 text-right">
+                      <button
+                        type="button"
+                        onClick={() => setForm(entry)}
+                        className="mr-3 cursor-pointer text-sm font-semibold text-blue-600 dark:text-blue-400"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => remove(entry)}
+                        className="cursor-pointer text-sm font-semibold text-rose-600 dark:text-rose-400"
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Section>
+      <Section
+        title="Observed countries"
+        description="Countries resolved from real Application Shield audit events. This is not fabricated traffic data."
+      >
+        {observed.length === 0 ? (
+          <p className="py-8 text-center text-sm text-neutral-500 dark:text-neutral-400">
+            No country-resolvable audit events yet.
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {observed.map((country) => (
+              <span
+                key={country.country_code}
+                className="rounded-md bg-neutral-100 px-3 py-2 text-sm text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300"
+              >
+                {country.country_name} ({country.country_code}) ·{" "}
+                {country.requests}
+              </span>
+            ))}
+          </div>
+        )}
+      </Section>
+      {form && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8">
+          <section className="w-full max-w-lg rounded-xl bg-white p-5 shadow-xl dark:bg-neutral-900">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">
+                {form.id ? "Edit country policy" : "Add country policy"}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setForm(null)}
+                className="cursor-pointer text-neutral-400"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <form className="mt-5 space-y-4" onSubmit={save}>
+              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                Country code
+                <input
+                  required
+                  maxLength="2"
+                  className={input}
+                  value={form.country_code}
+                  onChange={(event) =>
+                    setForm({
+                      ...form,
+                      country_code: event.target.value.toUpperCase(),
+                    })
+                  }
+                  placeholder="US"
+                />
+              </label>
+              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                Country name
+                <input
+                  required
+                  className={input}
+                  value={form.country_name}
+                  onChange={(event) =>
+                    setForm({ ...form, country_name: event.target.value })
+                  }
+                  placeholder="United States"
+                />
+              </label>
+              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                Decision
+                <select
+                  className={input}
+                  value={form.decision}
+                  onChange={(event) =>
+                    setForm({ ...form, decision: event.target.value })
+                  }
+                >
+                  <option value="Block">Block</option>
+                  <option value="Allow">Allow</option>
+                </select>
+              </label>
+              <label className="flex items-center gap-3 text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-blue-600"
+                  checked={form.enabled}
+                  onChange={(event) =>
+                    setForm({ ...form, enabled: event.target.checked })
+                  }
+                />
+                Enable this policy
+              </label>
+              <div className="flex justify-end gap-2 border-t border-neutral-200 pt-4 dark:border-neutral-800">
+                <button
+                  type="button"
+                  onClick={() => setForm(null)}
+                  className="cursor-pointer rounded-md px-3 py-2 text-sm text-neutral-600 dark:text-neutral-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving || !database?.ready}
+                  className="cursor-pointer rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  {saving ? "Saving…" : "Save policy"}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function TrafficTabPaginated() {
@@ -549,8 +3169,13 @@ function TrafficTabPaginated() {
     setLoading(true);
     setError("");
     try {
-      const response = await apiRequest(`/api/v1/application-shield/traffic?page=${requestedPage}&page_size=${pageSize}`);
-      if (!response.ok) throw new Error(await readApiError(response, "Unable to load traffic."));
+      const response = await apiRequest(
+        `/api/v1/application-shield/traffic?page=${requestedPage}&page_size=${pageSize}`,
+      );
+      if (!response.ok)
+        throw new Error(
+          await readApiError(response, "Unable to load traffic."),
+        );
       setData(await response.json());
       setPage(requestedPage);
     } catch (reason) {
@@ -570,156 +3195,1294 @@ function TrafficTabPaginated() {
   const pagination = data?.pagination || {};
   const total = Number(pagination.total || 0);
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
-  return <div className="space-y-5">
-    {error && <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300">{error}</p>}
-    <div className="grid gap-3 sm:grid-cols-3">
-      <Stat icon={Activity} label="Requests inspected" value={data ? Number(data.summary?.requests_inspected || 0).toLocaleString() : null} detail="Observed provider access logs" tone="blue" />
-      <Stat icon={ShieldAlert} label="Requests blocked" value={data ? Number(data.summary?.blocked || 0).toLocaleString() : null} detail="Across the audit log" tone="amber" />
-      <Stat icon={Globe2} label="Unique sources" value={data ? Number(data.summary?.unique_sources || 0).toLocaleString() : null} detail="Distinct observed addresses" />
+  return (
+    <div className="space-y-5">
+      {error && (
+        <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300">
+          {error}
+        </p>
+      )}
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Stat
+          icon={Activity}
+          label="Requests inspected"
+          value={
+            data
+              ? Number(data.summary?.requests_inspected || 0).toLocaleString()
+              : null
+          }
+          detail="Observed provider access logs"
+          tone="blue"
+        />
+        <Stat
+          icon={ShieldAlert}
+          label="Requests blocked"
+          value={
+            data ? Number(data.summary?.blocked || 0).toLocaleString() : null
+          }
+          detail="Across the audit log"
+          tone="amber"
+        />
+        <Stat
+          icon={Globe2}
+          label="Unique sources"
+          value={
+            data
+              ? Number(data.summary?.unique_sources || 0).toLocaleString()
+              : null
+          }
+          detail="Distinct observed addresses"
+        />
+      </div>
+      <Section
+        title="Recent traffic"
+        description="Traffic is loaded in pages of 50 events. Use Refresh when you want the latest audit entries."
+        actions={
+          <button
+            type="button"
+            onClick={() => load(page)}
+            disabled={loading}
+            className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 disabled:cursor-wait disabled:opacity-60 dark:border-neutral-700 dark:text-neutral-300"
+          >
+            <RefreshCw className={loading ? "animate-spin" : ""} size={14} />
+            {loading ? "Loading…" : "Refresh"}
+          </button>
+        }
+      >
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[860px] text-left">
+            <thead>
+              <tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
+                <th className="px-3 py-3">Time</th>
+                <th className="px-3 py-3">Request</th>
+                <th className="px-3 py-3">Source</th>
+                <th className="px-3 py-3">Host</th>
+                <th className="px-3 py-3">Status</th>
+                <th className="px-3 py-3">Outcome</th>
+              </tr>
+            </thead>
+            <tbody>
+              {events.map((event) => (
+                <tr
+                  key={event.id}
+                  className="border-b border-neutral-100 dark:border-neutral-800"
+                >
+                  <td className="px-3 py-4 text-xs text-neutral-500 dark:text-neutral-400">
+                    {trafficTime(event.time)}
+                  </td>
+                  <td className="max-w-md px-3 py-4">
+                    <code className="block truncate text-xs text-neutral-700 dark:text-neutral-300">
+                      {event.method} {event.uri}
+                    </code>
+                    {event.messages?.length > 0 && (
+                      <p className="mt-1 truncate text-xs text-neutral-500 dark:text-neutral-400">
+                        {event.messages[0][1]}
+                      </p>
+                    )}
+                  </td>
+                  <td className="px-3 py-4 font-mono text-xs text-neutral-600 dark:text-neutral-400">
+                    <SourceWithCountry event={event} />
+                  </td>
+                  <td className="max-w-xs px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">
+                    <span className="block truncate">{event.host}</span>
+                  </td>
+                  <td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">
+                    {event.status || "—"}
+                  </td>
+                  <td
+                    className={`px-3 py-4 text-xs font-semibold ${event.outcome === "Blocked" ? "text-rose-600 dark:text-rose-400" : event.outcome === "Allowed" ? "text-emerald-600 dark:text-emerald-400" : "text-neutral-600 dark:text-neutral-400"}`}
+                  >
+                    {event.outcome}
+                  </td>
+                </tr>
+              ))}
+              {data && events.length === 0 && (
+                <tr>
+                  <td colSpan="6" className="px-3 py-12">
+                    <div className="grid min-h-48 place-items-center text-center text-sm text-neutral-500 dark:text-neutral-400">
+                      <div>
+                        <Activity
+                          className="mx-auto text-neutral-400"
+                          size={28}
+                        />
+                        <p className="mt-3">
+                          No audited traffic has been recorded yet.
+                        </p>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <div className="mt-4 flex flex-col gap-3 border-t border-neutral-200 pt-4 text-sm dark:border-neutral-800 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-neutral-500 dark:text-neutral-400">
+            {total
+              ? `${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, total)} of ${total}`
+              : "0 events"}
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => load(page - 1)}
+              disabled={loading || page <= 1}
+              className="cursor-pointer rounded-md border border-neutral-300 px-3 py-2 font-medium text-neutral-700 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700 dark:text-neutral-300"
+            >
+              Previous
+            </button>
+            <span className="px-2 text-neutral-500 dark:text-neutral-400">
+              Page {page} of {pageCount}
+            </span>
+            <button
+              type="button"
+              onClick={() => load(page + 1)}
+              disabled={loading || !pagination.has_next}
+              className="cursor-pointer rounded-md border border-neutral-300 px-3 py-2 font-medium text-neutral-700 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700 dark:text-neutral-300"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      </Section>
     </div>
-    <Section title="Recent traffic" description="Traffic is loaded in pages of 50 events. Use Refresh when you want the latest audit entries." actions={<button type="button" onClick={() => load(page)} disabled={loading} className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 disabled:cursor-wait disabled:opacity-60 dark:border-neutral-700 dark:text-neutral-300"><RefreshCw className={loading ? "animate-spin" : ""} size={14} />{loading ? "Loading…" : "Refresh"}</button>}>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[860px] text-left">
-          <thead><tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400"><th className="px-3 py-3">Time</th><th className="px-3 py-3">Request</th><th className="px-3 py-3">Source</th><th className="px-3 py-3">Host</th><th className="px-3 py-3">Status</th><th className="px-3 py-3">Outcome</th></tr></thead>
-          <tbody>{events.map((event) => <tr key={event.id} className="border-b border-neutral-100 dark:border-neutral-800"><td className="px-3 py-4 text-xs text-neutral-500 dark:text-neutral-400">{trafficTime(event.time)}</td><td className="max-w-md px-3 py-4"><code className="block truncate text-xs text-neutral-700 dark:text-neutral-300">{event.method} {event.uri}</code>{event.messages?.length > 0 && <p className="mt-1 truncate text-xs text-neutral-500 dark:text-neutral-400">{event.messages[0][1]}</p>}</td><td className="px-3 py-4 font-mono text-xs text-neutral-600 dark:text-neutral-400"><SourceWithCountry event={event} /></td><td className="max-w-xs px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400"><span className="block truncate">{event.host}</span></td><td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">{event.status || "—"}</td><td className={`px-3 py-4 text-xs font-semibold ${event.outcome === "Blocked" ? "text-rose-600 dark:text-rose-400" : event.outcome === "Allowed" ? "text-emerald-600 dark:text-emerald-400" : "text-neutral-600 dark:text-neutral-400"}`}>{event.outcome}</td></tr>)}{data && events.length === 0 && <tr><td colSpan="6" className="px-3 py-12"><div className="grid min-h-48 place-items-center text-center text-sm text-neutral-500 dark:text-neutral-400"><div><Activity className="mx-auto text-neutral-400" size={28} /><p className="mt-3">No audited traffic has been recorded yet.</p></div></div></td></tr>}</tbody>
-        </table>
-      </div>
-      <div className="mt-4 flex flex-col gap-3 border-t border-neutral-200 pt-4 text-sm dark:border-neutral-800 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-neutral-500 dark:text-neutral-400">{total ? `${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, total)} of ${total}` : "0 events"}</p>
-        <div className="flex items-center gap-2"><button type="button" onClick={() => load(page - 1)} disabled={loading || page <= 1} className="cursor-pointer rounded-md border border-neutral-300 px-3 py-2 font-medium text-neutral-700 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700 dark:text-neutral-300">Previous</button><span className="px-2 text-neutral-500 dark:text-neutral-400">Page {page} of {pageCount}</span><button type="button" onClick={() => load(page + 1)} disabled={loading || !pagination.has_next} className="cursor-pointer rounded-md border border-neutral-300 px-3 py-2 font-medium text-neutral-700 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700 dark:text-neutral-300">Next</button></div>
-      </div>
-    </Section>
-
-  </div>;
+  );
 }
 
 function TrafficTab() {
   const [data, setData] = React.useState(null);
   const [error, setError] = React.useState("");
-  const load = React.useCallback(() => apiRequest("/api/v1/application-shield/traffic?limit=200").then(async (response) => { if (!response.ok) throw new Error(await readApiError(response, "Unable to load traffic.")); setData(await response.json()); }).catch((reason) => setError(reason.message || "Unable to load traffic.")), []);
-  React.useEffect(() => { load(); }, [load]);
+  const load = React.useCallback(
+    () =>
+      apiRequest("/api/v1/application-shield/traffic?limit=200")
+        .then(async (response) => {
+          if (!response.ok)
+            throw new Error(
+              await readApiError(response, "Unable to load traffic."),
+            );
+          setData(await response.json());
+        })
+        .catch((reason) =>
+          setError(reason.message || "Unable to load traffic."),
+        ),
+    [],
+  );
+  React.useEffect(() => {
+    load();
+  }, [load]);
   const events = data?.events || [];
   const blocked = events.filter((event) => event.outcome === "Blocked").length;
   const allowed = events.filter((event) => event.outcome === "Allowed").length;
-  const percent = (value) => events.length ? `${((value / events.length) * 100).toFixed(1)}%` : "—";
-  return <div className="space-y-5">{error && <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300">{error}</p>}<div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Stat icon={Activity} label="Requests inspected" value={data ? Number(data.summary.requests_inspected || 0).toLocaleString() : null} detail="Observed provider access logs" tone="blue" /><Stat icon={ShieldAlert} label="Blocked" value={data ? blocked.toLocaleString() : null} detail={data ? `${percent(blocked)} of audited events` : "Loading audit events"} tone="amber" /><Stat icon={Globe2} label="Unique sources" value={data ? Number(data.summary.unique_sources || 0).toLocaleString() : null} detail="Sources in recent audit events" /><Stat icon={BarChart3} label="Audit events" value={data ? events.length.toLocaleString() : null} detail="Recent ModSecurity transactions" /></div><Section title="Request outcomes" description="Live outcomes from recent ModSecurity audit transactions."><div className="grid gap-3 sm:grid-cols-3"><div className="rounded-md bg-emerald-50 p-4 dark:bg-emerald-950/20"><p className="text-xs text-emerald-700 dark:text-emerald-300">Allowed</p><p className="mt-2 text-2xl font-semibold text-emerald-800 dark:text-emerald-200">{data ? percent(allowed) : "—"}</p></div><div className="rounded-md bg-amber-50 p-4 dark:bg-amber-950/20"><p className="text-xs text-amber-700 dark:text-amber-300">Inspected</p><p className="mt-2 text-2xl font-semibold text-amber-800 dark:text-amber-200">{data ? percent(events.length - blocked - allowed) : "—"}</p></div><div className="rounded-md bg-rose-50 p-4 dark:bg-rose-950/20"><p className="text-xs text-rose-700 dark:text-rose-300">Blocked</p><p className="mt-2 text-2xl font-semibold text-rose-800 dark:text-rose-200">{data ? percent(blocked) : "—"}</p></div></div></Section><Section title="Recent traffic" description="The latest audited requests and the rules that matched them." actions={<button type="button" onClick={load} className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300"><RefreshCw size={15} />Refresh</button>}>{data && events.length === 0 ? <div className="py-10 text-center text-sm text-neutral-500 dark:text-neutral-400">No audited traffic has been recorded yet.</div> : <div className="overflow-x-auto"><table className="w-full min-w-[980px] text-left"><thead><tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400"><th className="px-3 py-3">Source</th><th className="px-3 py-3">Host</th><th className="px-3 py-3">Request</th><th className="px-3 py-3">Status</th><th className="px-3 py-3">Matched rules</th></tr></thead><tbody>{events.map((event) => <tr key={event.id} className="border-b border-neutral-100 dark:border-neutral-800"><td className="px-3 py-4 text-sm text-neutral-700 dark:text-neutral-300">{event.source_ip}</td><td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">{event.host}</td><td className="max-w-sm px-3 py-4"><code className="block truncate text-xs text-neutral-600 dark:text-neutral-400">{event.method} {event.uri}</code></td><td className="px-3 py-4"><span className={`text-xs font-semibold ${event.outcome === "Blocked" ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}`}>{event.status || "Inspected"} · {event.outcome}</span></td><td className="max-w-md px-3 py-4 text-xs text-neutral-500 dark:text-neutral-400">{event.messages?.length ? event.messages.map(([id, message]) => <span key={`${event.id}-${id}`} className="mr-2 inline-block">{id}: {message}</span>) : "No rule message"}</td></tr>)}</tbody></table></div>}</Section></div>;
+  const percent = (value) =>
+    events.length ? `${((value / events.length) * 100).toFixed(1)}%` : "—";
+  return (
+    <div className="space-y-5">
+      {error && (
+        <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300">
+          {error}
+        </p>
+      )}
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Stat
+          icon={Activity}
+          label="Requests inspected"
+          value={
+            data
+              ? Number(data.summary.requests_inspected || 0).toLocaleString()
+              : null
+          }
+          detail="Observed provider access logs"
+          tone="blue"
+        />
+        <Stat
+          icon={ShieldAlert}
+          label="Blocked"
+          value={data ? blocked.toLocaleString() : null}
+          detail={
+            data
+              ? `${percent(blocked)} of audited events`
+              : "Loading audit events"
+          }
+          tone="amber"
+        />
+        <Stat
+          icon={Globe2}
+          label="Unique sources"
+          value={
+            data
+              ? Number(data.summary.unique_sources || 0).toLocaleString()
+              : null
+          }
+          detail="Sources in recent audit events"
+        />
+        <Stat
+          icon={BarChart3}
+          label="Audit events"
+          value={data ? events.length.toLocaleString() : null}
+          detail="Recent ModSecurity transactions"
+        />
+      </div>
+      <Section
+        title="Request outcomes"
+        description="Live outcomes from recent ModSecurity audit transactions."
+      >
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div className="rounded-md bg-emerald-50 p-4 dark:bg-emerald-950/20">
+            <p className="text-xs text-emerald-700 dark:text-emerald-300">
+              Allowed
+            </p>
+            <p className="mt-2 text-2xl font-semibold text-emerald-800 dark:text-emerald-200">
+              {data ? percent(allowed) : "—"}
+            </p>
+          </div>
+          <div className="rounded-md bg-amber-50 p-4 dark:bg-amber-950/20">
+            <p className="text-xs text-amber-700 dark:text-amber-300">
+              Inspected
+            </p>
+            <p className="mt-2 text-2xl font-semibold text-amber-800 dark:text-amber-200">
+              {data ? percent(events.length - blocked - allowed) : "—"}
+            </p>
+          </div>
+          <div className="rounded-md bg-rose-50 p-4 dark:bg-rose-950/20">
+            <p className="text-xs text-rose-700 dark:text-rose-300">Blocked</p>
+            <p className="mt-2 text-2xl font-semibold text-rose-800 dark:text-rose-200">
+              {data ? percent(blocked) : "—"}
+            </p>
+          </div>
+        </div>
+      </Section>
+      <Section
+        title="Recent traffic"
+        description="The latest audited requests and the rules that matched them."
+        actions={
+          <button
+            type="button"
+            onClick={load}
+            className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300"
+          >
+            <RefreshCw size={15} />
+            Refresh
+          </button>
+        }
+      >
+        {data && events.length === 0 ? (
+          <div className="py-10 text-center text-sm text-neutral-500 dark:text-neutral-400">
+            No audited traffic has been recorded yet.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[980px] text-left">
+              <thead>
+                <tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
+                  <th className="px-3 py-3">Source</th>
+                  <th className="px-3 py-3">Host</th>
+                  <th className="px-3 py-3">Request</th>
+                  <th className="px-3 py-3">Status</th>
+                  <th className="px-3 py-3">Matched rules</th>
+                </tr>
+              </thead>
+              <tbody>
+                {events.map((event) => (
+                  <tr
+                    key={event.id}
+                    className="border-b border-neutral-100 dark:border-neutral-800"
+                  >
+                    <td className="px-3 py-4 text-sm text-neutral-700 dark:text-neutral-300">
+                      {event.source_ip}
+                    </td>
+                    <td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">
+                      {event.host}
+                    </td>
+                    <td className="max-w-sm px-3 py-4">
+                      <code className="block truncate text-xs text-neutral-600 dark:text-neutral-400">
+                        {event.method} {event.uri}
+                      </code>
+                    </td>
+                    <td className="px-3 py-4">
+                      <span
+                        className={`text-xs font-semibold ${event.outcome === "Blocked" ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}`}
+                      >
+                        {event.status || "Inspected"} · {event.outcome}
+                      </span>
+                    </td>
+                    <td className="max-w-md px-3 py-4 text-xs text-neutral-500 dark:text-neutral-400">
+                      {event.messages?.length
+                        ? event.messages.map(([id, message]) => (
+                            <span
+                              key={`${event.id}-${id}`}
+                              className="mr-2 inline-block"
+                            >
+                              {id}: {message}
+                            </span>
+                          ))
+                        : "No rule message"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Section>
+    </div>
+  );
 }
 
 function PoliciesTab({ rules, onCreate, onEdit, onToggle, onDelete }) {
   const policies = rules.filter((rule) => rule.scope !== "All protected sites");
-  return <Section title="Custom policies" description="Build website-specific conditions for paths, methods, headers, query strings, and request rates." actions={<button type="button" onClick={onCreate} className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white"><Plus size={15} />New policy</button>}>{policies.length === 0 ? <div className="rounded-md border border-dashed border-neutral-300 px-5 py-12 text-center dark:border-neutral-700"><ShieldCheck className="mx-auto text-neutral-400" size={28} /><h4 className="mt-3 text-sm font-semibold text-neutral-900 dark:text-neutral-100">No custom policies</h4><p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">Create a rule and choose a specific website scope to show it here.</p></div> : <div className="space-y-3">{policies.map((policy) => <div key={policy.id} className="flex flex-col justify-between gap-3 rounded-md border border-neutral-200 p-4 sm:flex-row sm:items-center dark:border-neutral-800"><div><p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{policy.name}</p><p className="mt-1 font-mono text-xs text-neutral-500 dark:text-neutral-400">{policy.match}</p><p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">Scope: {policy.scope} · Hits: {Number(policy.hits || 0).toLocaleString()}</p></div><div className="flex items-center gap-4"><span className={`text-xs font-medium ${policy.action === "Block" ? "text-rose-600 dark:text-rose-400" : "text-neutral-600 dark:text-neutral-400"}`}>{policy.action}</span><span className={`text-xs font-semibold ${policy.enabled ? "text-emerald-600 dark:text-emerald-400" : "text-neutral-500"}`}>{policy.enabled ? "Enabled" : "Disabled"}</span><button type="button" onClick={() => onEdit(policy)} className="cursor-pointer text-sm font-semibold text-blue-600 dark:text-blue-400">Edit</button><button type="button" onClick={() => onToggle(policy)} className="cursor-pointer text-sm text-neutral-500">{policy.enabled ? "Disable" : "Enable"}</button><button type="button" onClick={() => onDelete(policy.id)} className="cursor-pointer text-sm text-rose-600 dark:text-rose-400">Delete</button></div></div>)}</div>}</Section>;
+  return (
+    <Section
+      title="Custom policies"
+      description="Build website-specific conditions for paths, methods, headers, query strings, and request rates."
+      actions={
+        <button
+          type="button"
+          onClick={onCreate}
+          className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white"
+        >
+          <Plus size={15} />
+          New policy
+        </button>
+      }
+    >
+      {policies.length === 0 ? (
+        <div className="rounded-md border border-dashed border-neutral-300 px-5 py-12 text-center dark:border-neutral-700">
+          <ShieldCheck className="mx-auto text-neutral-400" size={28} />
+          <h4 className="mt-3 text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+            No custom policies
+          </h4>
+          <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+            Create a rule and choose a specific website scope to show it here.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {policies.map((policy) => (
+            <div
+              key={policy.id}
+              className="flex flex-col justify-between gap-3 rounded-md border border-neutral-200 p-4 sm:flex-row sm:items-center dark:border-neutral-800"
+            >
+              <div>
+                <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                  {policy.name}
+                </p>
+                <p className="mt-1 font-mono text-xs text-neutral-500 dark:text-neutral-400">
+                  {policy.match}
+                </p>
+                <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                  Scope: {policy.scope} · Hits:{" "}
+                  {Number(policy.hits || 0).toLocaleString()}
+                </p>
+              </div>
+              <div className="flex items-center gap-4">
+                <span
+                  className={`text-xs font-medium ${policy.action === "Block" ? "text-rose-600 dark:text-rose-400" : "text-neutral-600 dark:text-neutral-400"}`}
+                >
+                  {policy.action}
+                </span>
+                <span
+                  className={`text-xs font-semibold ${policy.enabled ? "text-emerald-600 dark:text-emerald-400" : "text-neutral-500"}`}
+                >
+                  {policy.enabled ? "Enabled" : "Disabled"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => onEdit(policy)}
+                  className="cursor-pointer text-sm font-semibold text-blue-600 dark:text-blue-400"
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onToggle(policy)}
+                  className="cursor-pointer text-sm text-neutral-500"
+                >
+                  {policy.enabled ? "Disable" : "Enable"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDelete(policy.id)}
+                  className="cursor-pointer text-sm text-rose-600 dark:text-rose-400"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Section>
+  );
 }
 
 function WorldTrafficMap({ countries: trafficCountries }) {
   const [hoveredCode, setHoveredCode] = React.useState("");
   const [selectedCode, setSelectedCode] = React.useState("");
-  const byCode = React.useMemo(() => Object.fromEntries(trafficCountries.map((item) => [String(item.country_code || "").toUpperCase(), item])), [trafficCountries]);
+  const byCode = React.useMemo(
+    () =>
+      Object.fromEntries(
+        trafficCountries.map((item) => [
+          String(item.country_code || "").toUpperCase(),
+          item,
+        ]),
+      ),
+    [trafficCountries],
+  );
   const activeCode = hoveredCode || selectedCode;
   const activeCountry = byCode[activeCode];
-  const maximum = Math.max(1, ...trafficCountries.map((item) => Number(item.requests || 0)));
-  const dark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
+  const maximum = Math.max(
+    1,
+    ...trafficCountries.map((item) => Number(item.requests || 0)),
+  );
+  const dark =
+    typeof document !== "undefined" &&
+    document.documentElement.classList.contains("dark");
   const color = (country) => {
     if (!country) return dark ? "#64748b" : "#e2e8f0";
-    const intensity = Math.max(0.18, Math.min(1, Number(country.requests || 0) / maximum));
-    const palette = dark ? ["#67e8f9", "#22d3ee", "#38bdf8", "#0ea5e9", "#0284c7"] : ["#bae6fd", "#7dd3fc", "#38bdf8", "#0ea5e9", "#0284c7"];
-    return palette[Math.min(palette.length - 1, Math.max(0, Math.ceil(intensity * palette.length) - 1))];
+    const intensity = Math.max(
+      0.18,
+      Math.min(1, Number(country.requests || 0) / maximum),
+    );
+    const palette = dark
+      ? ["#67e8f9", "#22d3ee", "#38bdf8", "#0ea5e9", "#0284c7"]
+      : ["#bae6fd", "#7dd3fc", "#38bdf8", "#0ea5e9", "#0284c7"];
+    return palette[
+      Math.min(
+        palette.length - 1,
+        Math.max(0, Math.ceil(intensity * palette.length) - 1),
+      )
+    ];
   };
   const codeForGeo = (geo) => {
-    try { return isoCountries.numericToAlpha2(String(geo.id)) || ""; } catch { return ""; }
+    try {
+      return isoCountries.numericToAlpha2(String(geo.id)) || "";
+    } catch {
+      return "";
+    }
   };
-  return <div className="relative w-full">
-    <div className="relative w-full overflow-hidden rounded-lg border border-neutral-200 bg-transparent p-2 dark:border-neutral-800">
-      <ComposableMap projectionConfig={{ scale: 175 }} width={1200} height={560} className="h-auto w-full">
-        <Geographies geography={worldMap}>
-          {({ geographies, borders }) => <>
-            {geographies.map((geo) => {
-              const code = codeForGeo(geo);
-              const country = byCode[code];
-              return <Geography key={geo.rsmKey} geography={geo} fill={color(country)} onMouseEnter={() => setHoveredCode(code)} onMouseLeave={() => setHoveredCode("")} onClick={() => country && setSelectedCode(code)} style={{ default: { fill: color(country), stroke: "transparent", strokeWidth: 0, outline: "none" }, hover: { fill: country ? "#f59e0b" : dark ? "#94a3b8" : "#cbd5e1", stroke: dark ? "#f8fafc" : "#334155", strokeWidth: 1, outline: "none", cursor: country ? "pointer" : "default" }, pressed: { fill: "#f97316", outline: "none" } }} />;
-            })}
-            {borders && <path d={borders.svgPath} fill="none" stroke={dark ? "#cbd5e1" : "#64748b"} strokeWidth="0.8" pointerEvents="none" />}
-          </>}
-        </Geographies>
-      </ComposableMap>
-      <div className="pointer-events-none absolute bottom-3 left-4 rounded-md border border-neutral-200 bg-white/90 px-3 py-2 text-[11px] text-neutral-600 shadow-sm backdrop-blur dark:border-neutral-700 dark:bg-neutral-900/90 dark:text-neutral-300"><span className="mr-2 inline-block h-2 w-16 rounded bg-gradient-to-r from-blue-100 via-blue-400 to-blue-700 align-middle dark:from-blue-950 dark:via-blue-600 dark:to-blue-300" />More requests</div>
-      {activeCountry && <div className="absolute right-5 top-5 z-10 w-60 rounded-lg border border-neutral-200 bg-white/95 p-3 shadow-xl backdrop-blur dark:border-neutral-700 dark:bg-neutral-900/95"><div className="flex items-center justify-between gap-3"><div className="flex min-w-0 items-center gap-2"><span className="text-xl" aria-hidden="true">{countryFlag(activeCode)}</span><h4 className="truncate text-sm font-semibold text-neutral-900 dark:text-neutral-100">{countryDisplayName(activeCountry)}</h4></div><button type="button" className="shrink-0 text-xs text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200" onClick={() => { setSelectedCode(""); setHoveredCode(""); }}>Clear</button></div><dl className="mt-3 grid grid-cols-3 gap-2 text-sm"><div><dt className="text-xs text-neutral-500 dark:text-neutral-400">Requests</dt><dd className="mt-0.5 font-semibold text-neutral-900 dark:text-neutral-100">{Number(activeCountry.requests || 0).toLocaleString()}</dd></div><div><dt className="text-xs text-neutral-500 dark:text-neutral-400">Blocked</dt><dd className="mt-0.5 font-semibold text-rose-600 dark:text-rose-400">{Number(activeCountry.blocked || 0).toLocaleString()}</dd></div><div><dt className="text-xs text-neutral-500 dark:text-neutral-400">Share</dt><dd className="mt-0.5 font-semibold text-neutral-900 dark:text-neutral-100">{trafficCountries.reduce((sum, item) => sum + Number(item.requests || 0), 0) ? `${((Number(activeCountry.requests || 0) / trafficCountries.reduce((sum, item) => sum + Number(item.requests || 0), 0)) * 100).toFixed(1)}%` : "—"}</dd></div></dl></div>}
+  return (
+    <div className="relative w-full">
+      <div className="relative w-full overflow-hidden rounded-lg border border-neutral-200 bg-transparent p-2 dark:border-neutral-800">
+        <ComposableMap
+          projectionConfig={{ scale: 175 }}
+          width={1200}
+          height={560}
+          className="h-auto w-full"
+        >
+          <Geographies geography={worldMap}>
+            {({ geographies, borders }) => (
+              <>
+                {geographies.map((geo) => {
+                  const code = codeForGeo(geo);
+                  const country = byCode[code];
+                  return (
+                    <Geography
+                      key={geo.rsmKey}
+                      geography={geo}
+                      fill={color(country)}
+                      onMouseEnter={() => setHoveredCode(code)}
+                      onMouseLeave={() => setHoveredCode("")}
+                      onClick={() => country && setSelectedCode(code)}
+                      style={{
+                        default: {
+                          fill: color(country),
+                          stroke: "transparent",
+                          strokeWidth: 0,
+                          outline: "none",
+                        },
+                        hover: {
+                          fill: country
+                            ? "#f59e0b"
+                            : dark
+                              ? "#94a3b8"
+                              : "#cbd5e1",
+                          stroke: dark ? "#f8fafc" : "#334155",
+                          strokeWidth: 1,
+                          outline: "none",
+                          cursor: country ? "pointer" : "default",
+                        },
+                        pressed: { fill: "#f97316", outline: "none" },
+                      }}
+                    />
+                  );
+                })}
+                {borders && (
+                  <path
+                    d={borders.svgPath}
+                    fill="none"
+                    stroke={dark ? "#cbd5e1" : "#64748b"}
+                    strokeWidth="0.8"
+                    pointerEvents="none"
+                  />
+                )}
+              </>
+            )}
+          </Geographies>
+        </ComposableMap>
+        <div className="pointer-events-none absolute bottom-3 left-4 rounded-md border border-neutral-200 bg-white/90 px-3 py-2 text-[11px] text-neutral-600 shadow-sm backdrop-blur dark:border-neutral-700 dark:bg-neutral-900/90 dark:text-neutral-300">
+          <span className="mr-2 inline-block h-2 w-16 rounded bg-gradient-to-r from-blue-100 via-blue-400 to-blue-700 align-middle dark:from-blue-950 dark:via-blue-600 dark:to-blue-300" />
+          More requests
+        </div>
+        {activeCountry && (
+          <div className="absolute right-5 top-5 z-10 w-60 rounded-lg border border-neutral-200 bg-white/95 p-3 shadow-xl backdrop-blur dark:border-neutral-700 dark:bg-neutral-900/95">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="text-xl" aria-hidden="true">
+                  {countryFlag(activeCode)}
+                </span>
+                <h4 className="truncate text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                  {countryDisplayName(activeCountry)}
+                </h4>
+              </div>
+              <button
+                type="button"
+                className="shrink-0 text-xs text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
+                onClick={() => {
+                  setSelectedCode("");
+                  setHoveredCode("");
+                }}
+              >
+                Clear
+              </button>
+            </div>
+            <dl className="mt-3 grid grid-cols-3 gap-2 text-sm">
+              <div>
+                <dt className="text-xs text-neutral-500 dark:text-neutral-400">
+                  Requests
+                </dt>
+                <dd className="mt-0.5 font-semibold text-neutral-900 dark:text-neutral-100">
+                  {Number(activeCountry.requests || 0).toLocaleString()}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-neutral-500 dark:text-neutral-400">
+                  Blocked
+                </dt>
+                <dd className="mt-0.5 font-semibold text-rose-600 dark:text-rose-400">
+                  {Number(activeCountry.blocked || 0).toLocaleString()}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-neutral-500 dark:text-neutral-400">
+                  Share
+                </dt>
+                <dd className="mt-0.5 font-semibold text-neutral-900 dark:text-neutral-100">
+                  {trafficCountries.reduce(
+                    (sum, item) => sum + Number(item.requests || 0),
+                    0,
+                  )
+                    ? `${((Number(activeCountry.requests || 0) / trafficCountries.reduce((sum, item) => sum + Number(item.requests || 0), 0)) * 100).toFixed(1)}%`
+                    : "—"}
+                </dd>
+              </div>
+            </dl>
+          </div>
+        )}
+      </div>
     </div>
-  </div>;
+  );
 }
 
 function AttackMapTab() {
   const [data, setData] = React.useState(null);
   const [error, setError] = React.useState("");
-  const load = React.useCallback(() => apiRequest("/api/v1/application-shield/attack-map?limit=1000").then(async (response) => { if (!response.ok) throw new Error(await readApiError(response, "Unable to load attack map.")); setData(await response.json()); }).catch((reason) => setError(reason.message || "Unable to load attack map.")), []);
-  React.useEffect(() => { load(); }, [load]);
+  const load = React.useCallback(
+    () =>
+      apiRequest("/api/v1/application-shield/attack-map?limit=1000")
+        .then(async (response) => {
+          if (!response.ok)
+            throw new Error(
+              await readApiError(response, "Unable to load attack map."),
+            );
+          setData(await response.json());
+        })
+        .catch((reason) =>
+          setError(reason.message || "Unable to load attack map."),
+        ),
+    [],
+  );
+  React.useEffect(() => {
+    load();
+  }, [load]);
   const countries = data?.countries || [];
   const continents = data?.continents || [];
-  const totalRequests = countries.reduce((sum, item) => sum + Number(item.requests || 0), 0);
-  const totalBlocked = countries.reduce((sum, item) => sum + Number(item.blocked || 0), 0);
-  const percent = (value, total) => total ? `${((value / total) * 100).toFixed(1)}%` : "—";
-  return <div className="space-y-5">{error && <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300">{error}</p>}<div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Stat icon={Activity} label="Audited requests" value={data ? totalRequests.toLocaleString() : null} detail="Country-resolvable events" tone="blue" /><Stat icon={ShieldAlert} label="Blocked requests" value={data ? totalBlocked.toLocaleString() : null} detail="Actual blocked audit events" tone="amber" /><Stat icon={Globe2} label="Countries" value={data ? countries.length.toLocaleString() : null} detail="Countries in observed traffic" /><Stat icon={Map} label="Continents" value={data ? continents.length.toLocaleString() : null} detail="Continents in observed traffic" /></div><Section title="World traffic map" description="Live country activity from indexed Application Shield events. Hover or click a country for details." actions={<button type="button" onClick={load} className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 dark:border-neutral-700 dark:text-neutral-300"><RefreshCw size={14} />Refresh</button>}>{countries.length ? <WorldTrafficMap countries={countries} /> : <div className="grid min-h-64 place-items-center rounded-md border border-dashed border-neutral-300 bg-white text-center dark:border-neutral-700 dark:bg-neutral-900"><div><Map className="mx-auto text-neutral-400" size={30} /><p className="mt-3 text-sm font-semibold text-neutral-700 dark:text-neutral-300">No country-resolved traffic yet</p><p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">Send traffic through an attached provider to populate this view.</p></div></div>}</Section><div className="grid gap-5 xl:grid-cols-2"><Section title="Activity by continent" description="Aggregated from real country-resolved audit events."><div className="space-y-4">{continents.length === 0 ? <p className="py-8 text-center text-sm text-neutral-500 dark:text-neutral-400">No continent data available.</p> : continents.map((continent) => <div key={continent.continent_code}><div className="flex justify-between text-sm"><span className="text-neutral-700 dark:text-neutral-300">{continent.continent_name || continent.continent_code}</span><span className="font-semibold text-neutral-900 dark:text-neutral-100">{continent.blocked} blocked · {continent.requests} total</span></div><div className="mt-2 h-2 rounded-full bg-neutral-100 dark:bg-neutral-800"><span className="block h-full rounded-full bg-rose-500" style={{ width: `${totalRequests ? Math.min(100, Math.max(2, (continent.requests / totalRequests) * 100)) : 0}%` }} /></div></div>)}</div></Section><Section title="Recent country activity" description="Latest country-resolved events, including allowed detection-only traffic."><div className="max-h-80 overflow-auto"><table className="w-full min-w-[560px] text-left"><thead><tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400"><th className="px-3 py-3">Country</th><th className="px-3 py-3">Request</th><th className="px-3 py-3">Outcome</th></tr></thead><tbody>{(data?.recent_events || []).slice(0, 20).map((event) => <tr key={event.id} className="border-b border-neutral-100 dark:border-neutral-800"><td className="px-3 py-3 text-sm text-neutral-700 dark:text-neutral-300"><span className="mr-2 text-base" aria-hidden="true">{countryFlag(event.country?.country_code) || "🌐"}</span>{countryDisplayName(event.country) || event.country?.country_code || "Unknown"} <span className="font-mono text-xs text-neutral-400">{event.country?.country_code || "—"}</span></td><td className="max-w-xs px-3 py-3"><code className="block truncate text-xs text-neutral-500">{event.method} {event.uri}</code></td><td className={`px-3 py-3 text-xs font-semibold ${event.outcome === "Blocked" ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}`}>{event.outcome}</td></tr>)}{data && !data.recent_events?.length && <tr><td colSpan="3" className="px-3 py-8 text-center text-sm text-neutral-500 dark:text-neutral-400">No country-resolved events yet.</td></tr>}</tbody></table></div></Section></div><p className="text-xs text-neutral-500 dark:text-neutral-400">Data source: {data?.source || "Application Shield SQLite event index"}.</p></div>;
+  const totalRequests = countries.reduce(
+    (sum, item) => sum + Number(item.requests || 0),
+    0,
+  );
+  const totalBlocked = countries.reduce(
+    (sum, item) => sum + Number(item.blocked || 0),
+    0,
+  );
+  const percent = (value, total) =>
+    total ? `${((value / total) * 100).toFixed(1)}%` : "—";
+  return (
+    <div className="space-y-5">
+      {error && (
+        <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300">
+          {error}
+        </p>
+      )}
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Stat
+          icon={Activity}
+          label="Audited requests"
+          value={data ? totalRequests.toLocaleString() : null}
+          detail="Country-resolvable events"
+          tone="blue"
+        />
+        <Stat
+          icon={ShieldAlert}
+          label="Blocked requests"
+          value={data ? totalBlocked.toLocaleString() : null}
+          detail="Actual blocked audit events"
+          tone="amber"
+        />
+        <Stat
+          icon={Globe2}
+          label="Countries"
+          value={data ? countries.length.toLocaleString() : null}
+          detail="Countries in observed traffic"
+        />
+        <Stat
+          icon={Map}
+          label="Continents"
+          value={data ? continents.length.toLocaleString() : null}
+          detail="Continents in observed traffic"
+        />
+      </div>
+      <Section
+        title="World traffic map"
+        description="Live country activity from indexed Application Shield events. Hover or click a country for details."
+        actions={
+          <button
+            type="button"
+            onClick={load}
+            className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 dark:border-neutral-700 dark:text-neutral-300"
+          >
+            <RefreshCw size={14} />
+            Refresh
+          </button>
+        }
+      >
+        {countries.length ? (
+          <WorldTrafficMap countries={countries} />
+        ) : (
+          <div className="grid min-h-64 place-items-center rounded-md border border-dashed border-neutral-300 bg-white text-center dark:border-neutral-700 dark:bg-neutral-900">
+            <div>
+              <Map className="mx-auto text-neutral-400" size={30} />
+              <p className="mt-3 text-sm font-semibold text-neutral-700 dark:text-neutral-300">
+                No country-resolved traffic yet
+              </p>
+              <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                Send traffic through an attached provider to populate this view.
+              </p>
+            </div>
+          </div>
+        )}
+      </Section>
+      <div className="grid gap-5 xl:grid-cols-2">
+        <Section
+          title="Activity by continent"
+          description="Aggregated from real country-resolved audit events."
+        >
+          <div className="space-y-4">
+            {continents.length === 0 ? (
+              <p className="py-8 text-center text-sm text-neutral-500 dark:text-neutral-400">
+                No continent data available.
+              </p>
+            ) : (
+              continents.map((continent) => (
+                <div key={continent.continent_code}>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-neutral-700 dark:text-neutral-300">
+                      {continent.continent_name || continent.continent_code}
+                    </span>
+                    <span className="font-semibold text-neutral-900 dark:text-neutral-100">
+                      {continent.blocked} blocked · {continent.requests} total
+                    </span>
+                  </div>
+                  <div className="mt-2 h-2 rounded-full bg-neutral-100 dark:bg-neutral-800">
+                    <span
+                      className="block h-full rounded-full bg-rose-500"
+                      style={{
+                        width: `${totalRequests ? Math.min(100, Math.max(2, (continent.requests / totalRequests) * 100)) : 0}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </Section>
+        <Section
+          title="Recent country activity"
+          description="Latest country-resolved events, including allowed detection-only traffic."
+        >
+          <div className="max-h-80 overflow-auto">
+            <table className="w-full min-w-[560px] text-left">
+              <thead>
+                <tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
+                  <th className="px-3 py-3">Country</th>
+                  <th className="px-3 py-3">Request</th>
+                  <th className="px-3 py-3">Outcome</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(data?.recent_events || []).slice(0, 20).map((event) => (
+                  <tr
+                    key={event.id}
+                    className="border-b border-neutral-100 dark:border-neutral-800"
+                  >
+                    <td className="px-3 py-3 text-sm text-neutral-700 dark:text-neutral-300">
+                      <span className="mr-2 text-base" aria-hidden="true">
+                        {countryFlag(event.country?.country_code) || "🌐"}
+                      </span>
+                      {countryDisplayName(event.country) ||
+                        event.country?.country_code ||
+                        "Unknown"}{" "}
+                      <span className="font-mono text-xs text-neutral-400">
+                        {event.country?.country_code || "—"}
+                      </span>
+                    </td>
+                    <td className="max-w-xs px-3 py-3">
+                      <code className="block truncate text-xs text-neutral-500">
+                        {event.method} {event.uri}
+                      </code>
+                    </td>
+                    <td
+                      className={`px-3 py-3 text-xs font-semibold ${event.outcome === "Blocked" ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}`}
+                    >
+                      {event.outcome}
+                    </td>
+                  </tr>
+                ))}
+                {data && !data.recent_events?.length && (
+                  <tr>
+                    <td
+                      colSpan="3"
+                      className="px-3 py-8 text-center text-sm text-neutral-500 dark:text-neutral-400"
+                    >
+                      No country-resolved events yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Section>
+      </div>
+      <p className="text-xs text-neutral-500 dark:text-neutral-400">
+        Data source: {data?.source || "Application Shield SQLite event index"}.
+      </p>
+    </div>
+  );
 }
 function LegacyAttackMapTab() {
   const [data, setData] = React.useState(null);
   const [error, setError] = React.useState("");
-  const load = React.useCallback(() => apiRequest("/api/v1/application-shield/attack-map?limit=1000").then(async (response) => { if (!response.ok) throw new Error(await readApiError(response, "Unable to load attack map.")); setData(await response.json()); }).catch((reason) => setError(reason.message || "Unable to load attack map.")), []);
-  React.useEffect(() => { load(); }, [load]);
+  const load = React.useCallback(
+    () =>
+      apiRequest("/api/v1/application-shield/attack-map?limit=1000")
+        .then(async (response) => {
+          if (!response.ok)
+            throw new Error(
+              await readApiError(response, "Unable to load attack map."),
+            );
+          setData(await response.json());
+        })
+        .catch((reason) =>
+          setError(reason.message || "Unable to load attack map."),
+        ),
+    [],
+  );
+  React.useEffect(() => {
+    load();
+  }, [load]);
   const countries = data?.countries || [];
   const continents = data?.continents || [];
   const totalRequests = countries.reduce((sum, item) => sum + item.requests, 0);
   const totalBlocked = countries.reduce((sum, item) => sum + item.blocked, 0);
-  const percent = (value, total) => total ? `${((value / total) * 100).toFixed(1)}%` : "—";
-  return <div className="space-y-5">{error && <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300">{error}</p>}<div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Stat icon={Activity} label="Audited requests" value={data ? totalRequests.toLocaleString() : null} detail="Country-resolvable events" tone="blue" /><Stat icon={ShieldAlert} label="Blocked requests" value={data ? totalBlocked.toLocaleString() : null} detail="Actual blocked audit events" tone="amber" /><Stat icon={Globe2} label="Countries" value={data ? countries.length.toLocaleString() : null} detail="Countries in observed traffic" /><Stat icon={Map} label="Continents" value={data ? continents.length.toLocaleString() : null} detail="Continents in observed traffic" /></div><Section title="Live attack map" description="Real country activity from the Application Shield audit log. Locations are country-level, not exact user coordinates." actions={<button type="button" onClick={load} className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 dark:border-neutral-700 dark:text-neutral-300"><RefreshCw size={14} />Refresh</button>}><div className="rounded-lg border border-neutral-200 bg-neutral-50 p-4 dark:border-neutral-800 dark:bg-neutral-950/60"><div className="mb-4 flex items-center justify-between gap-3"><div><p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Observed origin activity</p><p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">{data ? `${data.events_considered.toLocaleString()} recent audit events analyzed` : "Loading live audit events…"}</p></div><span className="inline-flex items-center gap-2 text-xs font-semibold text-emerald-600 dark:text-emerald-400"><span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />Live</span></div>{countries.length === 0 ? <div className="grid min-h-48 place-items-center rounded-md border border-dashed border-neutral-300 bg-white text-center dark:border-neutral-700 dark:bg-neutral-900"><div><Map className="mx-auto text-neutral-400" size={30} /><p className="mt-3 text-sm font-semibold text-neutral-700 dark:text-neutral-300">No country-resolvable attacks yet</p><p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">Send traffic through an attached provider to populate this view.</p></div></div> : <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{countries.slice(0, 12).map((country) => <div key={country.country_code} className="rounded-md border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900"><div className="flex items-start justify-between gap-3"><div><p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{country.country_name}</p><p className="mt-1 font-mono text-xs text-neutral-500 dark:text-neutral-400">{country.country_code} · {country.continent_name}</p></div><span className="rounded bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700 dark:bg-rose-950/30 dark:text-rose-300">{country.blocked} blocked</span></div><div className="mt-3 h-2 rounded-full bg-neutral-100 dark:bg-neutral-800"><span className="block h-full rounded-full bg-blue-500" style={{ width: `${Math.max(3, (country.requests / countries[0].requests) * 100)}%` }} /></div><p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">{country.requests.toLocaleString()} requests · {percent(country.requests, totalRequests)}</p></div>)}</div>}</div></Section><div className="grid gap-5 xl:grid-cols-2"><Section title="Activity by continent" description="Aggregated from real country-resolved audit events."><div className="space-y-4">{continents.length === 0 ? <p className="py-8 text-center text-sm text-neutral-500 dark:text-neutral-400">No continent data available.</p> : continents.map((continent) => <div key={continent.continent_code}><div className="flex justify-between text-sm"><span className="text-neutral-700 dark:text-neutral-300">{continent.continent_name}</span><span className="font-semibold text-neutral-900 dark:text-neutral-100">{continent.blocked} blocked · {continent.requests} total</span></div><div className="mt-2 h-2 rounded-full bg-neutral-100 dark:bg-neutral-800"><span className="block h-full rounded-full bg-rose-500" style={{ width: `${Math.max(2, (continent.requests / totalRequests) * 100)}%` }} /></div></div>)}</div></Section><Section title="Recent country activity" description="Latest country-resolved events, including allowed detection-only traffic."><div className="max-h-80 overflow-auto"><table className="w-full min-w-[560px] text-left"><thead><tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400"><th className="px-3 py-3">Country</th><th className="px-3 py-3">Request</th><th className="px-3 py-3">Outcome</th></tr></thead><tbody>{(data?.recent_events || []).slice(0, 20).map((event) => <tr key={event.id} className="border-b border-neutral-100 dark:border-neutral-800"><td className="px-3 py-3 text-sm text-neutral-700 dark:text-neutral-300"><span className="mr-2 text-base" aria-hidden="true">{countryFlag(event.country?.country_code) || "🌐"}</span>{event.country?.country_name || "Unknown"} <span className="font-mono text-xs text-neutral-400">{event.country?.country_code || "—"}</span></td><td className="max-w-xs px-3 py-3"><code className="block truncate text-xs text-neutral-500">{event.method} {event.uri}</code></td><td className={`px-3 py-3 text-xs font-semibold ${event.outcome === "Blocked" ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}`}>{event.outcome}</td></tr>)}{data && !data.recent_events?.length && <tr><td colSpan="3" className="px-3 py-8 text-center text-sm text-neutral-500 dark:text-neutral-400">No country-resolved events yet.</td></tr>}</tbody></table></div></Section></div><p className="text-xs text-neutral-500 dark:text-neutral-400">Data source: {data?.source || "Application Shield audit log"}. Country resolution is provided by the local DB-IP Lite database.</p></div>;
+  const percent = (value, total) =>
+    total ? `${((value / total) * 100).toFixed(1)}%` : "—";
+  return (
+    <div className="space-y-5">
+      {error && (
+        <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300">
+          {error}
+        </p>
+      )}
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Stat
+          icon={Activity}
+          label="Audited requests"
+          value={data ? totalRequests.toLocaleString() : null}
+          detail="Country-resolvable events"
+          tone="blue"
+        />
+        <Stat
+          icon={ShieldAlert}
+          label="Blocked requests"
+          value={data ? totalBlocked.toLocaleString() : null}
+          detail="Actual blocked audit events"
+          tone="amber"
+        />
+        <Stat
+          icon={Globe2}
+          label="Countries"
+          value={data ? countries.length.toLocaleString() : null}
+          detail="Countries in observed traffic"
+        />
+        <Stat
+          icon={Map}
+          label="Continents"
+          value={data ? continents.length.toLocaleString() : null}
+          detail="Continents in observed traffic"
+        />
+      </div>
+      <Section
+        title="Live attack map"
+        description="Real country activity from the Application Shield audit log. Locations are country-level, not exact user coordinates."
+        actions={
+          <button
+            type="button"
+            onClick={load}
+            className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 dark:border-neutral-700 dark:text-neutral-300"
+          >
+            <RefreshCw size={14} />
+            Refresh
+          </button>
+        }
+      >
+        <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-4 dark:border-neutral-800 dark:bg-neutral-950/60">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                Observed origin activity
+              </p>
+              <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                {data
+                  ? `${data.events_considered.toLocaleString()} recent audit events analyzed`
+                  : "Loading live audit events…"}
+              </p>
+            </div>
+            <span className="inline-flex items-center gap-2 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
+              Live
+            </span>
+          </div>
+          {countries.length === 0 ? (
+            <div className="grid min-h-48 place-items-center rounded-md border border-dashed border-neutral-300 bg-white text-center dark:border-neutral-700 dark:bg-neutral-900">
+              <div>
+                <Map className="mx-auto text-neutral-400" size={30} />
+                <p className="mt-3 text-sm font-semibold text-neutral-700 dark:text-neutral-300">
+                  No country-resolvable attacks yet
+                </p>
+                <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                  Send traffic through an attached provider to populate this
+                  view.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {countries.slice(0, 12).map((country) => (
+                <div
+                  key={country.country_code}
+                  className="rounded-md border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                        {country.country_name}
+                      </p>
+                      <p className="mt-1 font-mono text-xs text-neutral-500 dark:text-neutral-400">
+                        {country.country_code} · {country.continent_name}
+                      </p>
+                    </div>
+                    <span className="rounded bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700 dark:bg-rose-950/30 dark:text-rose-300">
+                      {country.blocked} blocked
+                    </span>
+                  </div>
+                  <div className="mt-3 h-2 rounded-full bg-neutral-100 dark:bg-neutral-800">
+                    <span
+                      className="block h-full rounded-full bg-blue-500"
+                      style={{
+                        width: `${Math.max(3, (country.requests / countries[0].requests) * 100)}%`,
+                      }}
+                    />
+                  </div>
+                  <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
+                    {country.requests.toLocaleString()} requests ·{" "}
+                    {percent(country.requests, totalRequests)}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </Section>
+      <div className="grid gap-5 xl:grid-cols-2">
+        <Section
+          title="Activity by continent"
+          description="Aggregated from real country-resolved audit events."
+        >
+          <div className="space-y-4">
+            {continents.length === 0 ? (
+              <p className="py-8 text-center text-sm text-neutral-500 dark:text-neutral-400">
+                No continent data available.
+              </p>
+            ) : (
+              continents.map((continent) => (
+                <div key={continent.continent_code}>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-neutral-700 dark:text-neutral-300">
+                      {continent.continent_name}
+                    </span>
+                    <span className="font-semibold text-neutral-900 dark:text-neutral-100">
+                      {continent.blocked} blocked · {continent.requests} total
+                    </span>
+                  </div>
+                  <div className="mt-2 h-2 rounded-full bg-neutral-100 dark:bg-neutral-800">
+                    <span
+                      className="block h-full rounded-full bg-rose-500"
+                      style={{
+                        width: `${Math.max(2, (continent.requests / totalRequests) * 100)}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </Section>
+        <Section
+          title="Recent country activity"
+          description="Latest country-resolved events, including allowed detection-only traffic."
+        >
+          <div className="max-h-80 overflow-auto">
+            <table className="w-full min-w-[560px] text-left">
+              <thead>
+                <tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
+                  <th className="px-3 py-3">Country</th>
+                  <th className="px-3 py-3">Request</th>
+                  <th className="px-3 py-3">Outcome</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(data?.recent_events || []).slice(0, 20).map((event) => (
+                  <tr
+                    key={event.id}
+                    className="border-b border-neutral-100 dark:border-neutral-800"
+                  >
+                    <td className="px-3 py-3 text-sm text-neutral-700 dark:text-neutral-300">
+                      <span className="mr-2 text-base" aria-hidden="true">
+                        {countryFlag(event.country?.country_code) || "🌐"}
+                      </span>
+                      {event.country?.country_name || "Unknown"}{" "}
+                      <span className="font-mono text-xs text-neutral-400">
+                        {event.country?.country_code || "—"}
+                      </span>
+                    </td>
+                    <td className="max-w-xs px-3 py-3">
+                      <code className="block truncate text-xs text-neutral-500">
+                        {event.method} {event.uri}
+                      </code>
+                    </td>
+                    <td
+                      className={`px-3 py-3 text-xs font-semibold ${event.outcome === "Blocked" ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}`}
+                    >
+                      {event.outcome}
+                    </td>
+                  </tr>
+                ))}
+                {data && !data.recent_events?.length && (
+                  <tr>
+                    <td
+                      colSpan="3"
+                      className="px-3 py-8 text-center text-sm text-neutral-500 dark:text-neutral-400"
+                    >
+                      No country-resolved events yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Section>
+      </div>
+      <p className="text-xs text-neutral-500 dark:text-neutral-400">
+        Data source: {data?.source || "Application Shield audit log"}. Country
+        resolution is provided by the local DB-IP Lite database.
+      </p>
+    </div>
+  );
 }
 
 function LiveReportsTab() {
   const [data, setData] = React.useState(null);
   const [error, setError] = React.useState("");
-  const load = React.useCallback(() => apiRequest("/api/v1/application-shield/report?hours=24").then(async (response) => { if (!response.ok) throw new Error(await readApiError(response, "Unable to load security report.")); setData(await response.json()); }).catch((reason) => setError(reason.message || "Unable to load security report.")), []);
-  React.useEffect(() => { load(); }, [load]);
+  const load = React.useCallback(
+    () =>
+      apiRequest("/api/v1/application-shield/report?hours=24")
+        .then(async (response) => {
+          if (!response.ok)
+            throw new Error(
+              await readApiError(response, "Unable to load security report."),
+            );
+          setData(await response.json());
+        })
+        .catch((reason) =>
+          setError(reason.message || "Unable to load security report."),
+        ),
+    [],
+  );
+  React.useEffect(() => {
+    load();
+  }, [load]);
   const blocked = Number(data?.summary?.blocked || 0);
   const allowed = Number(data?.summary?.allowed || 0);
   const total = Number(data?.summary?.total || 0);
-  const categories = (data?.rule_groups || []).slice(0, 8).map((item) => [item.message, item.count]);
-  const percent = (value) => total ? `${((value / total) * 100).toFixed(1)}%` : "—";
-  const exportReport = () => { const blob = new Blob([JSON.stringify({ generated_at: new Date().toISOString(), coverage: "Indexed Application Shield audit events", ...data }, null, 2)], { type: "application/json" }); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = `server-engine-application-shield-report-${new Date().toISOString().slice(0, 10)}.json`; link.click(); URL.revokeObjectURL(url); };
-  return <div className="space-y-5">{error && <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300">{error}</p>}<Section title="Security reports" description="Indexed Application Shield report for the last 24 hours." actions={<div className="flex gap-2"><button type="button" onClick={load} className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 dark:border-neutral-700 dark:text-neutral-300"><RefreshCw size={14} />Reload</button><button type="button" disabled={!data} onClick={exportReport} className="cursor-pointer rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-300">Export JSON</button></div>}><div className="grid gap-3 sm:grid-cols-3"><Stat icon={ShieldAlert} label="Requests blocked" value={data ? blocked.toLocaleString() : null} detail="From indexed audit events" tone="amber" /><Stat icon={Activity} label="Requests inspected" value={data ? total.toLocaleString() : null} detail="Indexed audit events" tone="blue" /><Stat icon={CheckCircle2} label="Allowed audit events" value={data ? allowed.toLocaleString() : null} detail="Detection-only requests allowed" tone="emerald" /></div></Section><Section title="Top detection categories" description="Grouped rule messages from the indexed audit store."><div className="space-y-4">{data && categories.length ? categories.map(([label, value]) => <div key={label} className="flex items-center gap-4"><span className="w-[32rem] shrink-0 whitespace-normal text-sm text-neutral-700 dark:text-neutral-300" title={label}>{label}</span><div className="h-2 flex-1 rounded-full bg-neutral-100 dark:bg-neutral-800"><span className="block h-full rounded-full bg-blue-500" style={{ width: `${Math.max(4, (value / categories[0][1]) * 100)}%` }} /></div><span className="w-16 text-right text-sm font-semibold text-neutral-700 dark:text-neutral-300">{value}</span></div>) : <p className="py-8 text-center text-sm text-neutral-500 dark:text-neutral-400">{data ? "No detection events recorded yet." : "Loading report data…"}</p>}</div></Section><p className="text-xs text-neutral-500 dark:text-neutral-400">Data source: {data?.source || "Application Shield SQLite event index"}.</p></div>;
+  const categories = (data?.rule_groups || [])
+    .slice(0, 8)
+    .map((item) => [item.message, item.count]);
+  const percent = (value) =>
+    total ? `${((value / total) * 100).toFixed(1)}%` : "—";
+  const exportReport = () => {
+    const blob = new Blob(
+      [
+        JSON.stringify(
+          {
+            generated_at: new Date().toISOString(),
+            coverage: "Indexed Application Shield audit events",
+            ...data,
+          },
+          null,
+          2,
+        ),
+      ],
+      { type: "application/json" },
+    );
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `server-engine-application-shield-report-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+  return (
+    <div className="space-y-5">
+      {error && (
+        <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300">
+          {error}
+        </p>
+      )}
+      <Section
+        title="Security reports"
+        description="Indexed Application Shield report for the last 24 hours."
+        actions={
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={load}
+              className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 dark:border-neutral-700 dark:text-neutral-300"
+            >
+              <RefreshCw size={14} />
+              Reload
+            </button>
+            <button
+              type="button"
+              disabled={!data}
+              onClick={exportReport}
+              className="cursor-pointer rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-300"
+            >
+              Export JSON
+            </button>
+          </div>
+        }
+      >
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Stat
+            icon={ShieldAlert}
+            label="Requests blocked"
+            value={data ? blocked.toLocaleString() : null}
+            detail="From indexed audit events"
+            tone="amber"
+          />
+          <Stat
+            icon={Activity}
+            label="Requests inspected"
+            value={data ? total.toLocaleString() : null}
+            detail="Indexed audit events"
+            tone="blue"
+          />
+          <Stat
+            icon={CheckCircle2}
+            label="Allowed audit events"
+            value={data ? allowed.toLocaleString() : null}
+            detail="Detection-only requests allowed"
+            tone="emerald"
+          />
+        </div>
+      </Section>
+      <Section
+        title="Top detection categories"
+        description="Grouped rule messages from the indexed audit store."
+      >
+        <div className="space-y-4">
+          {data && categories.length ? (
+            categories.map(([label, value]) => (
+              <div key={label} className="flex items-center gap-4">
+                <span
+                  className="w-[32rem] shrink-0 whitespace-normal text-sm text-neutral-700 dark:text-neutral-300"
+                  title={label}
+                >
+                  {label}
+                </span>
+                <div className="h-2 flex-1 rounded-full bg-neutral-100 dark:bg-neutral-800">
+                  <span
+                    className="block h-full rounded-full bg-blue-500"
+                    style={{
+                      width: `${Math.max(4, (value / categories[0][1]) * 100)}%`,
+                    }}
+                  />
+                </div>
+                <span className="w-16 text-right text-sm font-semibold text-neutral-700 dark:text-neutral-300">
+                  {value}
+                </span>
+              </div>
+            ))
+          ) : (
+            <p className="py-8 text-center text-sm text-neutral-500 dark:text-neutral-400">
+              {data
+                ? "No detection events recorded yet."
+                : "Loading report data…"}
+            </p>
+          )}
+        </div>
+      </Section>
+      <p className="text-xs text-neutral-500 dark:text-neutral-400">
+        Data source: {data?.source || "Application Shield SQLite event index"}.
+      </p>
+    </div>
+  );
 }
 
-function ReportChart({ type = "bar", series, categories, colors = ["#3b82f6", "#f43f5e"], height = 280, horizontal = false }) {
-  const dark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
+function ReportChart({
+  type = "bar",
+  series,
+  categories,
+  colors = ["#3b82f6", "#f43f5e"],
+  height = 280,
+  horizontal = false,
+}) {
+  const dark =
+    typeof document !== "undefined" &&
+    document.documentElement.classList.contains("dark");
   const safeCategories = Array.isArray(categories) ? categories : [];
   const safeSeries = Array.isArray(series) ? series : [];
-  const hasData = type === "donut"
-    ? safeSeries.some((value) => Number(value || 0) > 0)
-    : safeSeries.some((item) => Array.isArray(item?.data) && item.data.length > 0);
-  if (!hasData) return <div className="grid min-h-56 place-items-center rounded-md border border-dashed border-neutral-300 text-sm text-neutral-500 dark:border-neutral-700 dark:text-neutral-400">No data available for this period.</div>;
+  const hasData =
+    type === "donut"
+      ? safeSeries.some((value) => Number(value || 0) > 0)
+      : safeSeries.some(
+          (item) => Array.isArray(item?.data) && item.data.length > 0,
+        );
+  if (!hasData)
+    return (
+      <div className="grid min-h-56 place-items-center rounded-md border border-dashed border-neutral-300 text-sm text-neutral-500 dark:border-neutral-700 dark:text-neutral-400">
+        No data available for this period.
+      </div>
+    );
   const chartSeries = horizontal
-    ? safeSeries.map((item) => ({ ...item, data: item.data.map((value, index) => ({ x: safeCategories[index] || "Unknown", y: Number(value || 0) })) }))
+    ? safeSeries.map((item) => ({
+        ...item,
+        data: item.data.map((value, index) => ({
+          x: safeCategories[index] || "Unknown",
+          y: Number(value || 0),
+        })),
+      }))
     : safeSeries;
   const options = {
-    chart: { type, toolbar: { show: false }, zoom: { enabled: false }, fontFamily: "inherit", foreColor: dark ? "#a3a3a3" : "#737373", animations: { enabled: true, speed: 350 } },
+    chart: {
+      type,
+      toolbar: { show: false },
+      zoom: { enabled: false },
+      fontFamily: "inherit",
+      foreColor: dark ? "#a3a3a3" : "#737373",
+      animations: { enabled: true, speed: 350 },
+    },
     colors,
     dataLabels: { enabled: false },
     stroke: { curve: "smooth", width: type === "area" ? 2 : 0 },
-    fill: type === "area" ? { type: "gradient", gradient: { opacityFrom: 0.35, opacityTo: 0.04, stops: [0, 95, 100] } } : { opacity: 0.9 },
+    fill:
+      type === "area"
+        ? {
+            type: "gradient",
+            gradient: {
+              opacityFrom: 0.35,
+              opacityTo: 0.04,
+              stops: [0, 95, 100],
+            },
+          }
+        : { opacity: 0.9 },
     plotOptions: { bar: { horizontal, borderRadius: 4, columnWidth: "58%" } },
     labels: type === "donut" ? safeCategories : [],
     grid: { borderColor: dark ? "#262626" : "#e5e5e5", strokeDashArray: 4 },
-    xaxis: { categories: horizontal ? [] : safeCategories, labels: { hideOverlappingLabels: true, rotate: 0 } },
-    yaxis: { labels: { formatter: (value) => horizontal ? value : Math.round(value).toLocaleString() } },
-    legend: { position: "top", horizontalAlign: "right", labels: { colors: dark ? "#d4d4d4" : "#525252" } },
-    tooltip: { shared: type === "area", intersect: false, theme: dark ? "dark" : "light", y: { formatter: (value) => Number(value || 0).toLocaleString() } },
+    xaxis: {
+      categories: horizontal ? [] : safeCategories,
+      labels: { hideOverlappingLabels: true, rotate: 0 },
+    },
+    yaxis: {
+      labels: {
+        formatter: (value) =>
+          horizontal ? value : Math.round(value).toLocaleString(),
+      },
+    },
+    legend: {
+      position: "top",
+      horizontalAlign: "right",
+      labels: { colors: dark ? "#d4d4d4" : "#525252" },
+    },
+    tooltip: {
+      shared: type === "area",
+      intersect: false,
+      theme: dark ? "dark" : "light",
+      y: { formatter: (value) => Number(value || 0).toLocaleString() },
+    },
   };
-  return <Chart type={type} height={height} width="100%" options={options} series={chartSeries} />;
+  return (
+    <Chart
+      type={type}
+      height={height}
+      width="100%"
+      options={options}
+      series={chartSeries}
+    />
+  );
 }
 
 function RichReportsTab() {
   const [hours, setHours] = React.useState(24);
   const [data, setData] = React.useState(null);
   const [error, setError] = React.useState("");
-  const load = React.useCallback(() => apiRequest(`/api/v1/application-shield/report?hours=${hours}`).then(async (response) => { if (!response.ok) throw new Error(await readApiError(response, "Unable to load security report.")); setData(await response.json()); }).catch((reason) => setError(reason.message || "Unable to load security report.")), [hours]);
-  React.useEffect(() => { load(); }, [load]);
+  const load = React.useCallback(
+    () =>
+      apiRequest(`/api/v1/application-shield/report?hours=${hours}`)
+        .then(async (response) => {
+          if (!response.ok)
+            throw new Error(
+              await readApiError(response, "Unable to load security report."),
+            );
+          setData(await response.json());
+        })
+        .catch((reason) =>
+          setError(reason.message || "Unable to load security report."),
+        ),
+    [hours],
+  );
+  React.useEffect(() => {
+    load();
+  }, [load]);
   const summary = data?.summary || {};
   const timeline = data?.timeline || [];
   const categories = data?.categories || [];
@@ -727,14 +4490,372 @@ function RichReportsTab() {
   const hosts = data?.hosts || [];
   const sources = data?.sources || [];
   const statuses = data?.statuses || [];
-  const blockRate = summary.total ? `${((Number(summary.blocked || 0) / Number(summary.total)) * 100).toFixed(1)}%` : "—";
-  const timelineLabels = timeline.map((item) => { const date = new Date(item.bucket); return Number.isNaN(date.getTime()) ? item.bucket : hours <= 48 ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : date.toLocaleDateString([], { month: "short", day: "numeric" }); });
-  const exportReport = () => { const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = `server-engine-application-shield-report-${new Date().toISOString().slice(0, 10)}.json`; link.click(); URL.revokeObjectURL(url); };
-  return <div className="space-y-5">{error && <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300">{error}</p>}<Section title="Security reports" description="Cached Application Shield analytics from the SQLite event index." actions={<div className="flex flex-wrap items-center gap-2"><select className="cursor-pointer rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-300" value={hours} onChange={(event) => setHours(Number(event.target.value))}><option value="24">Last 24 hours</option><option value="168">Last 7 days</option><option value="720">Last 30 days</option><option value="2160">Last 90 days</option><option value="8760">Last year</option></select><button type="button" disabled={!data} onClick={exportReport} className="cursor-pointer rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-300">Export JSON</button></div>}><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6"><Stat icon={Activity} label="Requests inspected" value={data ? Number(summary.total || 0).toLocaleString() : null} detail="Indexed audit events" tone="blue" /><Stat icon={ShieldAlert} label="Requests blocked" value={data ? Number(summary.blocked || 0).toLocaleString() : null} detail="Blocked outcomes" tone="amber" /><Stat icon={CheckCircle2} label="Block rate" value={data ? blockRate : null} detail="Of inspected requests" tone="amber" /><Stat icon={Globe2} label="Unique sources" value={data ? Number(summary.unique_sources || 0).toLocaleString() : null} detail="Distinct source IPs" /><Stat icon={Globe2} label="Attacked hosts" value={data ? Number(summary.protected_hosts || 0).toLocaleString() : null} detail="Domains with traffic" tone="blue" /><Stat icon={Map} label="Countries" value={data ? countries.length.toLocaleString() : null} detail="Country-resolved events" /></div></Section>{data && <p className="text-xs text-neutral-500 dark:text-neutral-400">Generated {new Date(data.generated_at).toLocaleString()} · cache expires {new Date(data.cache_expires_at).toLocaleString()} · {data.cached ? "served from hourly cache" : "freshly generated"}</p>}<div className="grid gap-5 xl:grid-cols-[1.6fr_1fr]"><Section title="Traffic timeline" description="Requests, blocked traffic, allowed traffic, and HTTP error trends."><ReportChart type="area" categories={timelineLabels} series={[{ name: "Requests", data: timeline.map((item) => item.requests) }, { name: "Blocked", data: timeline.map((item) => item.blocked) }, { name: "Allowed", data: timeline.map((item) => item.allowed) }, { name: "4xx", data: timeline.map((item) => item.client_errors) }, { name: "5xx", data: timeline.map((item) => item.server_errors) }]} colors={["#3b82f6", "#f43f5e", "#10b981", "#f59e0b", "#8b5cf6"]} height={320} /></Section><Section title="Outcomes" description="How indexed requests ended."><ReportChart type="donut" categories={["Blocked", "Allowed", "Inspected"]} series={[Number(summary.blocked || 0), Number(summary.allowed || 0), Math.max(0, Number(summary.total || 0) - Number(summary.blocked || 0) - Number(summary.allowed || 0))]} colors={["#f43f5e", "#10b981", "#f59e0b"]} height={270} /></Section></div><div className="grid gap-5 xl:grid-cols-2"><Section title="Attack categories" description="Categories inferred from indexed ModSecurity rule messages."><ReportChart categories={categories.slice(0, 8).map((item) => item.category)} series={[{ name: "Detections", data: categories.slice(0, 8).map((item) => item.count) }]} colors={["#2563eb"]} horizontal height={300} /></Section><Section title="HTTP status codes" description="Response status distribution from audited transactions."><ReportChart categories={statuses.map((item) => String(item.status || "Unknown"))} series={[{ name: "Requests", data: statuses.map((item) => item.count) }]} colors={["#8b5cf6"]} height={300} /></Section></div><div className="grid gap-5 xl:grid-cols-2"><Section title="Most attacked domains" description="Hosts receiving the most inspected and blocked requests."><ReportChart type="donut" categories={hosts.slice(0, 10).map((item) => item.host || "Unknown")} series={hosts.slice(0, 10).map((item) => Number(item.requests || 0))} colors={["#3b82f6", "#60a5fa", "#93c5fd", "#1d4ed8", "#f43f5e", "#f59e0b", "#10b981", "#8b5cf6", "#14b8a6", "#ec4899"]} height={320} /></Section><Section title="Top source IPs" description="Sources ranked by blocked activity."><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400"><th className="px-2 py-3">Source</th><th className="px-2 py-3">Blocked</th><th className="px-2 py-3">Requests</th><th className="px-2 py-3">Hosts</th></tr></thead><tbody>{sources.slice(0, 10).map((item) => <tr key={item.source_ip} className="border-b border-neutral-100 dark:border-neutral-800"><td className="px-2 py-3 font-mono text-xs text-neutral-700 dark:text-neutral-300">{item.source_ip}</td><td className="px-2 py-3 font-semibold text-rose-600 dark:text-rose-400">{Number(item.blocked || 0).toLocaleString()}</td><td className="px-2 py-3 text-neutral-600 dark:text-neutral-400">{Number(item.requests || 0).toLocaleString()}</td><td className="px-2 py-3 text-neutral-600 dark:text-neutral-400">{item.hosts}</td></tr>)}{data && !sources.length && <tr><td colSpan="4" className="px-2 py-8 text-center text-neutral-500">No source data.</td></tr>}</tbody></table></div></Section></div><Section title="Top request paths" description="Normalized paths with the highest inspected request volume."><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{(data?.paths || []).slice(0, 12).map((item) => <div key={item.path} className="flex items-center justify-between gap-3 rounded-md bg-neutral-50 px-3 py-2 dark:bg-neutral-800"><code className="truncate text-xs text-neutral-700 dark:text-neutral-300">{item.path}</code><span className="shrink-0 text-xs font-semibold text-neutral-600 dark:text-neutral-300">{item.count.toLocaleString()}</span></div>)}</div></Section><p className="text-xs text-neutral-500 dark:text-neutral-400">Data source: {data?.source || "Application Shield SQLite event index"}. ASN, ISP, user-agent, and reviewed false-positive data are not stored yet.</p></div>;
+  const blockRate = summary.total
+    ? `${((Number(summary.blocked || 0) / Number(summary.total)) * 100).toFixed(1)}%`
+    : "—";
+  const timelineLabels = timeline.map((item) => {
+    const date = new Date(item.bucket);
+    return Number.isNaN(date.getTime())
+      ? item.bucket
+      : hours <= 48
+        ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        : date.toLocaleDateString([], { month: "short", day: "numeric" });
+  });
+  const exportReport = () => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `server-engine-application-shield-report-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+  return (
+    <div className="space-y-5">
+      {error && (
+        <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300">
+          {error}
+        </p>
+      )}
+      <Section
+        title="Security reports"
+        description="Cached Application Shield analytics from the SQLite event index."
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              className="cursor-pointer rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-300"
+              value={hours}
+              onChange={(event) => setHours(Number(event.target.value))}
+            >
+              <option value="24">Last 24 hours</option>
+              <option value="168">Last 7 days</option>
+              <option value="720">Last 30 days</option>
+              <option value="2160">Last 90 days</option>
+              <option value="8760">Last year</option>
+            </select>
+            <button
+              type="button"
+              disabled={!data}
+              onClick={exportReport}
+              className="cursor-pointer rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-300"
+            >
+              Export JSON
+            </button>
+          </div>
+        }
+      >
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+          <Stat
+            icon={Activity}
+            label="Requests inspected"
+            value={data ? Number(summary.total || 0).toLocaleString() : null}
+            detail="Indexed audit events"
+            tone="blue"
+          />
+          <Stat
+            icon={ShieldAlert}
+            label="Requests blocked"
+            value={data ? Number(summary.blocked || 0).toLocaleString() : null}
+            detail="Blocked outcomes"
+            tone="amber"
+          />
+          <Stat
+            icon={CheckCircle2}
+            label="Block rate"
+            value={data ? blockRate : null}
+            detail="Of inspected requests"
+            tone="amber"
+          />
+          <Stat
+            icon={Globe2}
+            label="Unique sources"
+            value={
+              data ? Number(summary.unique_sources || 0).toLocaleString() : null
+            }
+            detail="Distinct source IPs"
+          />
+          <Stat
+            icon={Globe2}
+            label="Attacked hosts"
+            value={
+              data
+                ? Number(summary.protected_hosts || 0).toLocaleString()
+                : null
+            }
+            detail="Domains with traffic"
+            tone="blue"
+          />
+          <Stat
+            icon={Map}
+            label="Countries"
+            value={data ? countries.length.toLocaleString() : null}
+            detail="Country-resolved events"
+          />
+        </div>
+      </Section>
+      {data && (
+        <p className="text-xs text-neutral-500 dark:text-neutral-400">
+          Generated {new Date(data.generated_at).toLocaleString()} · cache
+          expires {new Date(data.cache_expires_at).toLocaleString()} ·{" "}
+          {data.cached ? "served from hourly cache" : "freshly generated"}
+        </p>
+      )}
+      <div className="grid gap-5 xl:grid-cols-[1.6fr_1fr]">
+        <Section
+          title="Traffic timeline"
+          description="Requests, blocked traffic, allowed traffic, and HTTP error trends."
+        >
+          <ReportChart
+            type="area"
+            categories={timelineLabels}
+            series={[
+              { name: "Requests", data: timeline.map((item) => item.requests) },
+              { name: "Blocked", data: timeline.map((item) => item.blocked) },
+              { name: "Allowed", data: timeline.map((item) => item.allowed) },
+              { name: "4xx", data: timeline.map((item) => item.client_errors) },
+              { name: "5xx", data: timeline.map((item) => item.server_errors) },
+            ]}
+            colors={["#3b82f6", "#f43f5e", "#10b981", "#f59e0b", "#8b5cf6"]}
+            height={320}
+          />
+        </Section>
+        <Section title="Outcomes" description="How indexed requests ended.">
+          <ReportChart
+            type="donut"
+            categories={["Blocked", "Allowed", "Inspected"]}
+            series={[
+              Number(summary.blocked || 0),
+              Number(summary.allowed || 0),
+              Math.max(
+                0,
+                Number(summary.total || 0) -
+                  Number(summary.blocked || 0) -
+                  Number(summary.allowed || 0),
+              ),
+            ]}
+            colors={["#f43f5e", "#10b981", "#f59e0b"]}
+            height={270}
+          />
+        </Section>
+      </div>
+      <div className="grid gap-5 xl:grid-cols-2">
+        <Section
+          title="Attack categories"
+          description="Categories inferred from indexed ModSecurity rule messages."
+        >
+          <ReportChart
+            categories={categories.slice(0, 8).map((item) => item.category)}
+            series={[
+              {
+                name: "Detections",
+                data: categories.slice(0, 8).map((item) => item.count),
+              },
+            ]}
+            colors={["#2563eb"]}
+            horizontal
+            height={300}
+          />
+        </Section>
+        <Section
+          title="HTTP status codes"
+          description="Response status distribution from audited transactions."
+        >
+          <ReportChart
+            categories={statuses.map((item) =>
+              String(item.status || "Unknown"),
+            )}
+            series={[
+              { name: "Requests", data: statuses.map((item) => item.count) },
+            ]}
+            colors={["#8b5cf6"]}
+            height={300}
+          />
+        </Section>
+      </div>
+      <div className="grid gap-5 xl:grid-cols-2">
+        <Section
+          title="Most attacked domains"
+          description="Hosts receiving the most inspected and blocked requests."
+        >
+          <ReportChart
+            type="donut"
+            categories={hosts
+              .slice(0, 10)
+              .map((item) => item.host || "Unknown")}
+            series={hosts
+              .slice(0, 10)
+              .map((item) => Number(item.requests || 0))}
+            colors={[
+              "#3b82f6",
+              "#60a5fa",
+              "#93c5fd",
+              "#1d4ed8",
+              "#f43f5e",
+              "#f59e0b",
+              "#10b981",
+              "#8b5cf6",
+              "#14b8a6",
+              "#ec4899",
+            ]}
+            height={320}
+          />
+        </Section>
+        <Section
+          title="Top source IPs"
+          description="Sources ranked by blocked activity."
+        >
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
+                  <th className="px-2 py-3">Source</th>
+                  <th className="px-2 py-3">Blocked</th>
+                  <th className="px-2 py-3">Requests</th>
+                  <th className="px-2 py-3">Hosts</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sources.slice(0, 10).map((item) => (
+                  <tr
+                    key={item.source_ip}
+                    className="border-b border-neutral-100 dark:border-neutral-800"
+                  >
+                    <td className="px-2 py-3 font-mono text-xs text-neutral-700 dark:text-neutral-300">
+                      {item.source_ip}
+                    </td>
+                    <td className="px-2 py-3 font-semibold text-rose-600 dark:text-rose-400">
+                      {Number(item.blocked || 0).toLocaleString()}
+                    </td>
+                    <td className="px-2 py-3 text-neutral-600 dark:text-neutral-400">
+                      {Number(item.requests || 0).toLocaleString()}
+                    </td>
+                    <td className="px-2 py-3 text-neutral-600 dark:text-neutral-400">
+                      {item.hosts}
+                    </td>
+                  </tr>
+                ))}
+                {data && !sources.length && (
+                  <tr>
+                    <td
+                      colSpan="4"
+                      className="px-2 py-8 text-center text-neutral-500"
+                    >
+                      No source data.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Section>
+      </div>
+      <Section
+        title="Top request paths"
+        description="Normalized paths with the highest inspected request volume."
+      >
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {(data?.paths || []).slice(0, 12).map((item) => (
+            <div
+              key={item.path}
+              className="flex items-center justify-between gap-3 rounded-md bg-neutral-50 px-3 py-2 dark:bg-neutral-800"
+            >
+              <code className="truncate text-xs text-neutral-700 dark:text-neutral-300">
+                {item.path}
+              </code>
+              <span className="shrink-0 text-xs font-semibold text-neutral-600 dark:text-neutral-300">
+                {item.count.toLocaleString()}
+              </span>
+            </div>
+          ))}
+        </div>
+      </Section>
+      <p className="text-xs text-neutral-500 dark:text-neutral-400">
+        Data source: {data?.source || "Application Shield SQLite event index"}.
+        ASN, ISP, user-agent, and reviewed false-positive data are not stored
+        yet.
+      </p>
+    </div>
+  );
 }
 
 function ReportsTab() {
-  return <div className="space-y-5"><Section title="Security reports" description="Review protection performance and export a report for a selected period." actions={<div className="flex gap-2"><select className="cursor-pointer rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-300"><option>Last 7 days</option><option>Last 30 days</option><option>This year</option></select><button type="button" className="cursor-pointer rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 dark:border-neutral-700 dark:text-neutral-300">Export</button></div>}><div className="grid gap-3 sm:grid-cols-3"><Stat icon={ShieldAlert} label="Threats stopped" value="8,412" detail="Across all protected sites" tone="amber" /><Stat icon={Activity} label="Requests inspected" value="164k" detail="99.8% coverage" tone="blue" /><Stat icon={CheckCircle2} label="False-positive review" value="0.4%" detail="Requests challenged then allowed" tone="emerald" /></div></Section><Section title="Top detection categories" description="The rule families responsible for blocked requests."><div className="space-y-4">{[["Sensitive file exposure", "3,482", "41%"], ["SQL injection", "2,196", "26%"], ["Credential abuse", "1,687", "20%"], ["Scanner behavior", "1,047", "13%"]].map(([label, value, share]) => <div key={label} className="flex items-center gap-4"><span className="w-48 shrink-0 whitespace-normal text-sm text-neutral-700 dark:text-neutral-300">{label}</span><div className="h-2 flex-1 rounded-full bg-neutral-100 dark:bg-neutral-800"><span className="block h-full rounded-full bg-blue-500" style={{ width: share }} /></div><span className="w-16 text-right text-sm font-semibold text-neutral-700 dark:text-neutral-300">{value}</span></div>)}</div></Section></div>;
+  return (
+    <div className="space-y-5">
+      <Section
+        title="Security reports"
+        description="Review protection performance and export a report for a selected period."
+        actions={
+          <div className="flex gap-2">
+            <select className="cursor-pointer rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-300">
+              <option>Last 7 days</option>
+              <option>Last 30 days</option>
+              <option>This year</option>
+            </select>
+            <button
+              type="button"
+              className="cursor-pointer rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-700 dark:border-neutral-700 dark:text-neutral-300"
+            >
+              Export
+            </button>
+          </div>
+        }
+      >
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Stat
+            icon={ShieldAlert}
+            label="Threats stopped"
+            value="8,412"
+            detail="Across all protected sites"
+            tone="amber"
+          />
+          <Stat
+            icon={Activity}
+            label="Requests inspected"
+            value="164k"
+            detail="99.8% coverage"
+            tone="blue"
+          />
+          <Stat
+            icon={CheckCircle2}
+            label="False-positive review"
+            value="0.4%"
+            detail="Requests challenged then allowed"
+            tone="emerald"
+          />
+        </div>
+      </Section>
+      <Section
+        title="Top detection categories"
+        description="The rule families responsible for blocked requests."
+      >
+        <div className="space-y-4">
+          {[
+            ["Sensitive file exposure", "3,482", "41%"],
+            ["SQL injection", "2,196", "26%"],
+            ["Credential abuse", "1,687", "20%"],
+            ["Scanner behavior", "1,047", "13%"],
+          ].map(([label, value, share]) => (
+            <div key={label} className="flex items-center gap-4">
+              <span className="w-48 shrink-0 whitespace-normal text-sm text-neutral-700 dark:text-neutral-300">
+                {label}
+              </span>
+              <div className="h-2 flex-1 rounded-full bg-neutral-100 dark:bg-neutral-800">
+                <span
+                  className="block h-full rounded-full bg-blue-500"
+                  style={{ width: share }}
+                />
+              </div>
+              <span className="w-16 text-right text-sm font-semibold text-neutral-700 dark:text-neutral-300">
+                {value}
+              </span>
+            </div>
+          ))}
+        </div>
+      </Section>
+    </div>
+  );
 }
 
 export default function WebProtectionPage() {
@@ -747,31 +4868,51 @@ export default function WebProtectionPage() {
   const [configOpen, setConfigOpen] = React.useState(false);
   const [toast, setToast] = React.useState(null);
   const refreshShield = React.useCallback(() => {
-    Promise.all([apiRequest("/api/v1/application-shield/overview"), apiRequest("/api/v1/application-shield/rules"), apiRequest("/api/v1/jobs")])
+    Promise.all([
+      apiRequest("/api/v1/application-shield/overview"),
+      apiRequest("/api/v1/application-shield/rules"),
+      apiRequest("/api/v1/jobs"),
+    ])
       .then(async ([overviewResponse, rulesResponse, jobsResponse]) => {
-        if (overviewResponse.ok) setShieldOverview(await overviewResponse.json());
-        if (rulesResponse.ok) setRules((await rulesResponse.json()).rules || []);
+        if (overviewResponse.ok)
+          setShieldOverview(await overviewResponse.json());
+        if (rulesResponse.ok)
+          setRules((await rulesResponse.json()).rules || []);
         if (jobsResponse.ok) {
           const jobs = await jobsResponse.json();
-          setShieldJob(jobs.find((job) => job.type === "Install Application Shield bundle" && ["queued", "running"].includes(job.status)) || null);
+          setShieldJob(
+            jobs.find(
+              (job) =>
+                job.type === "Install Application Shield bundle" &&
+                ["queued", "running"].includes(job.status),
+            ) || null,
+          );
         }
-      }).catch(() => {});
+      })
+      .catch(() => {});
   }, []);
   React.useEffect(() => {
     refreshShield();
     window.addEventListener("serverengine:jobs-updated", refreshShield);
-    return () => window.removeEventListener("serverengine:jobs-updated", refreshShield);
+    return () =>
+      window.removeEventListener("serverengine:jobs-updated", refreshShield);
   }, [refreshShield]);
   React.useEffect(() => {
-    const badge = Array.from(document.querySelectorAll("span")).find((element) => element.textContent?.trim() === "Protection not enabled");
+    const badge = Array.from(document.querySelectorAll("span")).find(
+      (element) => element.textContent?.trim() === "Protection not enabled",
+    );
     if (badge) {
-      badge.className = "inline-flex items-center gap-2 rounded-md bg-amber-50 px-3 py-2 text-sm font-medium text-amber-700 dark:bg-amber-950/30 dark:text-amber-300";
+      badge.className =
+        "inline-flex items-center gap-2 rounded-md bg-amber-50 px-3 py-2 text-sm font-medium text-amber-700 dark:bg-amber-950/30 dark:text-amber-300";
       const dot = badge.querySelector("span");
       if (dot) dot.className = "h-2 w-2 rounded-full bg-amber-500";
     }
-    const enabledBadge = Array.from(document.querySelectorAll("span")).find((element) => element.textContent?.trim() === "Protection enabled");
+    const enabledBadge = Array.from(document.querySelectorAll("span")).find(
+      (element) => element.textContent?.trim() === "Protection enabled",
+    );
     if (enabledBadge) {
-      enabledBadge.className = "inline-flex items-center gap-2 rounded-md bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300";
+      enabledBadge.className =
+        "inline-flex items-center gap-2 rounded-md bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300";
       const dot = enabledBadge.querySelector("span");
       if (dot) dot.className = "h-2 w-2 rounded-full bg-emerald-500";
     }
@@ -781,7 +4922,11 @@ export default function WebProtectionPage() {
     const hideRedundantActions = () => {
       document.querySelectorAll("button").forEach((button) => {
         const label = button.textContent?.trim();
-        if (label === "Install Application Shield" || label === "Open configuration") button.hidden = true;
+        if (
+          label === "Install Application Shield" ||
+          label === "Open configuration"
+        )
+          button.hidden = true;
       });
     };
     hideRedundantActions();
@@ -791,52 +4936,335 @@ export default function WebProtectionPage() {
   }, [shieldOverview?.policy.enabled]);
   const installShield = async () => {
     try {
-      const response = await apiRequest("/api/v1/application-shield/install", { method: "POST" });
+      const response = await apiRequest("/api/v1/application-shield/install", {
+        method: "POST",
+      });
       if (!response.ok) {
-        const detail = await readApiError(response, "Unable to queue Application Shield installation.");
+        const detail = await readApiError(
+          response,
+          "Unable to queue Application Shield installation.",
+        );
         sonnerToast.error(detail);
         return;
       }
       const result = await response.json();
-      setShieldJob({ id: result.job_id, status: "queued", message: result.message, progress: 0 });
-      showToast(result.message || "Application Shield installation queued.", "success");
+      setShieldJob({
+        id: result.job_id,
+        status: "queued",
+        message: result.message,
+        progress: 0,
+      });
+      showToast(
+        result.message || "Application Shield installation queued.",
+        "success",
+      );
       refreshShield();
     } catch (error) {
-      showToast(error instanceof Error ? error.message : "Unable to queue Application Shield installation.", "error");
+      showToast(
+        error instanceof Error
+          ? error.message
+          : "Unable to queue Application Shield installation.",
+        "error",
+      );
     }
   };
   React.useEffect(() => {
     const reinstall = () => installShield();
     window.addEventListener("serverengine:shield-install", reinstall);
-    return () => window.removeEventListener("serverengine:shield-install", reinstall);
+    return () =>
+      window.removeEventListener("serverengine:shield-install", reinstall);
   });
   if (shieldOverview && !shieldOverview.engine.installed) {
-    return <div className="grid min-h-[calc(100vh-12rem)] w-full place-items-center px-4 py-8"><section className="w-full max-w-2xl rounded-xl border border-neutral-200 bg-white p-8 text-center shadow-sm dark:border-neutral-800 dark:bg-neutral-900"><div className="mx-auto grid h-14 w-14 place-items-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/30 dark:text-blue-400"><ShieldAlert size={28} /></div><h2 className="mt-5 text-2xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-100">Application Shield</h2><h3 className="mt-3 text-lg font-semibold text-neutral-900 dark:text-neutral-100">ModSecurity is not installed</h3><p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-neutral-500 dark:text-neutral-400">Install Application Shield to protect websites with ModSecurity, OWASP Core Rule Set, provider connectors, audit logs, and managed protection policies.</p>{shieldJob ? <div className="mx-auto mt-6 max-w-md rounded-lg bg-blue-50 px-4 py-3 text-left text-sm text-blue-700 dark:bg-blue-950/30 dark:text-blue-300"><div className="flex items-center gap-2 font-semibold"><RefreshCw className="animate-spin" size={15} />Installation in progress</div><p className="mt-1 text-xs">{shieldJob.progress ?? 0}% · {shieldJob.message || "Preparing Application Shield…"}</p></div> : <button type="button" onClick={installShield} className="mt-6 inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"><ShieldCheck size={16} />Install Application Shield</button>}<Toast message={toast?.message} type={toast?.type} onClose={() => setToast(null)} /></section></div>;
+    return (
+      <div className="grid min-h-[calc(100vh-12rem)] w-full place-items-center px-4 py-8">
+        <section className="w-full max-w-2xl rounded-xl border border-neutral-200 bg-white p-8 text-center shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
+          <div className="mx-auto grid h-14 w-14 place-items-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/30 dark:text-blue-400">
+            <ShieldAlert size={28} />
+          </div>
+          <h2 className="mt-5 text-2xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-100">
+            Application Shield
+          </h2>
+          <h3 className="mt-3 text-lg font-semibold text-neutral-900 dark:text-neutral-100">
+            ModSecurity is not installed
+          </h3>
+          <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-neutral-500 dark:text-neutral-400">
+            Install Application Shield to protect websites with ModSecurity,
+            OWASP Core Rule Set, provider connectors, audit logs, and managed
+            protection policies.
+          </p>
+          {shieldJob ? (
+            <div className="mx-auto mt-6 max-w-md rounded-lg bg-blue-50 px-4 py-3 text-left text-sm text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">
+              <div className="flex items-center gap-2 font-semibold">
+                <RefreshCw className="animate-spin" size={15} />
+                Installation in progress
+              </div>
+              <p className="mt-1 text-xs">
+                {shieldJob.progress ?? 0}% ·{" "}
+                {shieldJob.message || "Preparing Application Shield…"}
+              </p>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={installShield}
+              className="mt-6 inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
+            >
+              <ShieldCheck size={16} />
+              Install Application Shield
+            </button>
+          )}
+          <Toast
+            message={toast?.message}
+            type={toast?.type}
+            onClose={() => setToast(null)}
+          />
+        </section>
+      </div>
+    );
   }
   if (false && shieldOverview && !shieldOverview.policy.enabled) {
-    return <div className="grid min-h-[calc(100vh-12rem)] w-full place-items-center px-4 py-8"><section className="w-full max-w-2xl rounded-xl border border-amber-200 bg-white p-8 text-center shadow-sm dark:border-amber-900/50 dark:bg-neutral-900"><div className="mx-auto grid h-14 w-14 place-items-center rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-950/30 dark:text-amber-400"><ShieldAlert size={28} /></div><h2 className="mt-5 text-2xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-100">Application Shield</h2><h3 className="mt-3 text-lg font-semibold text-neutral-900 dark:text-neutral-100">Protection is disabled</h3><p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-neutral-500 dark:text-neutral-400">No requests are being inspected, no traffic metrics are being reported, and no protection rules are active.</p><button type="button" onClick={() => setConfigOpen(true)} className="mt-6 inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-4 py-2.5 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"><Settings2 size={16} />Open configuration</button>{configOpen && <ApplicationShieldConfigModal overview={shieldOverview} onClose={() => setConfigOpen(false)} onSaved={(value) => setShieldOverview(value)} />}<Toast message={toast?.message} type={toast?.type} onClose={() => setToast(null)} /></section></div>;
+    return (
+      <div className="grid min-h-[calc(100vh-12rem)] w-full place-items-center px-4 py-8">
+        <section className="w-full max-w-2xl rounded-xl border border-amber-200 bg-white p-8 text-center shadow-sm dark:border-amber-900/50 dark:bg-neutral-900">
+          <div className="mx-auto grid h-14 w-14 place-items-center rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-950/30 dark:text-amber-400">
+            <ShieldAlert size={28} />
+          </div>
+          <h2 className="mt-5 text-2xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-100">
+            Application Shield
+          </h2>
+          <h3 className="mt-3 text-lg font-semibold text-neutral-900 dark:text-neutral-100">
+            Protection is disabled
+          </h3>
+          <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-neutral-500 dark:text-neutral-400">
+            No requests are being inspected, no traffic metrics are being
+            reported, and no protection rules are active.
+          </p>
+          <button
+            type="button"
+            onClick={() => setConfigOpen(true)}
+            className="mt-6 inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-4 py-2.5 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+          >
+            <Settings2 size={16} />
+            Open configuration
+          </button>
+          {configOpen && (
+            <ApplicationShieldConfigModal
+              overview={shieldOverview}
+              onClose={() => setConfigOpen(false)}
+              onSaved={(value) => setShieldOverview(value)}
+            />
+          )}
+          <Toast
+            message={toast?.message}
+            type={toast?.type}
+            onClose={() => setToast(null)}
+          />
+        </section>
+      </div>
+    );
   }
   const saveRule = async (rule) => {
     const editing = rules.some((item) => item.id === rule.id);
-    const response = await apiRequest(editing ? `/api/v1/application-shield/rules/${rule.id}` : "/api/v1/application-shield/rules", { method: editing ? "PATCH" : "POST", body: JSON.stringify({ name: rule.name, match: rule.match, scope: rule.scope, action: rule.action, enabled: rule.enabled }) });
-    if (!response.ok) { showToast(await readApiError(response, "Unable to save protection rule."), "error"); return; }
+    const response = await apiRequest(
+      editing
+        ? `/api/v1/application-shield/rules/${rule.id}`
+        : "/api/v1/application-shield/rules",
+      {
+        method: editing ? "PATCH" : "POST",
+        body: JSON.stringify({
+          name: rule.name,
+          match: rule.match,
+          scope: rule.scope,
+          action: rule.action,
+          enabled: rule.enabled,
+        }),
+      },
+    );
+    if (!response.ok) {
+      showToast(
+        await readApiError(response, "Unable to save protection rule."),
+        "error",
+      );
+      return;
+    }
     const saved = await response.json();
-    setRules((current) => editing ? current.map((item) => item.id === saved.id ? saved : item) : [...current, saved]);
+    setRules((current) =>
+      editing
+        ? current.map((item) => (item.id === saved.id ? saved : item))
+        : [...current, saved],
+    );
     setModal(null);
-    showToast(editing ? "Protection rule updated." : "Protection rule created.", "success");
+    showToast(
+      editing ? "Protection rule updated." : "Protection rule created.",
+      "success",
+    );
   };
   const toggleRule = async (rule) => {
-    const response = await apiRequest(`/api/v1/application-shield/rules/${rule.id}/toggle`, { method: "POST" });
+    const response = await apiRequest(
+      `/api/v1/application-shield/rules/${rule.id}/toggle`,
+      { method: "POST" },
+    );
     if (response.ok) {
       const updated = await response.json();
-      setRules((current) => current.map((item) => item.id === rule.id ? updated : item));
-    } else showToast(await readApiError(response, "Unable to update protection rule."), "error");
+      setRules((current) =>
+        current.map((item) => (item.id === rule.id ? updated : item)),
+      );
+    } else
+      showToast(
+        await readApiError(response, "Unable to update protection rule."),
+        "error",
+      );
   };
   const deleteRule = async (id) => {
-    const response = await apiRequest(`/api/v1/application-shield/rules/${id}`, { method: "DELETE" });
-    if (response.ok) setRules((current) => current.filter((item) => item.id !== id));
-    else showToast(await readApiError(response, "Unable to delete protection rule."), "error");
+    const response = await apiRequest(
+      `/api/v1/application-shield/rules/${id}`,
+      { method: "DELETE" },
+    );
+    if (response.ok)
+      setRules((current) => current.filter((item) => item.id !== id));
+    else
+      showToast(
+        await readApiError(response, "Unable to delete protection rule."),
+        "error",
+      );
   };
-  const body = { overview: <Overview onTab={setTab} />, sites: <SitesTab />, rules: <RulesTab rules={rules} query={query} setQuery={setQuery} onEdit={setModal} onCreate={() => setModal({})} onToggle={toggleRule} onDelete={deleteRule} />, lists: <ListsTab />, regions: <RegionsTabV2 />, traffic: <TrafficTabPaginated />, policies: <PoliciesTab rules={rules} onEdit={setModal} onCreate={() => setModal({})} onToggle={toggleRule} onDelete={deleteRule} />, attacks: <AttackMapTab />, reports: <RichReportsTab /> }[tab];
-  return <div className="space-y-6"><div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end"><div><p className="text-sm font-medium text-blue-600 dark:text-blue-400">Security</p><h2 className="mt-1 text-3xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-100">Application Shield</h2><p className="mt-2 max-w-2xl text-sm text-neutral-500 dark:text-neutral-400">Protect your websites from malicious requests, automated abuse, exposed secrets, and application-layer attacks.</p></div><div className="flex items-center gap-2"><span className="inline-flex items-center gap-2 rounded-md bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300"><span className="h-2 w-2 rounded-full bg-emerald-500" />{shieldOverview?.policy.enabled ? "Protection enabled" : "Protection not enabled"}</span><button type="button" title="Configure Application Shield" aria-label="Configure Application Shield" onClick={() => setConfigOpen(true)} className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md border border-neutral-300 px-3 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"><Settings2 size={15} />Configure</button></div></div>{shieldOverview && <section className="rounded-xl border border-neutral-200 bg-white p-5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><p className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">Application Shield</p><h3 className="mt-1 text-lg font-semibold text-neutral-900 dark:text-neutral-100">One control plane for WAF engine, CRS, and provider connectors</h3><p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">Engine: {shieldOverview.engine.status} · CRS: {shieldOverview.policy.crs_version} · {shieldOverview.connectors.filter((item) => item.attached).length} connector(s) attached</p></div><div className="flex items-center gap-2">{shieldJob ? <span className="inline-flex items-center gap-2 rounded-md bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 dark:bg-blue-950/30 dark:text-blue-300"><RefreshCw className="animate-spin" size={14} />{shieldJob.progress ?? 0}% · {shieldJob.message || "Installing…"}</span> : (!shieldOverview.engine.installed || shieldOverview.policy.crs_version !== "installed") && <button type="button" onClick={installShield} className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"><ShieldCheck size={15} />Install Application Shield</button>}</div></div></section>}<div className="border-b border-neutral-200 dark:border-neutral-800"><div className="flex gap-5 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">{tabs.map(([id, label, Icon]) => <button type="button" key={id} onClick={() => setTab(id)} className={`inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap border-b-2 px-1 pb-3 text-sm font-medium ${tab === id ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200"}`}><Icon size={15} />{label}</button>)}</div></div>{body}{modal && <RuleModal rule={modal.id ? modal : null} onClose={() => setModal(null)} onSave={saveRule} />}{configOpen && shieldOverview && <ApplicationShieldConfigModal overview={shieldOverview} onClose={() => setConfigOpen(false)} onSaved={(value) => setShieldOverview(value)} />}</div>;
+  const body = {
+    overview: <Overview onTab={setTab} />,
+    sites: <SitesTab />,
+    rules: (
+      <RulesTab
+        rules={rules}
+        query={query}
+        setQuery={setQuery}
+        onEdit={setModal}
+        onCreate={() => setModal({})}
+        onToggle={toggleRule}
+        onDelete={deleteRule}
+      />
+    ),
+    lists: <ListsTab />,
+    regions: <RegionsTabV2 />,
+    traffic: <TrafficTabPaginated />,
+    policies: (
+      <PoliciesTab
+        rules={rules}
+        onEdit={setModal}
+        onCreate={() => setModal({})}
+        onToggle={toggleRule}
+        onDelete={deleteRule}
+      />
+    ),
+    attacks: <AttackMapTab />,
+    reports: <RichReportsTab />,
+  }[tab];
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
+        <div>
+          <p className="text-sm font-medium text-blue-600 dark:text-blue-400">
+            Security
+          </p>
+          <h2 className="mt-1 text-3xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-100">
+            Application Shield
+          </h2>
+          <p className="mt-2 max-w-2xl text-sm text-neutral-500 dark:text-neutral-400">
+            Protect your websites from malicious requests, automated abuse,
+            exposed secrets, and application-layer attacks.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center gap-2 rounded-md bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">
+            <span className="h-2 w-2 rounded-full bg-emerald-500" />
+            {shieldOverview?.policy.enabled
+              ? "Protection enabled"
+              : "Protection not enabled"}
+          </span>
+          <button
+            type="button"
+            title="Configure Application Shield"
+            aria-label="Configure Application Shield"
+            onClick={() => setConfigOpen(true)}
+            className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md border border-neutral-300 px-3 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+          >
+            <Settings2 size={15} />
+            Configure
+          </button>
+        </div>
+      </div>
+      {shieldOverview && (
+        <section className="rounded-xl border border-neutral-200 bg-white p-5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
+          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+                Application Shield
+              </p>
+              <h3 className="mt-1 text-lg font-semibold text-neutral-900 dark:text-neutral-100">
+                One control plane for WAF engine, CRS, and provider connectors
+              </h3>
+              <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+                Engine: {shieldOverview.engine.status} · CRS:{" "}
+                {shieldOverview.policy.crs_version} ·{" "}
+                {
+                  shieldOverview.connectors.filter((item) => item.attached)
+                    .length
+                }{" "}
+                connector(s) attached
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {shieldJob ? (
+                <span className="inline-flex items-center gap-2 rounded-md bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">
+                  <RefreshCw className="animate-spin" size={14} />
+                  {shieldJob.progress ?? 0}% ·{" "}
+                  {shieldJob.message || "Installing…"}
+                </span>
+              ) : (
+                (!shieldOverview.engine.installed ||
+                  shieldOverview.policy.crs_version !== "installed") && (
+                  <button
+                    type="button"
+                    onClick={installShield}
+                    className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                  >
+                    <ShieldCheck size={15} />
+                    Install Application Shield
+                  </button>
+                )
+              )}
+            </div>
+          </div>
+        </section>
+      )}
+      <div className="border-b border-neutral-200 dark:border-neutral-800">
+        <div className="flex gap-5 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {tabs.map(([id, label, Icon]) => (
+            <button
+              type="button"
+              key={id}
+              onClick={() => setTab(id)}
+              className={`inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap border-b-2 px-1 pb-3 text-sm font-medium ${tab === id ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200"}`}
+            >
+              <Icon size={15} />
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {body}
+      {modal && (
+        <RuleModal
+          rule={modal.id ? modal : null}
+          onClose={() => setModal(null)}
+          onSave={saveRule}
+        />
+      )}
+      {configOpen && shieldOverview && (
+        <ApplicationShieldConfigModal
+          overview={shieldOverview}
+          onClose={() => setConfigOpen(false)}
+          onSaved={(value) => setShieldOverview(value)}
+        />
+      )}
+    </div>
+  );
 }

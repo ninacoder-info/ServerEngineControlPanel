@@ -24,8 +24,14 @@ function Section({ title, description, children }) {
   return (
     <section className="rounded-xl border border-neutral-200 bg-white p-5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
       <div className="mb-5">
-        <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">{title}</h3>
-        {description && <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">{description}</p>}
+        <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
+          {title}
+        </h3>
+        {description && (
+          <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+            {description}
+          </p>
+        )}
       </div>
       {children}
     </section>
@@ -37,7 +43,10 @@ function Skeleton() {
     <div className="animate-pulse space-y-6" aria-busy="true">
       <div className="flex items-center gap-3">
         <div className="h-9 w-9 rounded-full bg-neutral-200 dark:bg-neutral-800" />
-        <div className="space-y-2"><div className="h-3 w-28 rounded bg-neutral-100 dark:bg-neutral-800" /><div className="h-6 w-64 rounded bg-neutral-200 dark:bg-neutral-800" /></div>
+        <div className="space-y-2">
+          <div className="h-3 w-28 rounded bg-neutral-100 dark:bg-neutral-800" />
+          <div className="h-6 w-64 rounded bg-neutral-200 dark:bg-neutral-800" />
+        </div>
       </div>
       <div className="h-[32rem] rounded-xl bg-neutral-100 dark:bg-neutral-800" />
     </div>
@@ -55,7 +64,11 @@ function formatBytes(value) {
 export default function DockerContainerDetailsPage() {
   const { containerId: routeContainerId = "" } = useParams();
   const location = useLocation();
-  const containerId = routeContainerId || decodeURIComponent(location.pathname.split("/").filter(Boolean).pop() || "");
+  const containerId =
+    routeContainerId ||
+    decodeURIComponent(
+      location.pathname.split("/").filter(Boolean).pop() || "",
+    );
   const navigate = useNavigate();
   const [details, setDetails] = React.useState(null);
   const [loading, setLoading] = React.useState(true);
@@ -78,50 +91,72 @@ export default function DockerContainerDetailsPage() {
     try {
       // Load the inventory row first so the page always has a usable header,
       // even when Docker logs or inspect data are temporarily unavailable.
-      const inventoryResponse = await apiRequest("/api/v1/services/docker/overview");
-      const inventory = inventoryResponse.ok ? await inventoryResponse.json() : null;
+      const inventoryResponse = await apiRequest(
+        "/api/v1/services/docker/overview",
+      );
+      const inventory = inventoryResponse.ok
+        ? await inventoryResponse.json()
+        : null;
       const summary = (inventory?.containers || []).find(
-        (item) => item.id === containerId || String(item.id || "").startsWith(containerId),
+        (item) =>
+          item.id === containerId ||
+          String(item.id || "").startsWith(containerId),
       );
       if (summary) setDetails({ ...summary, logs: "" });
 
-      const response = await apiRequest(`/api/v1/services/docker/containers/${encodeURIComponent(containerId)}`);
+      const response = await apiRequest(
+        `/api/v1/services/docker/containers/${encodeURIComponent(containerId)}`,
+      );
       if (!response.ok) {
         const body = await response.json().catch(() => null);
         throw new Error(body?.detail || `Request failed (${response.status})`);
       }
       setDetails(await response.json());
     } catch (reason) {
-      setError(reason?.message || "Unable to connect to the Server Engine API.");
+      setError(
+        reason?.message || "Unable to connect to the Server Engine API.",
+      );
     } finally {
       setLoading(false);
     }
   }, [containerId]);
 
-  React.useEffect(() => { load(); }, [load]);
+  React.useEffect(() => {
+    load();
+  }, [load]);
 
   React.useEffect(() => {
     if (!pendingAction) return undefined;
     const update = (event) => {
       const detail = event.detail || {};
-      if (detail.job?.id !== pendingAction.jobId || !["succeeded", "failed", "cancelled"].includes(detail.status)) return;
+      if (
+        detail.job?.id !== pendingAction.jobId ||
+        !["succeeded", "failed", "cancelled"].includes(detail.status)
+      )
+        return;
       const { action } = pendingAction;
       setPendingAction(null);
-      if (action === "delete" && detail.status === "succeeded") navigate("/docker");
+      if (action === "delete" && detail.status === "succeeded")
+        navigate("/docker");
       else load();
     };
     window.addEventListener("serverengine:service-status", update);
-    return () => window.removeEventListener("serverengine:service-status", update);
+    return () =>
+      window.removeEventListener("serverengine:service-status", update);
   }, [load, navigate, pendingAction]);
 
   React.useEffect(() => {
-    if (panel === "logs" && followLogs && logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+    if (panel === "logs" && followLogs && logRef.current)
+      logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [details?.logs, followLogs, panel]);
 
   const runAction = async (action) => {
     setDialog(null);
     try {
-      const response = await apiRequest(`/api/v1/services/docker/containers/${encodeURIComponent(containerId)}/action`, { method: "POST", body: JSON.stringify({ action }) });
+      const response = await apiRequest(
+        `/api/v1/services/docker/containers/${encodeURIComponent(containerId)}/action`,
+        { method: "POST", body: JSON.stringify({ action }) },
+      );
       if (!response.ok) throw new Error("Unable to queue the Docker action.");
       const result = await response.json();
       setPendingAction({ jobId: result.job_id, action });
@@ -135,35 +170,155 @@ export default function DockerContainerDetailsPage() {
   const name = details?.name || containerId;
   const running = details?.status === "running";
   const disabled = Boolean(pendingAction);
-  const tabs = [["logs", "Logs", FileCode2], ["terminal", "Terminal", TerminalSquare], ["config", "Configuration", Settings2], ["files", "Files", FolderOpen]];
+  const tabs = [
+    ["logs", "Logs", FileCode2],
+    ["terminal", "Terminal", TerminalSquare],
+    ["config", "Configuration", Settings2],
+    ["files", "Files", FolderOpen],
+  ];
 
   return (
     <div className="space-y-6">
       <header className="flex flex-col justify-between gap-4 border-b border-neutral-200 pb-5 dark:border-neutral-800 sm:flex-row sm:items-center">
         <div className="flex min-w-0 items-center gap-3">
-          <button type="button" aria-label="Back to Docker" title="Back to Docker" className="inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800" onClick={() => navigate("/docker")}><ArrowLeft size={18} /></button>
-          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300"><Container size={22} /></span>
+          <button
+            type="button"
+            aria-label="Back to Docker"
+            title="Back to Docker"
+            className="inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
+            onClick={() => navigate("/docker")}
+          >
+            <ArrowLeft size={18} />
+          </button>
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
+            <Container size={22} />
+          </span>
           <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">Docker container</p>
-            <h2 className="truncate text-xl font-semibold text-neutral-900 dark:text-neutral-100">{name}</h2>
+            <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+              Docker container
+            </p>
+            <h2 className="truncate text-xl font-semibold text-neutral-900 dark:text-neutral-100">
+              {name}
+            </h2>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-              <span className="font-mono text-neutral-500 dark:text-neutral-400">{details?.id || containerId}</span>
-              <Link to={`/docker/images/${encodeURIComponent(details?.image || "")}`} className="font-mono font-semibold text-neutral-700 hover:underline dark:text-neutral-300">{details?.image || "Loading image…"}</Link>
-              {Object.entries(details?.ports || {}).flatMap(([containerPort, bindings]) => (Array.isArray(bindings) ? bindings : bindings ? [bindings] : []).map((binding) => { const host = binding.HostIp || "127.0.0.1"; const url = `http://${host}:${binding.HostPort}/`; return <a key={`${containerPort}-${binding.HostPort}`} href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-mono font-semibold text-neutral-700 hover:underline dark:text-neutral-300"><ExternalLink size={13} />{url}</a>; }))}
+              <span className="font-mono text-neutral-500 dark:text-neutral-400">
+                {details?.id || containerId}
+              </span>
+              <Link
+                to={`/docker/images/${encodeURIComponent(details?.image || "")}`}
+                className="font-mono font-semibold text-neutral-700 hover:underline dark:text-neutral-300"
+              >
+                {details?.image || "Loading image…"}
+              </Link>
+              {Object.entries(details?.ports || {}).flatMap(
+                ([containerPort, bindings]) =>
+                  (Array.isArray(bindings)
+                    ? bindings
+                    : bindings
+                      ? [bindings]
+                      : []
+                  ).map((binding) => {
+                    const host = binding.HostIp || "127.0.0.1";
+                    const url = `http://${host}:${binding.HostPort}/`;
+                    return (
+                      <a
+                        key={`${containerPort}-${binding.HostPort}`}
+                        href={url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 font-mono font-semibold text-neutral-700 hover:underline dark:text-neutral-300"
+                      >
+                        <ExternalLink size={13} />
+                        {url}
+                      </a>
+                    );
+                  }),
+              )}
             </div>
           </div>
         </div>
         <div className="flex items-center gap-1.5">
-          {tabs.map(([key, label, Icon]) => <button key={key} type="button" title={label} aria-label={label} className={`inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md border ${panel === key ? "border-neutral-700 bg-neutral-800 text-white dark:border-neutral-500 dark:bg-neutral-700" : "border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"}`} onClick={() => setPanel(key)}><Icon size={16} /></button>)}
+          {tabs.map(([key, label, Icon]) => (
+            <button
+              key={key}
+              type="button"
+              title={label}
+              aria-label={label}
+              className={`inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md border ${panel === key ? "border-neutral-700 bg-neutral-800 text-white dark:border-neutral-500 dark:bg-neutral-700" : "border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"}`}
+              onClick={() => setPanel(key)}
+            >
+              <Icon size={16} />
+            </button>
+          ))}
           <span className="mx-1 h-6 w-px bg-neutral-200 dark:bg-neutral-800" />
-          <button type="button" title={running ? "Stop container" : "Start container"} aria-label={running ? "Stop container" : "Start container"} disabled={disabled} className={`inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md border disabled:cursor-wait disabled:opacity-60 ${running ? "border-red-200 text-red-600 hover:bg-red-50" : "border-emerald-200 text-emerald-600 hover:bg-emerald-50"}`} onClick={() => runAction(running ? "stop" : "start")}>{disabled ? <LoaderCircle className="animate-spin" size={16} /> : running ? <Square size={16} /> : <Play size={16} />}</button>
-          <button type="button" title="Restart container" aria-label="Restart container" disabled={disabled} className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md border border-neutral-300 text-neutral-600 hover:bg-neutral-50 disabled:cursor-wait disabled:opacity-60 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800" onClick={() => runAction("restart")}><RotateCw size={16} /></button>
-          <button type="button" title="Delete container" aria-label="Delete container" disabled={disabled} className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md border border-red-200 text-red-600 hover:bg-red-50 disabled:cursor-wait disabled:opacity-60 dark:border-red-900/70 dark:text-red-400" onClick={() => setDialog({ kind: "confirm", title: "Delete container?", message: `This will remove ${name} from Docker. Mounted files and volumes will remain.`, submitLabel: "Delete container", tone: "danger" })}><Trash2 size={16} /></button>
-          <button type="button" title="Refresh" aria-label="Refresh" className="ml-1 inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800" onClick={load}><RefreshCw size={16} /></button>
+          <button
+            type="button"
+            title={running ? "Stop container" : "Start container"}
+            aria-label={running ? "Stop container" : "Start container"}
+            disabled={disabled}
+            className={`inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md border disabled:cursor-wait disabled:opacity-60 ${running ? "border-red-200 text-red-600 hover:bg-red-50" : "border-emerald-200 text-emerald-600 hover:bg-emerald-50"}`}
+            onClick={() => runAction(running ? "stop" : "start")}
+          >
+            {disabled ? (
+              <LoaderCircle className="animate-spin" size={16} />
+            ) : running ? (
+              <Square size={16} />
+            ) : (
+              <Play size={16} />
+            )}
+          </button>
+          <button
+            type="button"
+            title="Restart container"
+            aria-label="Restart container"
+            disabled={disabled}
+            className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md border border-neutral-300 text-neutral-600 hover:bg-neutral-50 disabled:cursor-wait disabled:opacity-60 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+            onClick={() => runAction("restart")}
+          >
+            <RotateCw size={16} />
+          </button>
+          <button
+            type="button"
+            title="Delete container"
+            aria-label="Delete container"
+            disabled={disabled}
+            className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md border border-red-200 text-red-600 hover:bg-red-50 disabled:cursor-wait disabled:opacity-60 dark:border-red-900/70 dark:text-red-400"
+            onClick={() =>
+              setDialog({
+                kind: "confirm",
+                title: "Delete container?",
+                message: `This will remove ${name} from Docker. Mounted files and volumes will remain.`,
+                submitLabel: "Delete container",
+                tone: "danger",
+              })
+            }
+          >
+            <Trash2 size={16} />
+          </button>
+          <button
+            type="button"
+            title="Refresh"
+            aria-label="Refresh"
+            className="ml-1 inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
+            onClick={load}
+          >
+            <RefreshCw size={16} />
+          </button>
         </div>
       </header>
 
-      {error && <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-300">{error}<button type="button" className="ml-3 cursor-pointer font-semibold underline" onClick={load}>Retry</button></div>}
+      {error && (
+        <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-300">
+          {error}
+          <button
+            type="button"
+            className="ml-3 cursor-pointer font-semibold underline"
+            onClick={load}
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       {panel === "files" ? (
         <div className="space-y-4">
@@ -174,22 +329,89 @@ export default function DockerContainerDetailsPage() {
               ["Mounted volumes", String((details?.mounts || []).length)],
               ["Working directory", details?.working_dir || "/"],
             ].map(([label, value]) => (
-              <div key={label} className="rounded-lg border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
-                <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">{label}</p>
-                <p className="mt-2 truncate text-lg font-semibold text-neutral-900 dark:text-neutral-100" title={value}>{value}</p>
+              <div
+                key={label}
+                className="rounded-lg border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900"
+              >
+                <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+                  {label}
+                </p>
+                <p
+                  className="mt-2 truncate text-lg font-semibold text-neutral-900 dark:text-neutral-100"
+                  title={value}
+                >
+                  {value}
+                </p>
               </div>
             ))}
           </div>
-          <FileManagerWorkspace embedded containerId={containerId} initialPath={details?.working_dir || "/"} />
+          <FileManagerWorkspace
+            embedded
+            containerId={containerId}
+            initialPath={details?.working_dir || "/"}
+          />
         </div>
       ) : (
-      <Section title={panel === "logs" ? "Console logs" : panel === "terminal" ? "Terminal" : "Container configuration"} description={panel === "logs" ? "Recent output from this Docker container." : panel === "terminal" ? "Interactive root shell inside this Docker container." : "Docker configuration for this container."}>
-        {panel === "logs" && <pre ref={logRef} onScroll={(event) => { const output = event.currentTarget; setFollowLogs(output.scrollHeight - output.scrollTop - output.clientHeight < 24); }} className="h-[32rem] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-neutral-950 p-5 font-mono text-xs leading-5 text-neutral-200">{details?.logs || "No logs available."}</pre>}
-        {panel === "terminal" && <TerminalSession profile={{ id: `docker-${containerId}`, name, kind: "docker", container_id: containerId, username: "root" }} visible enabled restart={0} onStatus={() => {}} onControls={() => {}} />}
-        {panel === "config" && <pre className="h-[32rem] overflow-auto whitespace-pre-wrap rounded-lg bg-neutral-950 p-5 font-mono text-xs leading-5 text-neutral-200">{details?.compose_yaml || "No Compose configuration is available for this container."}</pre>}
-      </Section>
+        <Section
+          title={
+            panel === "logs"
+              ? "Console logs"
+              : panel === "terminal"
+                ? "Terminal"
+                : "Container configuration"
+          }
+          description={
+            panel === "logs"
+              ? "Recent output from this Docker container."
+              : panel === "terminal"
+                ? "Interactive root shell inside this Docker container."
+                : "Docker configuration for this container."
+          }
+        >
+          {panel === "logs" && (
+            <pre
+              ref={logRef}
+              onScroll={(event) => {
+                const output = event.currentTarget;
+                setFollowLogs(
+                  output.scrollHeight - output.scrollTop - output.clientHeight <
+                    24,
+                );
+              }}
+              className="h-[32rem] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-neutral-950 p-5 font-mono text-xs leading-5 text-neutral-200"
+            >
+              {details?.logs || "No logs available."}
+            </pre>
+          )}
+          {panel === "terminal" && (
+            <TerminalSession
+              profile={{
+                id: `docker-${containerId}`,
+                name,
+                kind: "docker",
+                container_id: containerId,
+                username: "root",
+              }}
+              visible
+              enabled
+              restart={0}
+              onStatus={() => {}}
+              onControls={() => {}}
+            />
+          )}
+          {panel === "config" && (
+            <pre className="h-[32rem] overflow-auto whitespace-pre-wrap rounded-lg bg-neutral-950 p-5 font-mono text-xs leading-5 text-neutral-200">
+              {details?.compose_yaml ||
+                "No Compose configuration is available for this container."}
+            </pre>
+          )}
+        </Section>
       )}
-      <ActionDialog dialog={dialog} onClose={() => setDialog(null)} onSubmit={() => runAction("delete")} />
+      <ActionDialog
+        dialog={dialog}
+        onClose={() => setDialog(null)}
+        onSubmit={() => runAction("delete")}
+      />
     </div>
   );
 }

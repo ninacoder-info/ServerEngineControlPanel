@@ -17,6 +17,7 @@ class FileBulkRequest(BaseModel):
     paths: list[str] = Field(min_length=1, max_length=100)
     destination: str = ""
     name: str | None = Field(default=None, max_length=255)
+    overwrite: bool = False
 
 
 class FileContentRequest(BaseModel):

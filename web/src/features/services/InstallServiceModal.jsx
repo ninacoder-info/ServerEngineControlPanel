@@ -4,7 +4,12 @@ import { apiRequest, readApiError } from "../../lib/api";
 import Toast from "../../components/Toast";
 
 const latestFirst = (items) =>
-  [...items].sort((a, b) => String(b.version).localeCompare(String(a.version), undefined, { numeric: true, sensitivity: "base" }));
+  [...items].sort((a, b) =>
+    String(b.version).localeCompare(String(a.version), undefined, {
+      numeric: true,
+      sensitivity: "base",
+    }),
+  );
 
 export default function InstallServiceModal({
   service,
@@ -34,13 +39,18 @@ export default function InstallServiceModal({
 
   async function refreshVersions(manual = true) {
     if (service.id === "phpmyadmin") {
-      const fixedVersions = Array.isArray(service.versions) && service.versions.length
-        ? service.versions
-        : [{ version: "5.2.2", channel: "stable" }];
+      const fixedVersions =
+        Array.isArray(service.versions) && service.versions.length
+          ? service.versions
+          : [{ version: "5.2.2", channel: "stable" }];
       setVersions(fixedVersions);
       selectPreferredVersion(fixedVersions);
       setRefreshing(false);
-      if (manual) setToast({ type: "success", message: "Fetched the pinned phpMyAdmin release catalog." });
+      if (manual)
+        setToast({
+          type: "success",
+          message: "Fetched the pinned phpMyAdmin release catalog.",
+        });
       return;
     }
     const method = installMethod;
@@ -64,7 +74,8 @@ export default function InstallServiceModal({
       response = { ok: false };
       body = { message: "Unable to fetch compatible versions." };
     }
-    if (requestId !== refreshSequence.current || method !== installMethod) return;
+    if (requestId !== refreshSequence.current || method !== installMethod)
+      return;
     if (response.ok && body.versions?.length) {
       setVersions(body.versions);
       window.sessionStorage.setItem(
@@ -103,7 +114,9 @@ export default function InstallServiceModal({
     }
     const cacheKey = `server-engine:service-versions:v10:${service.id}:${installMethod}`;
     try {
-      const cached = JSON.parse(window.sessionStorage.getItem(cacheKey) || "null");
+      const cached = JSON.parse(
+        window.sessionStorage.getItem(cacheKey) || "null",
+      );
       if (Array.isArray(cached) && cached.length) {
         setVersions(cached);
         selectPreferredVersion(cached);
@@ -116,7 +129,8 @@ export default function InstallServiceModal({
   }, [service.id, installMethod]);
 
   React.useEffect(() => {
-    if (!(["composer", "wp-cli", "phpmyadmin"].includes(service.id))) return undefined;
+    if (!["composer", "wp-cli", "phpmyadmin"].includes(service.id))
+      return undefined;
     apiRequest("/api/v1/services/php/runtimes")
       .then((response) => (response.ok ? response.json() : []))
       .then((items) => {
@@ -137,7 +151,17 @@ export default function InstallServiceModal({
     setBusy(true);
     const response = await apiRequest(
       `/api/v1/services/${service.id}/install`,
-      { method: "POST", body: JSON.stringify({ version, confirmed: true, install_method: installMethod, php_version: ["composer", "wp-cli", "phpmyadmin"].includes(service.id) ? phpVersion : undefined }) },
+      {
+        method: "POST",
+        body: JSON.stringify({
+          version,
+          confirmed: true,
+          install_method: installMethod,
+          php_version: ["composer", "wp-cli", "phpmyadmin"].includes(service.id)
+            ? phpVersion
+            : undefined,
+        }),
+      },
     );
     const body = response.ok
       ? await response.json()
@@ -186,16 +210,56 @@ export default function InstallServiceModal({
               <legend className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">
                 Installation method
               </legend>
-              <label className={`block cursor-pointer rounded-lg border p-3 ${installMethod === "prebuilt" ? "border-blue-500 bg-blue-50/60 dark:bg-blue-950/20" : "border-neutral-200 dark:border-neutral-800"}`}>
+              <label
+                className={`block cursor-pointer rounded-lg border p-3 ${installMethod === "prebuilt" ? "border-blue-500 bg-blue-50/60 dark:bg-blue-950/20" : "border-neutral-200 dark:border-neutral-800"}`}
+              >
                 <span className="flex items-start gap-3">
-                  <input type="radio" name={`${service.id}-install-method`} value="prebuilt" checked={installMethod === "prebuilt"} onChange={() => changeInstallMethod("prebuilt")} className="mt-1 accent-blue-600" disabled={busy} />
-                  <span><strong className="block text-sm text-neutral-900 dark:text-neutral-100">Prebuilt package · Recommended</strong><span className="mt-1 block text-xs leading-5 text-neutral-500 dark:text-neutral-400">Fast installation using the exact compatible {service.name} package fetched for this OS and architecture.</span></span>
+                  <input
+                    type="radio"
+                    name={`${service.id}-install-method`}
+                    value="prebuilt"
+                    checked={installMethod === "prebuilt"}
+                    onChange={() => changeInstallMethod("prebuilt")}
+                    className="mt-1 accent-blue-600"
+                    disabled={busy}
+                  />
+                  <span>
+                    <strong className="block text-sm text-neutral-900 dark:text-neutral-100">
+                      Prebuilt package · Recommended
+                    </strong>
+                    <span className="mt-1 block text-xs leading-5 text-neutral-500 dark:text-neutral-400">
+                      Fast installation using the exact compatible{" "}
+                      {service.name} package fetched for this OS and
+                      architecture.
+                    </span>
+                  </span>
                 </span>
               </label>
-              <label className={`block cursor-pointer rounded-lg border p-3 ${installMethod === "source" ? "border-blue-500 bg-blue-50/60 dark:bg-blue-950/20" : "border-neutral-200 dark:border-neutral-800"}`}>
+              <label
+                className={`block cursor-pointer rounded-lg border p-3 ${installMethod === "source" ? "border-blue-500 bg-blue-50/60 dark:bg-blue-950/20" : "border-neutral-200 dark:border-neutral-800"}`}
+              >
                 <span className="flex items-start gap-3">
-                  <input type="radio" name={`${service.id}-install-method`} value="source" checked={installMethod === "source"} onChange={() => changeInstallMethod("source")} className="mt-1 accent-blue-600" disabled={busy} />
-                  <span><strong className="block text-sm text-neutral-900 dark:text-neutral-100">{service.id === "wp-cli" ? "Official release" : "Build from source · Advanced"}</strong><span className="mt-1 block text-xs leading-5 text-neutral-500 dark:text-neutral-400">{service.id === "wp-cli" ? "Downloads the official WP-CLI release and installs it with the latest available PHP runtime." : `Fetches the official ${service.name} source release and builds it inside Server Engine.`}</span></span>
+                  <input
+                    type="radio"
+                    name={`${service.id}-install-method`}
+                    value="source"
+                    checked={installMethod === "source"}
+                    onChange={() => changeInstallMethod("source")}
+                    className="mt-1 accent-blue-600"
+                    disabled={busy}
+                  />
+                  <span>
+                    <strong className="block text-sm text-neutral-900 dark:text-neutral-100">
+                      {service.id === "wp-cli"
+                        ? "Official release"
+                        : "Build from source · Advanced"}
+                    </strong>
+                    <span className="mt-1 block text-xs leading-5 text-neutral-500 dark:text-neutral-400">
+                      {service.id === "wp-cli"
+                        ? "Downloads the official WP-CLI release and installs it with the latest available PHP runtime."
+                        : `Fetches the official ${service.name} source release and builds it inside Server Engine.`}
+                    </span>
+                  </span>
                 </span>
               </label>
             </fieldset>
@@ -209,7 +273,10 @@ export default function InstallServiceModal({
                 onClick={refreshVersions}
                 disabled={refreshing || busy}
               >
-                <RefreshCw size={13} className={refreshing ? "animate-spin" : ""} />
+                <RefreshCw
+                  size={13}
+                  className={refreshing ? "animate-spin" : ""}
+                />
                 {refreshing ? "Fetching…" : "Fetch compatible versions"}
               </button>
             </span>
@@ -242,16 +309,28 @@ export default function InstallServiceModal({
                 disabled={busy || !phpRuntimes.length}
                 className="mt-2 block min-h-11 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2.5 text-sm text-neutral-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:opacity-70 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100"
               >
-                {phpRuntimes.map((runtime) => <option key={runtime.version} value={runtime.version}>PHP {runtime.version}</option>)}
-                {!phpRuntimes.length && <option value="">Install PHP first</option>}
+                {phpRuntimes.map((runtime) => (
+                  <option key={runtime.version} value={runtime.version}>
+                    PHP {runtime.version}
+                  </option>
+                ))}
+                {!phpRuntimes.length && (
+                  <option value="">Install PHP first</option>
+                )}
               </select>
               <span className="mt-1 block text-xs font-normal text-neutral-500 dark:text-neutral-400">
-                {service.id === "phpmyadmin" ? "phpMyAdmin will run through this PHP 8.x CLI runtime." : service.id === "wp-cli" ? "WP-CLI will use this PHP runtime. If it is removed, the latest installed PHP is selected automatically." : "Composer will use this PHP CLI runtime. If it is removed, the latest installed PHP is selected automatically."}
+                {service.id === "phpmyadmin"
+                  ? "phpMyAdmin will run through this PHP 8.x CLI runtime."
+                  : service.id === "wp-cli"
+                    ? "WP-CLI will use this PHP runtime. If it is removed, the latest installed PHP is selected automatically."
+                    : "Composer will use this PHP CLI runtime. If it is removed, the latest installed PHP is selected automatically."}
               </span>
             </label>
           )}
           {message && (
-            <p className={`text-sm ${messageTone === "success" ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+            <p
+              className={`text-sm ${messageTone === "success" ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}
+            >
               {message}
             </p>
           )}
@@ -266,7 +345,14 @@ export default function InstallServiceModal({
             <button
               type="submit"
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={busy || refreshing || !version || !versions.length || (["composer", "wp-cli", "phpmyadmin"].includes(service.id) && !phpVersion)}
+              disabled={
+                busy ||
+                refreshing ||
+                !version ||
+                !versions.length ||
+                (["composer", "wp-cli", "phpmyadmin"].includes(service.id) &&
+                  !phpVersion)
+              }
             >
               {busy ? "Installing…" : "Install"}
             </button>

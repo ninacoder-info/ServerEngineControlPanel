@@ -114,9 +114,19 @@ function OverviewSkeleton() {
 
 export default function DashboardPage({ user, onLogout }) {
   const [menuOpen, setMenuOpen] = React.useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = React.useState(
+    () => localStorage.getItem("server-engine-sidebar-collapsed") === "true",
+  );
   const [panelPreferences, setPanelPreferences] =
     React.useState(readPanelPreferences);
-  const [terminalPane, setTerminalPane] = React.useState({ open: false, height: 46, session: 0, sessionName: "Local Server", panel: "terminal", initialCommand: "" });
+  const [terminalPane, setTerminalPane] = React.useState({
+    open: false,
+    height: 46,
+    session: 0,
+    sessionName: "Local Server",
+    panel: "terminal",
+    initialCommand: "",
+  });
   const [serviceModal, setServiceModal] = React.useState(null);
   const [serverInfoOpen, setServerInfoOpen] = React.useState(false);
   const overviewLoading = false;
@@ -124,39 +134,71 @@ export default function DashboardPage({ user, onLogout }) {
   const navigate = useNavigate();
   const theme = useTheme();
   const { t } = useTranslation();
-  const openTerminal = React.useCallback((initialCommand = "") => setTerminalPane((current) => ({ ...current, open: true, panel: "terminal", initialCommand })), []);
-  const openWebsiteTerminal = React.useCallback(({ projectPath, phpVersion, domain } = {}) => {
-    const quote = (value) => `'${String(value || "").replace(/'/g, "'\\''")}'`;
-    const folder = quote(projectPath || "/server-engine/www");
-    const commands = [];
-    commands.push('for composer_bin in /opt/server-engine/services/composer/bin /opt/server-engine/services/composer/versions/*/bin; do [ -d "$composer_bin" ] && PATH="$composer_bin:$PATH"; done; export PATH');
-    if (phpVersion) {
-      const phpRoot = `/opt/server-engine/services/php/versions/${phpVersion}`;
-      commands.push(`export PATH=${quote(`${phpRoot}/usr/bin`)}:"$PATH"`);
-      commands.push(`export PHP_INI_SCAN_DIR=${quote(`${phpRoot}/conf/conf.d`)}`);
-    }
-    commands.push(`cd -- ${folder}`);
-    setTerminalPane((current) => ({
-      ...current,
-      open: true,
-      panel: "terminal",
-      session: `website-${String(domain || "site").replace(/[^A-Za-z0-9_-]/g, "-")}-${Date.now()}`,
-      sessionName: domain || "Website",
-      initialCommand: `${commands.join("; ")}\n`,
-    }));
-  }, []);
-  const openLogs = React.useCallback(() => setTerminalPane((current) => ({ ...current, open: true, panel: "logs" })), []);
+  const openTerminal = React.useCallback(
+    (initialCommand = "") =>
+      setTerminalPane((current) => ({
+        ...current,
+        open: true,
+        panel: "terminal",
+        initialCommand,
+      })),
+    [],
+  );
+  const openWebsiteTerminal = React.useCallback(
+    ({ projectPath, phpVersion, domain } = {}) => {
+      const quote = (value) =>
+        `'${String(value || "").replace(/'/g, "'\\''")}'`;
+      const folder = quote(projectPath || "/server-engine/www");
+      const commands = [];
+      commands.push(
+        'for composer_bin in /opt/server-engine/services/composer/bin /opt/server-engine/services/composer/versions/*/bin; do [ -d "$composer_bin" ] && PATH="$composer_bin:$PATH"; done; export PATH',
+      );
+      if (phpVersion) {
+        const phpRoot = `/opt/server-engine/services/php/versions/${phpVersion}`;
+        commands.push(`export PATH=${quote(`${phpRoot}/usr/bin`)}:"$PATH"`);
+        commands.push(
+          `export PHP_INI_SCAN_DIR=${quote(`${phpRoot}/conf/conf.d`)}`,
+        );
+      }
+      commands.push(`cd -- ${folder}`);
+      const sessionKey = `website-${String(domain || projectPath || "site").replace(/[^A-Za-z0-9_-]/g, "-")}`;
+      setTerminalPane((current) => ({
+        ...current,
+        open: true,
+        panel: "terminal",
+        session: sessionKey,
+        sessionName: domain || "Website",
+        initialCommand: `${commands.join("; ")}\n`,
+      }));
+    },
+    [],
+  );
+  const openLogs = React.useCallback(
+    () =>
+      setTerminalPane((current) => ({ ...current, open: true, panel: "logs" })),
+    [],
+  );
   const openServiceConfig = React.useCallback(async (installedService) => {
     const serviceId = String(installedService?.id || "").split("@", 1)[0];
     if (!serviceId) return;
+    if (serviceId === "modsecurity") {
+      navigate("/application-shield");
+      return;
+    }
     const response = await apiRequest("/api/v1/services/catalog");
     if (!response.ok) return;
     const catalog = await response.json();
     const service = catalog.find((item) => item.id === serviceId);
     if (service) setServiceModal({ service, installed: [installedService] });
   }, []);
-  const resizeTerminal = React.useCallback((height) => setTerminalPane((current) => ({ ...current, height })), []);
-  const closeTerminal = React.useCallback(() => setTerminalPane((current) => ({ ...current, open: false })), []);
+  const resizeTerminal = React.useCallback(
+    (height) => setTerminalPane((current) => ({ ...current, height })),
+    [],
+  );
+  const closeTerminal = React.useCallback(
+    () => setTerminalPane((current) => ({ ...current, open: false })),
+    [],
+  );
   React.useEffect(() => {
     const update = (event) =>
       setPanelPreferences(event.detail || readPanelPreferences());
@@ -199,7 +241,8 @@ export default function DashboardPage({ user, onLogout }) {
     ? "Websites"
     : location.pathname === "/services/nodejs"
       ? "Node.js runtimes"
-      : location.pathname === "/services/php" || location.pathname.startsWith("/services/php/")
+      : location.pathname === "/services/php" ||
+          location.pathname.startsWith("/services/php/")
         ? "PHP runtimes"
         : location.pathname.startsWith("/services")
           ? "Services"
@@ -211,7 +254,8 @@ export default function DashboardPage({ user, onLogout }) {
                 ? "Email"
                 : location.pathname === "/ftp"
                   ? "FTP Accounts"
-                  : location.pathname === "/activity" || location.pathname === "/logs"
+                  : location.pathname === "/activity" ||
+                      location.pathname === "/logs"
                     ? "Logs"
                     : location.pathname === "/cronjobs"
                       ? "Cron jobs"
@@ -229,36 +273,39 @@ export default function DashboardPage({ user, onLogout }) {
                                   ? "Terminal"
                                   : location.pathname === "/logs"
                                     ? "Logs"
-                                      : location.pathname === "/users"
+                                    : location.pathname === "/users"
                                       ? "Panel users"
                                       : location.pathname === "/roles"
                                         ? "Roles & permissions"
-                                      : location.pathname === "/hosting-accounts"
-                                        ? "Hosting accounts"
-                                      : location.pathname === "/plans"
-                                        ? "Hosting plans"
-                                        : location.pathname === "/firewall"
-                                          ? "Firewall"
-                                          : location.pathname ===
-                                              "/malware-scanner"
-                                            ? "Malware Scanner"
-                                            : location.pathname ===
-                                                "/application-shield"
-                                              ? "Application Shield"
-                                              : location.pathname === "/backups"
-                                                ? "Backups"
+                                        : location.pathname ===
+                                            "/hosting-accounts"
+                                          ? "Hosting accounts"
+                                          : location.pathname === "/plans"
+                                            ? "Hosting plans"
+                                            : location.pathname === "/firewall"
+                                              ? "Firewall"
+                                              : location.pathname ===
+                                                  "/malware-scanner"
+                                                ? "Malware Scanner"
                                                 : location.pathname ===
-                                                    "/databases"
-                                                  ? "Databases"
-                                                  : location.pathname === "/"
-                                                    ? "Overview"
-                                                    : location.pathname
-                                                        .slice(1)
-                                                        .replace(
-                                                          /^[a-z]/,
-                                                          (letter) =>
-                                                            letter.toUpperCase(),
-                                                        );
+                                                    "/application-shield"
+                                                  ? "Application Shield"
+                                                  : location.pathname ===
+                                                      "/backups"
+                                                    ? "Backups"
+                                                    : location.pathname ===
+                                                        "/databases"
+                                                      ? "Databases"
+                                                      : location.pathname ===
+                                                          "/"
+                                                        ? "Overview"
+                                                        : location.pathname
+                                                            .slice(1)
+                                                            .replace(
+                                                              /^[a-z]/,
+                                                              (letter) =>
+                                                                letter.toUpperCase(),
+                                                            );
   const content = location.pathname.startsWith("/websites") ? (
     <WebsitesPage onOpenTerminal={openWebsiteTerminal} />
   ) : location.pathname === "/activity" || location.pathname === "/logs" ? (
@@ -320,7 +367,9 @@ export default function DashboardPage({ user, onLogout }) {
   ) : (
     <>
       <div>
-        <p className="text-sm font-medium text-blue-600 dark:text-blue-400">{t("dashboard.greeting")}</p>
+        <p className="text-sm font-medium text-blue-600 dark:text-blue-400">
+          {t("dashboard.greeting")}
+        </p>
         <h2 className="mt-1 text-3xl font-semibold tracking-tight">
           {location.pathname === "/" ? t("nav.overview") : active}
         </h2>
@@ -336,12 +385,17 @@ export default function DashboardPage({ user, onLogout }) {
   );
   return (
     <div
-      className="grid h-[calc(100vh-2rem)] min-h-0 grid-cols-1 grid-rows-[minmax(0,1fr)_0px] overflow-hidden bg-[var(--se-bg)] text-[var(--se-text)] md:grid-cols-[16rem_minmax(0,1fr)]"
-      style={{ gridTemplateRows: terminalPane.open ? `minmax(0, 1fr) ${terminalPane.height}vh` : "minmax(0, 1fr) 0px" }}
+      className={`grid h-[calc(100vh-2rem)] min-h-0 grid-cols-1 grid-rows-[minmax(0,1fr)_0px] overflow-hidden bg-[var(--se-bg)] text-[var(--se-text)] ${sidebarCollapsed ? "md:grid-cols-[4rem_minmax(0,1fr)]" : "md:grid-cols-[16rem_minmax(0,1fr)]"}`}
+      style={{
+        gridTemplateRows: terminalPane.open
+          ? `minmax(0, 1fr) ${terminalPane.height}vh`
+          : "minmax(0, 1fr) 0px",
+      }}
       data-show-hints={panelPreferences.panel_show_hints !== false}
     >
       <Sidebar
         open={menuOpen}
+        collapsed={sidebarCollapsed}
         active={active}
         onSelect={(path) => navigate(path)}
         onClose={() => setMenuOpen(false)}
@@ -360,22 +414,71 @@ export default function DashboardPage({ user, onLogout }) {
           onThemeToggle={theme.toggle}
           onLogout={onLogout}
           onMenu={() => setMenuOpen(true)}
+          sidebarCollapsed={sidebarCollapsed}
+          onSidebarToggle={() => {
+            setSidebarCollapsed((collapsed) => {
+              const next = !collapsed;
+              localStorage.setItem(
+                "server-engine-sidebar-collapsed",
+                String(next),
+              );
+              return next;
+            });
+          }}
           onNavigate={navigate}
         />
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-7xl space-y-8 p-5 pb-24 md:p-10 md:pb-24">
-          {content}
-          <div className={location.pathname === "/terminal" ? "" : "hidden"}>
-            <TerminalPage autoConnect={location.pathname === "/terminal"} />
-          </div>
+        <div
+          className={`min-h-0 flex-1 ${location.pathname === "/file-manager" ? "overflow-hidden" : "overflow-y-auto"}`}
+        >
+          <div
+            className={
+              location.pathname === "/file-manager"
+                ? "h-full min-h-0 w-full overflow-hidden"
+                : "mx-auto max-w-7xl space-y-8 p-5 pb-24 md:p-10 md:pb-24"
+            }
+          >
+            {content}
+            <div className={location.pathname === "/terminal" ? "" : "hidden"}>
+              <TerminalPage autoConnect={location.pathname === "/terminal"} />
+            </div>
           </div>
         </div>
       </main>
-      <GlobalTerminalPane open={terminalPane.open} height={terminalPane.height} session={terminalPane.session} sessionName={terminalPane.sessionName} initialCommand={terminalPane.initialCommand} panel={terminalPane.panel} onResize={resizeTerminal} onClose={closeTerminal} />
-      <GlobalJobStatusBar onOpenTerminal={openTerminal} onOpenLogs={openLogs} onOpenServer={() => setServerInfoOpen(true)} onOpenService={openServiceConfig} terminalOpen={terminalPane.open} panel={terminalPane.panel} />
-      {serverInfoOpen && <ServerInfoModal onClose={() => setServerInfoOpen(false)} />}
-      {serviceModal?.service?.id === "nginx" && <NginxConfigModal service={serviceModal.service} installed={serviceModal.installed} onClose={() => setServiceModal(null)} />}
-      {serviceModal?.service && serviceModal.service.id !== "nginx" && <ServiceManagerModal service={serviceModal.service} installed={serviceModal.installed} onClose={() => setServiceModal(null)} />}
+      <GlobalTerminalPane
+        open={terminalPane.open}
+        height={terminalPane.height}
+        session={terminalPane.session}
+        sessionName={terminalPane.sessionName}
+        initialCommand={terminalPane.initialCommand}
+        panel={terminalPane.panel}
+        onResize={resizeTerminal}
+        onClose={closeTerminal}
+      />
+      <GlobalJobStatusBar
+        onOpenTerminal={openTerminal}
+        onOpenLogs={openLogs}
+        onOpenServer={() => setServerInfoOpen(true)}
+        onOpenService={openServiceConfig}
+        terminalOpen={terminalPane.open}
+        panel={terminalPane.panel}
+      />
+      {serverInfoOpen && (
+        <ServerInfoModal onClose={() => setServerInfoOpen(false)} />
+      )}
+      {serviceModal?.service?.id === "nginx" && (
+        <NginxConfigModal
+          service={serviceModal.service}
+          installed={serviceModal.installed}
+          onClose={() => setServiceModal(null)}
+        />
+      )}
+      {serviceModal?.service && serviceModal.service.id !== "nginx" && (
+        <ServiceManagerModal
+          service={serviceModal.service}
+          installed={serviceModal.installed}
+          onClose={() => setServiceModal(null)}
+        />
+      )}
     </div>
   );
 }

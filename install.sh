@@ -195,7 +195,8 @@ download_release_bundle() {
     local release_asset="${BASH_REMATCH[3]}"
     local release_api="https://api.github.com/repos/${release_owner}/${release_repo}/releases/latest"
     log "Resolving private GitHub release asset through the authenticated API"
-    download_url="$(curl --fail --location --silent --show-error \
+    local resolved_asset_url
+    resolved_asset_url="$(curl --fail --location --silent --show-error \
       --header "Authorization: Bearer $GITHUB_TOKEN" \
       --header 'Accept: application/vnd.github+json' \
       "$release_api" | SE_RELEASE_ASSET="$release_asset" python3 -c 'import json, sys
@@ -203,12 +204,15 @@ import os
 asset_name = os.environ["SE_RELEASE_ASSET"]
 release = json.load(sys.stdin)
 for asset in release.get("assets", []):
-    if asset.get("name") == asset_name:
-        print(asset.get("url", ""))
+    if asset.get("name", "").strip() == asset_name:
+        print(asset.get("url", "") or asset.get("browser_download_url", ""))
         break
-else:
-    raise SystemExit(f"release asset not found: {asset_name}")')" || die "unable to resolve the private GitHub release asset"
-    [ -n "$download_url" ] || die "private GitHub release asset URL was empty"
+    ' )" || die "unable to resolve the private GitHub release metadata"
+    if [ -n "$resolved_asset_url" ]; then
+      download_url="$resolved_asset_url"
+    else
+      log "Authenticated release metadata did not expose ${release_asset}; falling back to the direct release URL"
+    fi
   fi
   if [ -n "$GITHUB_TOKEN" ] && [[ "$RELEASE_URL" == https://github.com/* || "$RELEASE_URL" == https://api.github.com/* ]]; then
     github_auth=(--header "Authorization: Bearer $GITHUB_TOKEN" --header "Accept: application/octet-stream")

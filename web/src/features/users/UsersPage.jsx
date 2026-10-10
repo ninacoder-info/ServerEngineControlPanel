@@ -2,72 +2,696 @@ import React from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
-import { CirclePlus, Globe2, HardDrive, MoreHorizontal, Search, Server, ShieldCheck, Users, X } from "lucide-react";
+import {
+  CirclePlus,
+  Globe2,
+  HardDrive,
+  MoreHorizontal,
+  Search,
+  Server,
+  ShieldCheck,
+  Users,
+  X,
+} from "lucide-react";
 import { apiRequest, readApiError } from "../../lib/api";
 import Toast from "../../components/Toast";
 import SecurePasswordInput from "../../components/SecurePasswordInput";
-import Form, { FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "../../components/ui/form";
+import Form, {
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "../../components/ui/form";
 
-const input = "mt-2 block min-h-11 w-full rounded-md border border-neutral-300 bg-white px-3 py-2.5 text-sm text-neutral-900 outline-none placeholder:text-neutral-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100";
-const panel = "rounded-xl border border-neutral-200 bg-white p-5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900";
-const formatSize = (mb) => mb >= 1024 ? `${Math.round(mb / 1024)} GB` : `${mb} MB`;
+const input =
+  "mt-2 block min-h-11 w-full rounded-md border border-neutral-300 bg-white px-3 py-2.5 text-sm text-neutral-900 outline-none placeholder:text-neutral-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100";
+const panel =
+  "rounded-xl border border-neutral-200 bg-white p-5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900";
+const formatSize = (mb) =>
+  mb >= 1024 ? `${Math.round(mb / 1024)} GB` : `${mb} MB`;
 
 const accountSchema = z.object({
-  account_name: z.string().trim().min(1, "Account name is required.").max(120, "Account name is too long."),
-  primary_domain: z.string().trim().min(3, "Primary domain is required.").max(253, "Domain is too long.").regex(/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i, "Enter a valid domain such as example.com."),
-  username: z.string().trim().toLowerCase().regex(/^[a-z][a-z0-9._-]{2,63}$/, "Use 3–64 lowercase letters, numbers, dots, underscores, or hyphens."),
-  email: z.string().trim().email("Enter a valid email address.").or(z.literal("")),
-  password: z.string().min(12, "Use at least 12 characters for the initial password.").max(256, "Password is too long."),
+  account_name: z
+    .string()
+    .trim()
+    .min(1, "Account name is required.")
+    .max(120, "Account name is too long."),
+  primary_domain: z
+    .string()
+    .trim()
+    .min(3, "Primary domain is required.")
+    .max(253, "Domain is too long.")
+    .regex(
+      /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i,
+      "Enter a valid domain such as example.com.",
+    ),
+  username: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(
+      /^[a-z][a-z0-9._-]{2,63}$/,
+      "Use 3–64 lowercase letters, numbers, dots, underscores, or hyphens.",
+    ),
+  email: z
+    .string()
+    .trim()
+    .email("Enter a valid email address.")
+    .or(z.literal("")),
+  password: z
+    .string()
+    .min(12, "Use at least 12 characters for the initial password.")
+    .max(256, "Password is too long."),
   package_id: z.string().min(1, "Select a hosting plan."),
 });
 
 function AccountModal({ onClose, onCreate, saving, packages }) {
   const activePackages = packages.filter((item) => item.status === "active");
-  const methods = useForm({ resolver: zodResolver(accountSchema), defaultValues: { account_name: "", primary_domain: "", username: "", email: "", password: "", package_id: activePackages.find((item) => item.id === "starter")?.id || activePackages[0]?.id || "" }, mode: "onBlur" });
-  const { control, handleSubmit, watch, setValue, formState: { errors } } = methods;
-  const selected = activePackages.find((item) => item.id === watch("package_id"));
-  React.useEffect(() => { if (!selected && activePackages[0]) setValue("package_id", activePackages[0].id, { shouldValidate: true }); }, [activePackages, selected, setValue]);
+  const methods = useForm({
+    resolver: zodResolver(accountSchema),
+    defaultValues: {
+      account_name: "",
+      primary_domain: "",
+      username: "",
+      email: "",
+      password: "",
+      package_id:
+        activePackages.find((item) => item.id === "starter")?.id ||
+        activePackages[0]?.id ||
+        "",
+    },
+    mode: "onBlur",
+  });
+  const {
+    control,
+    handleSubmit,
+    watch,
+    setValue,
+    formState: { errors },
+  } = methods;
+  const selected = activePackages.find(
+    (item) => item.id === watch("package_id"),
+  );
+  React.useEffect(() => {
+    if (!selected && activePackages[0])
+      setValue("package_id", activePackages[0].id, { shouldValidate: true });
+  }, [activePackages, selected, setValue]);
   async function submit(form) {
-    if (!selected) { methods.setError("package_id", { type: "manual", message: "Create an active hosting plan before creating an account." }); return; }
-    try { await onCreate({ ...form, disk_quota_mb: selected.disk_quota_mb, bandwidth_quota_mb: selected.bandwidth_quota_mb, websites_quota: selected.websites_quota }); } catch (requestError) { methods.setError("root", { type: "server", message: requestError.message || "Could not create hosting account." }); }
+    if (!selected) {
+      methods.setError("package_id", {
+        type: "manual",
+        message: "Create an active hosting plan before creating an account.",
+      });
+      return;
+    }
+    try {
+      await onCreate({
+        ...form,
+        disk_quota_mb: selected.disk_quota_mb,
+        bandwidth_quota_mb: selected.bandwidth_quota_mb,
+        websites_quota: selected.websites_quota,
+      });
+    } catch (requestError) {
+      methods.setError("root", {
+        type: "server",
+        message: requestError.message || "Could not create hosting account.",
+      });
+    }
   }
-  return <div className="fixed inset-0 z-50 grid place-items-center bg-neutral-950/60 p-4" onMouseDown={(event) => event.target === event.currentTarget && !saving && onClose()}>
-    <Form {...methods}><form onSubmit={handleSubmit(submit)} noValidate className="max-h-[calc(100vh-2rem)] w-full max-w-3xl overflow-y-auto rounded-xl border border-neutral-200 bg-white p-6 shadow-2xl dark:border-neutral-700 dark:bg-neutral-900">
-      <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Hosting account</p><h2 className="mt-1 text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Create hosting account</h2><p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">Give your friend an independent login, website home, domain, and resource package.</p></div><button type="button" disabled={saving} onClick={onClose} className="grid h-9 w-9 place-items-center rounded-md text-neutral-500 hover:bg-neutral-100 disabled:opacity-50 dark:hover:bg-neutral-800"><X size={18} /></button></div>
-      <div className="mt-6 grid gap-5 md:grid-cols-2">
-        <FormField control={control} name="account_name" render={({ field }) => <FormItem><FormLabel>Account name</FormLabel><FormControl><input {...field} className={input} placeholder="Jane's website account" /></FormControl><FormMessage /></FormItem>} />
-        <FormField control={control} name="primary_domain" render={({ field }) => <FormItem><FormLabel>Primary domain</FormLabel><FormControl><input {...field} className={input} placeholder="example.com" /></FormControl><FormMessage /></FormItem>} />
-        <FormField control={control} name="username" render={({ field }) => <FormItem><FormLabel>Panel username</FormLabel><FormControl><input {...field} onChange={(event) => field.onChange(event.target.value.toLowerCase())} className={input} placeholder="jane" /></FormControl><FormDescription>This becomes the account home: /server-engine/www/{field.value || "username"}</FormDescription><FormMessage /></FormItem>} />
-        <FormField control={control} name="email" render={({ field }) => <FormItem><FormLabel>Contact email</FormLabel><FormControl><input {...field} type="email" className={input} placeholder="jane@example.com" /></FormControl><FormMessage /></FormItem>} />
-        <FormField control={control} name="password" render={({ field }) => <FormItem><FormLabel>Initial password</FormLabel><FormControl><SecurePasswordInput {...field} className={input} placeholder="At least 12 characters" /></FormControl><FormMessage /></FormItem>} />
-        <FormField control={control} name="package_id" render={({ field }) => <FormItem><FormLabel>Hosting package</FormLabel><FormControl><select {...field} className={input}><option value="">Select a plan</option>{activePackages.map((item) => <option key={item.id} value={item.id}>{item.name} · {formatSize(item.disk_quota_mb)} · {item.websites_quota} website{item.websites_quota > 1 ? "s" : ""}</option>)}</select></FormControl><FormMessage /></FormItem>} />
-      </div>
-      {selected && <div className="mt-6 grid gap-3 sm:grid-cols-3"><div className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800"><small className="text-xs text-neutral-500 dark:text-neutral-400">Disk quota</small><strong className="mt-1 block text-sm text-neutral-900 dark:text-neutral-100">{formatSize(selected.disk_quota_mb)}</strong></div><div className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800"><small className="text-xs text-neutral-500 dark:text-neutral-400">Bandwidth</small><strong className="mt-1 block text-sm text-neutral-900 dark:text-neutral-100">{formatSize(selected.bandwidth_quota_mb)}</strong></div><div className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800"><small className="text-xs text-neutral-500 dark:text-neutral-400">Websites</small><strong className="mt-1 block text-sm text-neutral-900 dark:text-neutral-100">{selected.websites_quota}</strong></div></div>}
-      {errors.root?.message && <p className="mt-5 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-300">{errors.root.message}</p>}
-      <div className="mt-6 flex justify-end gap-3"><button type="button" disabled={saving} onClick={onClose} className="rounded-md border border-neutral-300 px-4 py-2.5 text-sm font-semibold text-neutral-700 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-300">Cancel</button><button disabled={saving} className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60"><CirclePlus size={16} />{saving ? "Creating…" : "Create account"}</button></div>
-    </form></Form>
-  </div>;
+  return (
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-neutral-950/60 p-4"
+      onMouseDown={(event) =>
+        event.target === event.currentTarget && !saving && onClose()
+      }
+    >
+      <Form {...methods}>
+        <form
+          onSubmit={handleSubmit(submit)}
+          noValidate
+          className="max-h-[calc(100vh-2rem)] w-full max-w-3xl overflow-y-auto rounded-xl border border-neutral-200 bg-white p-6 shadow-2xl dark:border-neutral-700 dark:bg-neutral-900"
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">
+                Hosting account
+              </p>
+              <h2 className="mt-1 text-2xl font-semibold text-neutral-900 dark:text-neutral-100">
+                Create hosting account
+              </h2>
+              <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
+                Give your friend an independent login, website home, domain, and
+                resource package.
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={onClose}
+              className="grid h-9 w-9 place-items-center rounded-md text-neutral-500 hover:bg-neutral-100 disabled:opacity-50 dark:hover:bg-neutral-800"
+            >
+              <X size={18} />
+            </button>
+          </div>
+          <div className="mt-6 grid gap-5 md:grid-cols-2">
+            <FormField
+              control={control}
+              name="account_name"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Account name</FormLabel>
+                  <FormControl>
+                    <input
+                      {...field}
+                      className={input}
+                      placeholder="Jane's website account"
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={control}
+              name="primary_domain"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Primary domain</FormLabel>
+                  <FormControl>
+                    <input
+                      {...field}
+                      className={input}
+                      placeholder="example.com"
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={control}
+              name="username"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Panel username</FormLabel>
+                  <FormControl>
+                    <input
+                      {...field}
+                      onChange={(event) =>
+                        field.onChange(event.target.value.toLowerCase())
+                      }
+                      className={input}
+                      placeholder="jane"
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    This becomes the account home: /server-engine/www/
+                    {field.value || "username"}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={control}
+              name="email"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Contact email</FormLabel>
+                  <FormControl>
+                    <input
+                      {...field}
+                      type="email"
+                      className={input}
+                      placeholder="jane@example.com"
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={control}
+              name="password"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Initial password</FormLabel>
+                  <FormControl>
+                    <SecurePasswordInput
+                      {...field}
+                      className={input}
+                      placeholder="At least 12 characters"
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={control}
+              name="package_id"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Hosting package</FormLabel>
+                  <FormControl>
+                    <select {...field} className={input}>
+                      <option value="">Select a plan</option>
+                      {activePackages.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.name} · {formatSize(item.disk_quota_mb)} ·{" "}
+                          {item.websites_quota} website
+                          {item.websites_quota > 1 ? "s" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
+          {selected && (
+            <div className="mt-6 grid gap-3 sm:grid-cols-3">
+              <div className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+                <small className="text-xs text-neutral-500 dark:text-neutral-400">
+                  Disk quota
+                </small>
+                <strong className="mt-1 block text-sm text-neutral-900 dark:text-neutral-100">
+                  {formatSize(selected.disk_quota_mb)}
+                </strong>
+              </div>
+              <div className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+                <small className="text-xs text-neutral-500 dark:text-neutral-400">
+                  Bandwidth
+                </small>
+                <strong className="mt-1 block text-sm text-neutral-900 dark:text-neutral-100">
+                  {formatSize(selected.bandwidth_quota_mb)}
+                </strong>
+              </div>
+              <div className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+                <small className="text-xs text-neutral-500 dark:text-neutral-400">
+                  Websites
+                </small>
+                <strong className="mt-1 block text-sm text-neutral-900 dark:text-neutral-100">
+                  {selected.websites_quota}
+                </strong>
+              </div>
+            </div>
+          )}
+          {errors.root?.message && (
+            <p className="mt-5 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-300">
+              {errors.root.message}
+            </p>
+          )}
+          <div className="mt-6 flex justify-end gap-3">
+            <button
+              type="button"
+              disabled={saving}
+              onClick={onClose}
+              className="rounded-md border border-neutral-300 px-4 py-2.5 text-sm font-semibold text-neutral-700 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-300"
+            >
+              Cancel
+            </button>
+            <button
+              disabled={saving}
+              className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60"
+            >
+              <CirclePlus size={16} />
+              {saving ? "Creating…" : "Create account"}
+            </button>
+          </div>
+        </form>
+      </Form>
+    </div>
+  );
 }
 
 export default function UsersPage() {
-  const [accounts, setAccounts] = React.useState([]); const [packages, setPackages] = React.useState([]); const [query, setQuery] = React.useState(""); const [modal, setModal] = React.useState(false); const [loading, setLoading] = React.useState(true); const [saving, setSaving] = React.useState(false); const [error, setError] = React.useState(""); const [toast, setToast] = React.useState(null);
-  const loadAccounts = React.useCallback(async () => { const response = await apiRequest("/api/v1/accounts"); if (!response.ok) throw new Error(await readApiError(response, "Could not load hosting accounts.")); const payload = await response.json(); setAccounts(Array.isArray(payload.accounts) ? payload.accounts : []); setError(""); }, []);
-  const loadPlans = React.useCallback(async () => { const response = await apiRequest("/api/v1/plans"); if (!response.ok) throw new Error(await readApiError(response, "Could not load hosting plans.")); const payload = await response.json(); setPackages(Array.isArray(payload.plans) ? payload.plans : []); }, []);
-  React.useEffect(() => { let active = true; setLoading(true); Promise.all([loadAccounts(), loadPlans()]).catch((requestError) => active && setError(requestError.message || "Could not load hosting accounts.")).finally(() => active && setLoading(false)); return () => { active = false; }; }, [loadAccounts, loadPlans]);
-  React.useEffect(() => { const refresh = () => loadAccounts().catch((requestError) => setError(requestError.message || "Could not refresh hosting accounts.")); const refreshPlans = () => loadPlans().catch((requestError) => setError(requestError.message || "Could not refresh hosting plans.")); window.addEventListener("serverengine:hosting-accounts", refresh); window.addEventListener("serverengine:plans", refreshPlans); return () => { window.removeEventListener("serverengine:hosting-accounts", refresh); window.removeEventListener("serverengine:plans", refreshPlans); }; }, [loadAccounts, loadPlans]);
-  async function createAccount(form) { setSaving(true); try { const response = await apiRequest("/api/v1/accounts", { method: "POST", body: JSON.stringify(form) }); if (!response.ok) throw new Error(await readApiError(response, "Could not create hosting account.")); setModal(false); setToast({ type: "success", message: "Hosting account created." }); await loadAccounts(); } finally { setSaving(false); } }
-  async function changeStatus(account) { const status = account.status === "active" ? "suspended" : "active"; const response = await apiRequest(`/api/v1/accounts/${account.id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }); if (!response.ok) throw new Error(await readApiError(response, "Could not update account status.")); setToast({ type: "success", message: `Account ${status}.` }); await loadAccounts(); }
-  async function removeAccount(account) { if (!window.confirm(`Suspend and archive ${account.account_name}? It can be restored later.`)) return; const response = await apiRequest(`/api/v1/accounts/${account.id}`, { method: "DELETE" }); if (!response.ok) throw new Error(await readApiError(response, "Could not archive hosting account.")); setToast({ type: "success", message: "Account archived. Its home can be restored." }); await loadAccounts(); }
-  async function restoreAccount(account) { const response = await apiRequest(`/api/v1/accounts/${account.id}/restore`, { method: "POST" }); if (!response.ok) throw new Error(await readApiError(response, "Could not restore hosting account.")); setToast({ type: "success", message: "Hosting account restored." }); await loadAccounts(); }
-  const visible = accounts.filter((account) => `${account.account_name} ${account.username} ${account.primary_domain} ${account.package_id}`.toLowerCase().includes(query.toLowerCase()));
-  const active = accounts.filter((account) => account.status === "active").length;
-  return <div className="space-y-7"><Toast message={toast?.message} type={toast?.type} onClose={() => setToast(null)} />
-    <div className="flex flex-col items-start justify-between gap-4 md:flex-row md:items-end"><div><p className="text-sm font-medium text-blue-600 dark:text-blue-400">WHM-style hosting</p><h2 className="mt-1 text-3xl font-bold tracking-tight text-neutral-900 dark:text-neutral-100">Hosting accounts</h2><p className="mt-2 max-w-3xl text-base leading-7 text-neutral-500 dark:text-neutral-400">Create and manage independent hosting spaces for friends or customers on this server. No reseller or billing layer is required.</p></div><button className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700" onClick={() => setModal(true)}><CirclePlus size={16} /> Create account</button></div>
-    <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{[[Users, "Total accounts", accounts.length, "Independent logins"], [ShieldCheck, "Active accounts", active, "Allowed to sign in"], [HardDrive, "Websites capacity", accounts.reduce((total, item) => total + (item.websites_quota || 0), 0), "Across assigned packages"], [Globe2, "Domains", accounts.filter((item) => item.primary_domain).length, "Primary domains assigned"]].map(([Icon, label, value, detail]) => <div className={panel} key={label}><div className="flex items-center gap-3"><Icon className="text-blue-500" size={20} /><span><small className="block text-xs text-neutral-500 dark:text-neutral-400">{label}</small><strong className="mt-1 block text-xl text-neutral-900 dark:text-neutral-100">{value}</strong></span></div><p className="mt-3 text-xs text-neutral-500 dark:text-neutral-400">{detail}</p></div>)}</section>
-    <section className={panel}><div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center"><div><h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Account directory</h3><p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">Each account has an isolated home, resource ownership, enforced quotas, and lifecycle controls.</p></div><label className="flex min-w-64 items-center gap-2 rounded-md border border-neutral-300 bg-white px-3 py-2.5 text-neutral-400 dark:border-neutral-700 dark:bg-neutral-950"><Search size={16} /><input className="w-full bg-transparent text-sm text-neutral-900 outline-none dark:text-neutral-100" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search account or domain" /></label></div>
-      {error && <div className="mt-5 flex items-center justify-between gap-4 rounded-md border border-rose-200 bg-rose-50 px-3 py-3 text-sm text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-300"><span>{error}</span><button className="font-semibold underline" onClick={() => loadAccounts().catch((requestError) => setError(requestError.message))}>Retry</button></div>}
-      <div className="mt-5 overflow-x-auto">{loading ? <div className="space-y-3 py-4">{[1, 2, 3, 4].map((item) => <div key={item} className="h-14 animate-pulse rounded-md bg-neutral-100 dark:bg-neutral-800" />)}</div> : <table className="w-full min-w-[1050px] border-collapse text-left"><thead><tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400"><th className="px-3 py-3 font-semibold">Account / domain</th><th className="px-3 py-3 font-semibold">Login / home</th><th className="px-3 py-3 font-semibold">Package</th><th className="px-3 py-3 font-semibold">Quota</th><th className="px-3 py-3 font-semibold">Status</th><th className="px-3 py-3" /></tr></thead><tbody>{visible.map((account) => <tr key={account.id} className="border-b border-neutral-100 dark:border-neutral-800"><td className="px-3 py-4"><div className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-lg bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300"><Globe2 size={17} /></span><span><strong className="block text-sm font-semibold text-neutral-900 dark:text-neutral-100">{account.account_name}</strong><small className="mt-0.5 block text-xs text-neutral-500 dark:text-neutral-400">{account.primary_domain}</small></span></div></td><td className="px-3 py-4"><strong className="block text-sm text-neutral-700 dark:text-neutral-300">{account.username}</strong><small className="mt-1 block max-w-xs truncate text-xs text-neutral-500 dark:text-neutral-400" title={account.home_path}>{account.home_path}</small></td><td className="px-3 py-4 text-sm capitalize text-neutral-700 dark:text-neutral-300">{account.package_id}</td><td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">{formatSize(account.disk_quota_mb)} · {account.websites_quota} site{account.websites_quota === 1 ? "" : "s"}</td><td className="px-3 py-4"><span className={`inline-flex items-center gap-2 text-xs font-semibold ${account.status === "active" ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}><span className="h-1.5 w-1.5 rounded-full bg-current" />{account.status === "active" ? "Active" : account.status === "suspended" ? "Suspended" : "Archived"}</span></td><td className="px-3 py-4 text-right"><div className="flex justify-end gap-1"><button onClick={() => (account.status === "deleted" ? restoreAccount(account) : changeStatus(account)).catch((requestError) => setError(requestError.message))} className="rounded-md px-2 py-1 text-xs font-semibold text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30">{account.status === "deleted" ? "Restore" : account.status === "active" ? "Suspend" : "Activate"}</button>{account.status !== "deleted" && <button onClick={() => removeAccount(account).catch((requestError) => setError(requestError.message))} className="rounded-md p-2 text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800" title="Archive account"><MoreHorizontal size={17} /></button>}</div></td></tr>)}</tbody></table>}{!loading && visible.length === 0 && <div className="grid place-items-center py-16 text-center"><Server size={30} className="text-neutral-400" /><h4 className="mt-4 text-base font-semibold text-neutral-900 dark:text-neutral-100">No hosting accounts found</h4><p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">Create an account to give someone an independent hosting space.</p></div>}</div>
-    </section>
-    {modal && <AccountModal packages={packages} onClose={() => setModal(false)} onCreate={createAccount} saving={saving} />}
-  </div>;
+  const [accounts, setAccounts] = React.useState([]);
+  const [packages, setPackages] = React.useState([]);
+  const [query, setQuery] = React.useState("");
+  const [modal, setModal] = React.useState(false);
+  const [loading, setLoading] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState("");
+  const [toast, setToast] = React.useState(null);
+  const loadAccounts = React.useCallback(async () => {
+    const response = await apiRequest("/api/v1/accounts");
+    if (!response.ok)
+      throw new Error(
+        await readApiError(response, "Could not load hosting accounts."),
+      );
+    const payload = await response.json();
+    setAccounts(Array.isArray(payload.accounts) ? payload.accounts : []);
+    setError("");
+  }, []);
+  const loadPlans = React.useCallback(async () => {
+    const response = await apiRequest("/api/v1/plans");
+    if (!response.ok)
+      throw new Error(
+        await readApiError(response, "Could not load hosting plans."),
+      );
+    const payload = await response.json();
+    setPackages(Array.isArray(payload.plans) ? payload.plans : []);
+  }, []);
+  React.useEffect(() => {
+    let active = true;
+    setLoading(true);
+    Promise.all([loadAccounts(), loadPlans()])
+      .catch(
+        (requestError) =>
+          active &&
+          setError(requestError.message || "Could not load hosting accounts."),
+      )
+      .finally(() => active && setLoading(false));
+    return () => {
+      active = false;
+    };
+  }, [loadAccounts, loadPlans]);
+  React.useEffect(() => {
+    const refresh = () =>
+      loadAccounts().catch((requestError) =>
+        setError(requestError.message || "Could not refresh hosting accounts."),
+      );
+    const refreshPlans = () =>
+      loadPlans().catch((requestError) =>
+        setError(requestError.message || "Could not refresh hosting plans."),
+      );
+    window.addEventListener("serverengine:hosting-accounts", refresh);
+    window.addEventListener("serverengine:plans", refreshPlans);
+    return () => {
+      window.removeEventListener("serverengine:hosting-accounts", refresh);
+      window.removeEventListener("serverengine:plans", refreshPlans);
+    };
+  }, [loadAccounts, loadPlans]);
+  async function createAccount(form) {
+    setSaving(true);
+    try {
+      const response = await apiRequest("/api/v1/accounts", {
+        method: "POST",
+        body: JSON.stringify(form),
+      });
+      if (!response.ok)
+        throw new Error(
+          await readApiError(response, "Could not create hosting account."),
+        );
+      setModal(false);
+      setToast({ type: "success", message: "Hosting account created." });
+      await loadAccounts();
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function changeStatus(account) {
+    const status = account.status === "active" ? "suspended" : "active";
+    const response = await apiRequest(`/api/v1/accounts/${account.id}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    });
+    if (!response.ok)
+      throw new Error(
+        await readApiError(response, "Could not update account status."),
+      );
+    setToast({ type: "success", message: `Account ${status}.` });
+    await loadAccounts();
+  }
+  async function removeAccount(account) {
+    if (
+      !window.confirm(
+        `Suspend and archive ${account.account_name}? It can be restored later.`,
+      )
+    )
+      return;
+    const response = await apiRequest(`/api/v1/accounts/${account.id}`, {
+      method: "DELETE",
+    });
+    if (!response.ok)
+      throw new Error(
+        await readApiError(response, "Could not archive hosting account."),
+      );
+    setToast({
+      type: "success",
+      message: "Account archived. Its home can be restored.",
+    });
+    await loadAccounts();
+  }
+  async function restoreAccount(account) {
+    const response = await apiRequest(
+      `/api/v1/accounts/${account.id}/restore`,
+      { method: "POST" },
+    );
+    if (!response.ok)
+      throw new Error(
+        await readApiError(response, "Could not restore hosting account."),
+      );
+    setToast({ type: "success", message: "Hosting account restored." });
+    await loadAccounts();
+  }
+  const visible = accounts.filter((account) =>
+    `${account.account_name} ${account.username} ${account.primary_domain} ${account.package_id}`
+      .toLowerCase()
+      .includes(query.toLowerCase()),
+  );
+  const active = accounts.filter(
+    (account) => account.status === "active",
+  ).length;
+  return (
+    <div className="space-y-7">
+      <Toast
+        message={toast?.message}
+        type={toast?.type}
+        onClose={() => setToast(null)}
+      />
+      <div className="flex flex-col items-start justify-between gap-4 md:flex-row md:items-end">
+        <div>
+          <p className="text-sm font-medium text-blue-600 dark:text-blue-400">
+            WHM-style hosting
+          </p>
+          <h2 className="mt-1 text-3xl font-bold tracking-tight text-neutral-900 dark:text-neutral-100">
+            Hosting accounts
+          </h2>
+          <p className="mt-2 max-w-3xl text-base leading-7 text-neutral-500 dark:text-neutral-400">
+            Create and manage independent hosting spaces for friends or
+            customers on this server. No reseller or billing layer is required.
+          </p>
+        </div>
+        <button
+          className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
+          onClick={() => setModal(true)}
+        >
+          <CirclePlus size={16} /> Create account
+        </button>
+      </div>
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {[
+          [Users, "Total accounts", accounts.length, "Independent logins"],
+          [ShieldCheck, "Active accounts", active, "Allowed to sign in"],
+          [
+            HardDrive,
+            "Websites capacity",
+            accounts.reduce(
+              (total, item) => total + (item.websites_quota || 0),
+              0,
+            ),
+            "Across assigned packages",
+          ],
+          [
+            Globe2,
+            "Domains",
+            accounts.filter((item) => item.primary_domain).length,
+            "Primary domains assigned",
+          ],
+        ].map(([Icon, label, value, detail]) => (
+          <div className={panel} key={label}>
+            <div className="flex items-center gap-3">
+              <Icon className="text-blue-500" size={20} />
+              <span>
+                <small className="block text-xs text-neutral-500 dark:text-neutral-400">
+                  {label}
+                </small>
+                <strong className="mt-1 block text-xl text-neutral-900 dark:text-neutral-100">
+                  {value}
+                </strong>
+              </span>
+            </div>
+            <p className="mt-3 text-xs text-neutral-500 dark:text-neutral-400">
+              {detail}
+            </p>
+          </div>
+        ))}
+      </section>
+      <section className={panel}>
+        <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
+          <div>
+            <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">
+              Account directory
+            </h3>
+            <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+              Each account has an isolated home, resource ownership, enforced
+              quotas, and lifecycle controls.
+            </p>
+          </div>
+          <label className="flex min-w-64 items-center gap-2 rounded-md border border-neutral-300 bg-white px-3 py-2.5 text-neutral-400 dark:border-neutral-700 dark:bg-neutral-950">
+            <Search size={16} />
+            <input
+              className="w-full bg-transparent text-sm text-neutral-900 outline-none dark:text-neutral-100"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search account or domain"
+            />
+          </label>
+        </div>
+        {error && (
+          <div className="mt-5 flex items-center justify-between gap-4 rounded-md border border-rose-200 bg-rose-50 px-3 py-3 text-sm text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-300">
+            <span>{error}</span>
+            <button
+              className="font-semibold underline"
+              onClick={() =>
+                loadAccounts().catch((requestError) =>
+                  setError(requestError.message),
+                )
+              }
+            >
+              Retry
+            </button>
+          </div>
+        )}
+        <div className="mt-5 overflow-x-auto">
+          {loading ? (
+            <div className="space-y-3 py-4">
+              {[1, 2, 3, 4].map((item) => (
+                <div
+                  key={item}
+                  className="h-14 animate-pulse rounded-md bg-neutral-100 dark:bg-neutral-800"
+                />
+              ))}
+            </div>
+          ) : (
+            <table className="w-full min-w-[1050px] border-collapse text-left">
+              <thead>
+                <tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
+                  <th className="px-3 py-3 font-semibold">Account / domain</th>
+                  <th className="px-3 py-3 font-semibold">Login / home</th>
+                  <th className="px-3 py-3 font-semibold">Package</th>
+                  <th className="px-3 py-3 font-semibold">Quota</th>
+                  <th className="px-3 py-3 font-semibold">Status</th>
+                  <th className="px-3 py-3" />
+                </tr>
+              </thead>
+              <tbody>
+                {visible.map((account) => (
+                  <tr
+                    key={account.id}
+                    className="border-b border-neutral-100 dark:border-neutral-800"
+                  >
+                    <td className="px-3 py-4">
+                      <div className="flex items-center gap-3">
+                        <span className="grid h-9 w-9 place-items-center rounded-lg bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                          <Globe2 size={17} />
+                        </span>
+                        <span>
+                          <strong className="block text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                            {account.account_name}
+                          </strong>
+                          <small className="mt-0.5 block text-xs text-neutral-500 dark:text-neutral-400">
+                            {account.primary_domain}
+                          </small>
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-4">
+                      <strong className="block text-sm text-neutral-700 dark:text-neutral-300">
+                        {account.username}
+                      </strong>
+                      <small
+                        className="mt-1 block max-w-xs truncate text-xs text-neutral-500 dark:text-neutral-400"
+                        title={account.home_path}
+                      >
+                        {account.home_path}
+                      </small>
+                    </td>
+                    <td className="px-3 py-4 text-sm capitalize text-neutral-700 dark:text-neutral-300">
+                      {account.package_id}
+                    </td>
+                    <td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">
+                      {formatSize(account.disk_quota_mb)} ·{" "}
+                      {account.websites_quota} site
+                      {account.websites_quota === 1 ? "" : "s"}
+                    </td>
+                    <td className="px-3 py-4">
+                      <span
+                        className={`inline-flex items-center gap-2 text-xs font-semibold ${account.status === "active" ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}
+                      >
+                        <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                        {account.status === "active"
+                          ? "Active"
+                          : account.status === "suspended"
+                            ? "Suspended"
+                            : "Archived"}
+                      </span>
+                    </td>
+                    <td className="px-3 py-4 text-right">
+                      <div className="flex justify-end gap-1">
+                        <button
+                          onClick={() =>
+                            (account.status === "deleted"
+                              ? restoreAccount(account)
+                              : changeStatus(account)
+                            ).catch((requestError) =>
+                              setError(requestError.message),
+                            )
+                          }
+                          className="rounded-md px-2 py-1 text-xs font-semibold text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30"
+                        >
+                          {account.status === "deleted"
+                            ? "Restore"
+                            : account.status === "active"
+                              ? "Suspend"
+                              : "Activate"}
+                        </button>
+                        {account.status !== "deleted" && (
+                          <button
+                            onClick={() =>
+                              removeAccount(account).catch((requestError) =>
+                                setError(requestError.message),
+                              )
+                            }
+                            className="rounded-md p-2 text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                            title="Archive account"
+                          >
+                            <MoreHorizontal size={17} />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {!loading && visible.length === 0 && (
+            <div className="grid place-items-center py-16 text-center">
+              <Server size={30} className="text-neutral-400" />
+              <h4 className="mt-4 text-base font-semibold text-neutral-900 dark:text-neutral-100">
+                No hosting accounts found
+              </h4>
+              <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
+                Create an account to give someone an independent hosting space.
+              </p>
+            </div>
+          )}
+        </div>
+      </section>
+      {modal && (
+        <AccountModal
+          packages={packages}
+          onClose={() => setModal(false)}
+          onCreate={createAccount}
+          saving={saving}
+        />
+      )}
+    </div>
+  );
 }
