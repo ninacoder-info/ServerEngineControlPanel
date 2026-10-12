@@ -36,7 +36,7 @@ export default {
     securityBaselineDescription: "Xem lại xác thực và kiểm soát mạng.",
     review: "Cần xem lại",
     waiting: "Đang chờ",
-    liveFiveMinutes: "Trực tiếp · 5 phút",
+    liveThirtyMinutes: "Trực tiếp · 30 phút",
     collectingSample: "Đang thu thập mẫu…",
     load: "Tải",
     downloadUpload: "tải xuống / tải lên",

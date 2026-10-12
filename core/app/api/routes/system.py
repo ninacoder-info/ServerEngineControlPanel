@@ -23,13 +23,14 @@ from app.version import APP_VERSION
 
 router = APIRouter(prefix="/api/v1", tags=["system"])
 
-_previous_cpu = None
 _previous_network = None
 _previous_metrics_at = None
+_metrics_lock = Lock()
 _history_lock = Lock()
 _collector_stop = Event()
 _collector_thread = None
-_HISTORY_LIMIT = 10080  # one sample per minute for seven days
+_METRICS_INTERVAL_SECONDS = 5
+_HISTORY_LIMIT = (7 * 24 * 60 * 60) // _METRICS_INTERVAL_SECONDS
 HEALTH_THRESHOLD_DEFAULTS = {
     "cpu_warning": 70,
     "memory_warning": 80,
@@ -205,8 +206,9 @@ def _collect_and_publish() -> None:
 
 
 def _collector() -> None:
-    while not _collector_stop.wait(60):
+    while not _collector_stop.is_set():
         _collect_and_publish()
+        _collector_stop.wait(_METRICS_INTERVAL_SECONDS)
 
 
 def start_metrics_collector() -> None:
@@ -244,28 +246,37 @@ def _network_bytes():
 
 
 def _collect_metrics():
-    global _previous_cpu, _previous_network, _previous_metrics_at
+    global _previous_network, _previous_metrics_at
 
-    cpu_start = _cpu_times()
-    network_start = _network_bytes()
-    time.sleep(0.08)
-    cpu_end = _cpu_times()
-    network_end = _network_bytes()
-    now = time.monotonic()
+    with _metrics_lock:
+        cpu_start = _cpu_times()
+        network_start = _network_bytes()
+        time.sleep(0.08)
+        cpu_end = _cpu_times()
+        network_end = _network_bytes()
+        now = time.monotonic()
 
-    total_delta = cpu_end[0] - cpu_start[0]
-    idle_delta = cpu_end[1] - cpu_start[1]
-    cpu_percent = round(max(0, min(100, (1 - idle_delta / total_delta) * 100)) if total_delta else 0, 1)
+        total_delta = cpu_end[0] - cpu_start[0]
+        idle_delta = cpu_end[1] - cpu_start[1]
+        cpu_percent = round(
+            max(0, min(100, (1 - idle_delta / total_delta) * 100))
+            if total_delta
+            else 0,
+            1,
+        )
 
-    if _previous_network and _previous_metrics_at:
-        elapsed = max(now - _previous_metrics_at, 0.001)
-        download_rate = max(0, (network_end[0] - _previous_network[0]) / elapsed)
-        upload_rate = max(0, (network_end[1] - _previous_network[1]) / elapsed)
-    else:
-        download_rate = upload_rate = 0
-    _previous_cpu = cpu_end
-    _previous_network = network_end
-    _previous_metrics_at = now
+        if _previous_network and _previous_metrics_at:
+            elapsed = max(now - _previous_metrics_at, 0.001)
+            download_rate = max(
+                0, (network_end[0] - _previous_network[0]) / elapsed
+            )
+            upload_rate = max(
+                0, (network_end[1] - _previous_network[1]) / elapsed
+            )
+        else:
+            download_rate = upload_rate = 0
+        _previous_network = network_end
+        _previous_metrics_at = now
 
     memory = {}
     with open("/proc/meminfo", encoding="utf-8") as stream:
@@ -299,11 +310,22 @@ def metrics(user=Depends(require_user)):
 
 @router.get("/metrics/history")
 def metrics_history(window: str = "5m", user=Depends(require_user)):
-    windows = {"5m": 5, "1h": 60, "6h": 360, "24h": 1440}
-    minutes = windows.get(window, 5)
+    windows = {
+        "5m": 5 * 60,
+        "30m": 30 * 60,
+        "1h": 60 * 60,
+        "6h": 6 * 60 * 60,
+        "24h": 24 * 60 * 60,
+    }
+    seconds = windows.get(window, windows["5m"])
+    sample_count = max(1, seconds // _METRICS_INTERVAL_SECONDS)
     with _history_lock:
         history = _read_history()
-    return {"window": window, "interval": "60s", "samples": history[-minutes:]}
+    return {
+        "window": window,
+        "interval": f"{_METRICS_INTERVAL_SECONDS}s",
+        "samples": history[-sample_count:],
+    }
 
 
 def _threshold_path() -> Path:

@@ -1073,7 +1073,7 @@ export default function ServerHealthPage() {
             {metrics ? "Live" : "—"}
           </strong>
           <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
-            Server sample stream · 60-second interval
+            Server sample stream · 5-second interval
           </p>
         </div>
       </section>

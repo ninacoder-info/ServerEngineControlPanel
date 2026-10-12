@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI
+from fastapi.middleware.gzip import GZipMiddleware
 from starlette.requests import Request
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -54,6 +55,7 @@ async def lifespan(application: FastAPI):
 
 
 app = FastAPI(title="Server Engine Control Panel API", version=APP_VERSION, lifespan=lifespan)
+app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=6)
 app.include_router(auth.router)
 app.include_router(accounts.router)
 app.include_router(plans.router)

@@ -1,6 +1,7 @@
+import re
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 WebsiteStatus = Literal["ready", "disabled", "error"]
@@ -154,4 +155,13 @@ class WebsiteActionRequest(BaseModel):
 
 class WebsiteDirectoryRequest(BaseModel):
     path: str = Field(min_length=1, max_length=1024)
-    name: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._-]+$")
+    name: str = Field(min_length=1, max_length=128)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        if value in {".", ".."} or "/" in value or "\\" in value:
+            raise ValueError("Folder name contains unsupported characters")
+        if not re.fullmatch(r"[A-Za-z0-9._-]+(?: [A-Za-z0-9._-]+)*", value):
+            raise ValueError("Folder name must use letters, numbers, punctuation, and spaces between characters")
+        return value

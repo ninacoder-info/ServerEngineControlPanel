@@ -41,7 +41,7 @@ export default {
       "Vérifier l’authentification et les contrôles réseau.",
     review: "À vérifier",
     waiting: "En attente",
-    liveFiveMinutes: "En direct · 5 min",
+    liveThirtyMinutes: "En direct · 30 min",
     collectingSample: "Collecte de données…",
     load: "Charge",
     downloadUpload: "téléchargement / envoi",

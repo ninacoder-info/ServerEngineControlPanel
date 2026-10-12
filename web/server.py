@@ -11,6 +11,7 @@ from pathlib import Path
 import httpx
 import websockets
 from starlette.applications import Starlette
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.responses import FileResponse, Response
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket
@@ -51,7 +52,14 @@ async def api_proxy(request):
     response_headers = {
         key: value
         for key, value in upstream.headers.items()
-        if key.lower() not in {"connection", "keep-alive", "transfer-encoding"}
+        if key.lower()
+        not in {
+            "connection",
+            "content-encoding",
+            "content-length",
+            "keep-alive",
+            "transfer-encoding",
+        }
     }
     return Response(
         upstream.content,
@@ -103,10 +111,14 @@ async def frontend(request):
     return FileResponse(WEB_DIST / "index.html")
 
 
-app = Starlette(
-    routes=[
-        WebSocketRoute("/api/{path:path}", websocket_proxy),
-        Route("/api/{path:path}", api_proxy, methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]),
-        Route("/{path:path}", frontend, methods=["GET", "HEAD"]),
-    ]
+app = GZipMiddleware(
+    Starlette(
+        routes=[
+            WebSocketRoute("/api/{path:path}", websocket_proxy),
+            Route("/api/{path:path}", api_proxy, methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]),
+            Route("/{path:path}", frontend, methods=["GET", "HEAD"]),
+        ]
+    ),
+    minimum_size=1000,
+    compresslevel=6,
 )

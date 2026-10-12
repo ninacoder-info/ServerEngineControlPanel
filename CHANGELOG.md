@@ -4,6 +4,17 @@ Release notes for the Server Engine control panel and control-plane runtime.
 
 ## Unreleased
 
+## v0.1.61
+
+- Increased live system metric collection and WebSocket publishing from every
+  60 seconds to every 5 seconds while preserving seven-day history recording.
+- Added one-hour and 30-minute metric history windows with interval-aware
+  sampling and safer CPU/network calculations.
+- Updated Overview resource charts to load a 30-minute history and consume
+  live metrics directly from the shared WebSocket without duplicate requests.
+- Added gzip compression for large API responses, including metric history,
+  in the FastAPI control plane and production Python web proxy.
+
 ## v0.1.60
 
 - Added the full file-manager workspace with SimpleBar scrolling, resizable

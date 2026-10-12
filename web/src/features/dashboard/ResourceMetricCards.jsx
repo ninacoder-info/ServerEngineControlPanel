@@ -22,11 +22,23 @@ function Sparkline({
   fill = "fill-blue-500/10",
 }) {
   const safeValues = values.filter((value) => Number.isFinite(value));
-  const points =
-    safeValues.length > 1
+  const chartValues =
+    safeValues.length <= 60
       ? safeValues
-      : safeValues.length === 1
-        ? [0, safeValues[0]]
+      : Array.from({ length: 60 }, (_, index) => {
+          const start = Math.floor((index * safeValues.length) / 60);
+          const end = Math.max(
+            start + 1,
+            Math.floor(((index + 1) * safeValues.length) / 60),
+          );
+          const bucket = safeValues.slice(start, end);
+          return bucket.reduce((sum, value) => sum + value, 0) / bucket.length;
+        });
+  const points =
+    chartValues.length > 1
+      ? chartValues
+      : chartValues.length === 1
+        ? [0, chartValues[0]]
         : [0, 0];
   const max = Math.max(...points, 1);
   const min = Math.min(...points, 0);
@@ -72,7 +84,7 @@ function Metric({ icon: Icon, label, value, detail, values, color, fill }) {
           {label}
         </div>
         <span className="text-xs font-medium text-neutral-400 dark:text-neutral-500">
-          {t("dashboard.liveFiveMinutes")}
+          {t("dashboard.liveThirtyMinutes")}
         </span>
       </div>
       <div className="mt-5 flex items-end justify-between gap-3">
@@ -105,31 +117,68 @@ export default function ResourceMetricCards() {
   React.useEffect(() => {
     let active = true;
     const load = async () => {
-      const response = await apiRequest("/api/v1/metrics");
-      if (!response.ok || !active) return;
-      const next = await response.json();
+      const [metricsResponse, historyResponse] = await Promise.all([
+        apiRequest("/api/v1/metrics"),
+        apiRequest("/api/v1/metrics/history?window=30m"),
+      ]);
+      if (!metricsResponse.ok || !active) return;
+      const next = await metricsResponse.json();
+      const historyBody = historyResponse.ok
+        ? await historyResponse.json()
+        : null;
+      const samples = Array.isArray(historyBody?.samples)
+        ? historyBody.samples
+        : [];
       setMetrics(next);
       setHistory((previous) => ({
-        cpu: [...previous.cpu, next.cpu.percent].slice(-60),
-        memory: [...previous.memory, next.memory.percent].slice(-60),
-        disk: [...previous.disk, next.disk.percent].slice(-60),
-        network: [
-          ...previous.network,
-          next.network.download + next.network.upload,
-        ].slice(-60),
+        cpu: samples.length
+          ? samples.map((sample) => sample.cpu?.percent).filter(Number.isFinite)
+          : [...previous.cpu, next.cpu.percent],
+        memory: samples.length
+          ? samples
+              .map((sample) => sample.memory?.percent)
+              .filter(Number.isFinite)
+          : [...previous.memory, next.memory.percent],
+        disk: samples.length
+          ? samples
+              .map((sample) => sample.disk?.percent)
+              .filter(Number.isFinite)
+          : [...previous.disk, next.disk.percent],
+        network: samples.length
+          ? samples.map(
+              (sample) =>
+                (sample.network?.download || 0) + (sample.network?.upload || 0),
+            )
+          : [...previous.network, next.network.download + next.network.upload],
       }));
     };
     load();
     // Metrics are loaded once for the initial view. Live updates must come
     // through the shared event bridge instead of a page-owned polling loop.
-    const onMetrics = () => load();
-    const onJobs = () => load();
+    const onMetrics = (event) => {
+      const next = event.detail;
+      if (!next) return;
+      setMetrics(next);
+      setHistory((previous) => ({
+        cpu: [...previous.cpu, next.cpu?.percent]
+          .filter(Number.isFinite)
+          .slice(-360),
+        memory: [...previous.memory, next.memory?.percent]
+          .filter(Number.isFinite)
+          .slice(-360),
+        disk: [...previous.disk, next.disk?.percent]
+          .filter(Number.isFinite)
+          .slice(-360),
+        network: [
+          ...previous.network,
+          (next.network?.download || 0) + (next.network?.upload || 0),
+        ].slice(-360),
+      }));
+    };
     window.addEventListener("serverengine:metrics-updated", onMetrics);
-    window.addEventListener("serverengine:jobs-updated", onJobs);
     return () => {
       active = false;
       window.removeEventListener("serverengine:metrics-updated", onMetrics);
-      window.removeEventListener("serverengine:jobs-updated", onJobs);
     };
   }, []);
 

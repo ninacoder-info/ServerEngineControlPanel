@@ -36,7 +36,7 @@ export default {
     securityBaselineDescription: "Review authentication and network controls.",
     review: "Review",
     waiting: "Waiting",
-    liveFiveMinutes: "Live · 5 min",
+    liveThirtyMinutes: "Live · 30 min",
     collectingSample: "Collecting sample…",
     load: "Load",
     downloadUpload: "download / upload",
