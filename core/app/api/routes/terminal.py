@@ -1,4 +1,5 @@
 import asyncio
+import ipaddress
 import json
 import os
 import pty
@@ -16,6 +17,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.auth import SESSION_COOKIE
 from app.services.job_service import job_store
 from app.services.service_runtime import composer_path, ensure_composer_launcher, ensure_php_terminal_launcher, php_cli_path, prepare_mysql_runtime, service_root
+from app.services.settings_service import settings_service
 
 router = APIRouter(prefix="/api/v1/terminal", tags=["terminal"])
 
@@ -126,9 +128,35 @@ def local_runtime_environment(selected_php_version: str | None = None) -> dict[s
 async def terminal_socket(websocket: WebSocket):
     session = websocket.cookies.get(SESSION_COOKIE)
     user = websocket.app.state.auth_service.current_user(session)
+    authorization = websocket.headers.get("authorization", "")
+    if authorization.lower().startswith("bearer "):
+        api_settings = settings_service.read()
+        if not api_settings.get("api_enabled", True):
+            await websocket.close(code=1008, reason="External API access is disabled")
+            return
+        if api_settings.get("api_auth_mode") == "session":
+            await websocket.close(code=1008, reason="Bearer token access is disabled")
+            return
+        user = websocket.app.state.auth_service.store.user_for_api_token(
+            authorization[7:].strip(), request=websocket
+        )
     if not user:
         await websocket.close(code=1008, reason="Authentication required")
         return
+    allowed = settings_service.read().get("security_authorized_ips", [])
+    if allowed:
+        client_ip = websocket.client.host if websocket.client else ""
+        try:
+            address = ipaddress.ip_address(client_ip)
+            permitted = any(
+                address in ipaddress.ip_network(entry.strip(), strict=False)
+                for entry in allowed
+            )
+        except ValueError:
+            permitted = False
+        if not permitted:
+            await websocket.close(code=1008, reason="Client IP is not authorized")
+            return
     if user.get("role") != "administrator":
         await websocket.close(code=1008, reason="Administrator access required")
         return
@@ -314,7 +342,10 @@ async def terminal_socket(websocket: WebSocket):
         loop.remove_reader(fd)
         output_task.cancel()
         with suppress(ProcessLookupError):
-            os.kill(pid, signal.SIGHUP)
+            # pty.fork() creates a new session for the shell. Signal its full
+            # process group so commands started inside the terminal do not
+            # survive after the WebSocket closes.
+            os.killpg(pid, signal.SIGHUP)
         with suppress(OSError):
             os.close(fd)
         if temporary_key:
