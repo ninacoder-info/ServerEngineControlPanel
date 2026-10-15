@@ -40,6 +40,11 @@ _CONTINENT_COUNTRIES = {
     "MO": "AS", "MG": "AF", "MW": "AF", "MY": "AS", "MV": "AS", "ML": "AF", "MT": "EU", "MH": "OC", "MQ": "NA", "MR": "AF", "MU": "AF", "YT": "AF", "MX": "NA", "FM": "OC", "MD": "EU", "MC": "EU", "MN": "AS", "ME": "EU", "MS": "NA", "MA": "AF", "MZ": "AF", "MM": "AS", "NA": "AF", "NR": "OC", "NP": "AS", "NL": "EU", "NC": "OC", "NZ": "OC", "NI": "NA", "NE": "AF", "NG": "AF", "NU": "OC", "NF": "OC", "MK": "EU", "MP": "OC", "NO": "EU", "OM": "AS", "PK": "AS", "PW": "OC", "PS": "AS", "PA": "NA", "PG": "OC", "PY": "SA", "PE": "SA", "PH": "AS", "PN": "OC", "PL": "EU", "PT": "EU", "PR": "NA", "QA": "AS", "RE": "AF", "RO": "EU", "RU": "EU", "RW": "AF", "BL": "NA", "SH": "AF", "KN": "NA", "LC": "NA", "MF": "NA", "PM": "NA", "VC": "NA", "WS": "OC", "SM": "EU", "ST": "AF", "SA": "AS", "SN": "AF", "RS": "EU", "SC": "AF", "SL": "AF", "SG": "AS", "SX": "NA", "SK": "EU", "SI": "EU", "SB": "OC", "SO": "AF", "ZA": "AF", "GS": "AN", "SS": "AF", "ES": "EU", "LK": "AS", "SD": "AF", "SR": "SA", "SJ": "EU", "SE": "EU", "CH": "EU", "SY": "AS", "TW": "AS", "TJ": "AS", "TZ": "AF", "TH": "AS", "TL": "AS", "TG": "AF", "TK": "OC", "TO": "OC", "TT": "NA", "TN": "AF", "TR": "AS", "TM": "AS", "TC": "NA", "TV": "OC", "UG": "AF", "UA": "EU", "AE": "AS", "GB": "EU", "US": "NA", "UM": "OC", "UY": "SA", "UZ": "AS", "VU": "OC", "VE": "SA", "VN": "AS", "VG": "NA", "VI": "NA", "WF": "OC", "EH": "AF", "YE": "AS", "ZM": "AF", "ZW": "AF"}
 _CONTINENT_NAMES = {"AF": "Africa", "AN": "Antarctica", "AS": "Asia", "EU": "Europe", "NA": "North America", "OC": "Oceania", "SA": "South America"}
 
+_AUDIT_LOG_PATH = Path("/server-engine/logs/application-shield/audit.log")
+_AUDIT_LOG_STORAGE_DIR = Path("/server-engine/logs/application-shield/audit")
+_AUDIT_LOG_FILE_MODE = "0600"
+_AUDIT_LOG_DIR_MODE = "0700"
+
 
 def _continent_for_country(code: str) -> tuple[str, str]:
     continent = _CONTINENT_COUNTRIES.get(str(code or "").upper(), "")
@@ -150,7 +155,7 @@ class ApplicationShieldService:
             values = json.loads(self.rules_path.read_text())
             if not isinstance(values, list):
                 return []
-            audit = Path(self.policy().audit_log_path).read_text(errors="replace") if Path(self.policy().audit_log_path).exists() else ""
+            audit = _AUDIT_LOG_PATH.read_text(errors="replace") if _AUDIT_LOG_PATH.exists() else ""
             result = []
             for item in values:
                 rule = ApplicationShieldRule.model_validate(item)
@@ -331,6 +336,10 @@ class ApplicationShieldService:
             values = current.model_dump()
             values.update(changes.model_dump(exclude_unset=True))
             updated = ApplicationShieldPolicy.model_validate(values)
+            # Validate and render the new audit directives before persisting
+            # the policy, so a malformed regex or mode cannot become the
+            # active saved configuration.
+            self._write_engine_config(updated)
             self.path.parent.mkdir(parents=True, exist_ok=True)
             handle = tempfile.NamedTemporaryFile("w", dir=self.path.parent, prefix=".application-shield.", delete=False)
             try:
@@ -342,7 +351,6 @@ class ApplicationShieldService:
             finally:
                 handle.close()
             os.replace(temporary, self.path)
-            self._write_engine_config(updated)
             active_providers = [provider for provider, _, _ in self.providers if (self.service_root / provider / ".serverengine-application-shield-attached").exists()]
             if updated.enabled and updated.mode != "off":
                 try:
@@ -381,16 +389,31 @@ class ApplicationShieldService:
         root = self.service_root / "modsecurity"
         config_dir = root / "conf"
         config_dir.mkdir(parents=True, exist_ok=True)
-        Path(policy.audit_log_path).parent.mkdir(parents=True, exist_ok=True)
+        audit_storage_dir = _AUDIT_LOG_STORAGE_DIR
+        _AUDIT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        if policy.audit_log_type == "Concurrent":
+            audit_storage_dir.mkdir(parents=True, exist_ok=True)
         engine_config = config_dir / "modsecurity.conf"
         mode = "Off" if not policy.enabled or policy.mode == "off" else ("On" if policy.mode == "blocking" else "DetectionOnly")
-        audit = "RelevantOnly" if policy.enabled and policy.mode != "off" else "Off"
-        audit_path = Path(policy.audit_log_path)
+        audit = "Off" if not policy.enabled or policy.mode == "off" else policy.audit_engine
+        audit_path = _AUDIT_LOG_PATH
         self._ensure_crs_setup(root)
         custom_rules = self._write_custom_rules(root)
         geo_rules = self._write_geo_rules(root)
         crs_setup = root / "crs/crs-setup.conf"
         crs_rules = root / "crs/rules"
+        relevant_status = policy.audit_relevant_status
+        if policy.audit_successful_responses and relevant_status == "^(?:5|403|406|409|429|444|499)":
+            relevant_status = "^(?:2|3|5|403|406|409|429|444|499)"
+        if "\n" in relevant_status or "\r" in relevant_status or '"' in relevant_status:
+            raise ValueError("Audit relevant-status must be a single regex without quotes or newlines")
+        try:
+            re.compile(relevant_status)
+        except re.error as exc:
+            raise ValueError(f"Invalid audit relevant-status regex: {exc}") from exc
+        audit_parts = "".join(dict.fromkeys(policy.audit_log_parts.upper()))
+        if "A" not in audit_parts or any(part not in "ABCDEFGHIJKZ" for part in audit_parts):
+            raise ValueError("Audit log parts must contain A and only use documented part letters")
         crs_lines = []
         if policy.crs_enabled and crs_setup.is_file():
             crs_lines.append(f"Include {crs_setup}")
@@ -407,26 +430,32 @@ class ApplicationShieldService:
             f"SecRuleEngine {mode}",
             f"SecRequestBodyLimit {policy.request_body_limit}",
             f"SecAuditEngine {audit}",
-            # Keep the traffic audit useful on busy public sites. Detection
-            # rules may match harmless allowed requests (for example a GET
-            # carrying Content-Type: text/html); retain only transactions
-            # that are blocked by the WAF or return a server error. Do not
-            # retain ordinary 404 scans as audit transactions.
-            'SecAuditLogRelevantStatus "^(?:403|406|409|429|444|499|5)"',
-            # Bodies are not needed for traffic reports and can contain
-            # credentials, personal data, or large application responses.
-            # Keep request metadata, response status/headers, rule messages,
-            # and the transaction terminator only.
-            "SecAuditLogParts ABFHZ",
+            # RelevantOnly uses the operator-provided status expression;
+            # DetectionOnly and blocking mode do not change that audit choice.
+            f'SecAuditLogRelevantStatus "{relevant_status}"',
+            f"SecAuditLogParts {audit_parts}",
+            f"SecAuditLogType {policy.audit_log_type}",
+            f"SecAuditLogFormat {policy.audit_log_format}",
             f"SecAuditLog {audit_path}",
+            *([f"SecAuditLogStorageDir {audit_storage_dir}"] if policy.audit_log_type == "Concurrent" else []),
+            *([f"SecAuditLogFileMode {_AUDIT_LOG_FILE_MODE}"] if policy.audit_log_type == "Concurrent" else []),
+            *([f"SecAuditLogDirMode {_AUDIT_LOG_DIR_MODE}"] if policy.audit_log_type == "Concurrent" else []),
             # IncludeOptional is Apache-only syntax. This file is consumed
             # by Nginx's ModSecurity rules parser, so use native ModSecurity
             # Include directives and only reference files that exist.
+            *([
+                # GET and HEAD requests do not carry an application request
+                # body; CRS 920420 otherwise treats a normal text/html
+                # content type as a protocol violation.
+                'SecRule REQUEST_METHOD "@rx ^(?:GET|HEAD)$" "id:1999997,phase:1,pass,nolog,ctl:ruleRemoveById=920420"',
+            ] if policy.audit_ignore_get_content_type else []),
             *crs_lines,
-            # CRS can explicitly request audit logging for a rule that only
-            # detects a harmless request. Remove that request at the end of
-            # the transaction unless the response was blocked or failed.
-            'SecRule RESPONSE_STATUS "!@rx ^(?:403|406|409|429|444|499|5\\d\\d)$" "id:1999998,phase:5,pass,noauditlog,nolog"',
+            *([
+                # CRS can explicitly request audit logging for a rule that
+                # only detects a harmless request. Keep routine successful
+                # responses out of the audit log by default.
+                'SecRule RESPONSE_STATUS "@rx ^(?:2|3)\\d\\d$" "id:1999998,phase:5,pass,nolog,ctl:auditEngine=Off"',
+            ] if audit == "RelevantOnly" and not policy.audit_successful_responses else []),
             "",
         ])
         temporary = engine_config.with_suffix(".tmp")
@@ -662,7 +691,7 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
         }
 
     def _sync_audit_events(self) -> None:
-        path = Path(self.policy().audit_log_path)
+        path = _AUDIT_LOG_PATH
         if not path.exists() or not path.is_file():
             return
         try:
@@ -712,6 +741,35 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
                    ON CONFLICT(path) DO UPDATE SET inode = excluded.inode, offset = excluded.offset, updated_at = excluded.updated_at""",
                 (str(path), int(stat.st_ino), offset + consumed, datetime.now(timezone.utc).isoformat()),
             )
+
+    def clear_traffic_index(self) -> None:
+        """Remove indexed traffic and derived aggregates after its raw log is cleared."""
+        with self._lock:
+            with self._events_connection() as db:
+                db.execute("DELETE FROM audit_events")
+                db.execute("DELETE FROM report_cache")
+                db.execute("DELETE FROM hourly_security_rollups")
+                db.execute("DELETE FROM daily_security_rollups")
+                db.execute("DELETE FROM audit_log_state")
+            with self._events_connection() as db:
+                db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                db.execute("VACUUM")
+            self._traffic_cache_signature = None
+            self._traffic_cache_events = []
+            self._activity_cache_expires = 0.0
+            self._activity_cache_signature = None
+            self._activity_cache = None
+
+    def is_traffic_log(self, path: Path) -> bool:
+        """Return whether a log path is the Application Shield audit log."""
+        candidates = {
+            _AUDIT_LOG_PATH.resolve(),
+            (self.service_root / "modsecurity/logs/audit.log").resolve(),
+        }
+        try:
+            return path.resolve() in candidates
+        except OSError:
+            return path in candidates
 
     @staticmethod
     def _event_public(row: sqlite3.Row) -> dict:
@@ -857,7 +915,7 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
 
     def logs(self, lines: int = 120) -> dict:
         candidates = [
-            Path(self.policy().audit_log_path),
+            _AUDIT_LOG_PATH,
             self.service_root / "modsecurity/logs/audit.log",
         ]
         for path in candidates:
@@ -890,7 +948,7 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
             page_size = limit
         page = max(1, page)
         page_size = max(1, min(page_size, 100))
-        path = Path(self.policy().audit_log_path)
+        path = _AUDIT_LOG_PATH
         if not path.exists():
             return {"events": [], "summary": {"requests_inspected": 0, "blocked": 0, "unique_sources": 0}, "pagination": {"page": page, "page_size": page_size, "total": 0, "has_next": False, "has_previous": page > 1}}
         try:
@@ -1007,7 +1065,7 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
     def activity(self, hours: int = 24) -> dict:
         """Return cached hourly protection activity from real audit transactions."""
         hours = max(1, min(hours, 168))
-        path = Path(self.policy().audit_log_path)
+        path = _AUDIT_LOG_PATH
         now = int(time.time())
         start = now - hours * 3600
         signature = None
@@ -1052,7 +1110,7 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
                 access_logs.append(website_service.log_root / site.server_type / "sites" / f"{website_service._configuration_id(site)}.access.log")
         access_logs.append(nginx_paths()["access_log"]) if "nginx" in attached else None
         requests_observed = sum(self._line_count(path) for path in access_logs)
-        audit_path = Path(policy.audit_log_path)
+        audit_path = _AUDIT_LOG_PATH
         audit_text = audit_path.read_text(errors="replace") if audit_path.exists() else ""
         statuses = [int(value) for value in re.findall(r"HTTP/[0-9.]+\s+(\d{3})", audit_text)]
         requests_blocked = sum(1 for status in statuses if status in {403, 406, 409, 429, 444, 499})

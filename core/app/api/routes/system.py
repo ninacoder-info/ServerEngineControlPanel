@@ -231,6 +231,44 @@ def _cpu_times():
     return sum(numbers), numbers[3] + (numbers[4] if len(numbers) > 4 else 0)
 
 
+def _cpu_breakdown() -> tuple[int, int, int, int]:
+    with open("/proc/stat", encoding="utf-8") as stream:
+        values = [int(value) for value in stream.readline().split()[1:]]
+    user = values[0] + (values[1] if len(values) > 1 else 0)
+    system = values[2] if len(values) > 2 else 0
+    total = sum(values)
+    idle = max(total - user - system, 0)
+    return total, user, system, idle
+
+
+def _top_processes(limit: int = 8) -> list[dict]:
+    processes = []
+    try:
+        result = subprocess.run(
+            ["ps", "-eo", "pid=,comm=,pcpu=,pmem=", "--sort=-pcpu"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        for line in result.stdout.splitlines()[:limit]:
+            columns = line.split(None, 3)
+            if len(columns) != 4:
+                continue
+            try:
+                processes.append({
+                    "pid": int(columns[0]),
+                    "name": columns[1],
+                    "cpu": round(float(columns[2]), 1),
+                    "memory": round(float(columns[3]), 1),
+                })
+            except ValueError:
+                continue
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return processes
+
+
 def _network_bytes():
     received = sent = 0
     with open("/proc/net/dev", encoding="utf-8") as stream:
@@ -249,15 +287,17 @@ def _collect_metrics():
     global _previous_network, _previous_metrics_at
 
     with _metrics_lock:
-        cpu_start = _cpu_times()
+        cpu_start = _cpu_breakdown()
         network_start = _network_bytes()
         time.sleep(0.08)
-        cpu_end = _cpu_times()
+        cpu_end = _cpu_breakdown()
         network_end = _network_bytes()
         now = time.monotonic()
 
         total_delta = cpu_end[0] - cpu_start[0]
-        idle_delta = cpu_end[1] - cpu_start[1]
+        user_delta = cpu_end[1] - cpu_start[1]
+        system_delta = cpu_end[2] - cpu_start[2]
+        idle_delta = cpu_end[3] - cpu_start[3]
         cpu_percent = round(
             max(0, min(100, (1 - idle_delta / total_delta) * 100))
             if total_delta
@@ -294,7 +334,17 @@ def _collect_metrics():
 
     return {
         "timestamp": datetime.now(timezone.utc),
-        "cpu": {"percent": cpu_percent, "load": round(os.getloadavg()[0], 2), "load1": round(os.getloadavg()[0], 2), "load5": round(os.getloadavg()[1], 2), "load15": round(os.getloadavg()[2], 2)},
+        "cpu": {
+            "percent": cpu_percent,
+            "user": round(user_delta / total_delta * 100, 1) if total_delta else 0,
+            "system": round(system_delta / total_delta * 100, 1) if total_delta else 0,
+            "idle": round(idle_delta / total_delta * 100, 1) if total_delta else 100,
+            "load": round(os.getloadavg()[0], 2),
+            "load1": round(os.getloadavg()[0], 2),
+            "load5": round(os.getloadavg()[1], 2),
+            "load15": round(os.getloadavg()[2], 2),
+        },
+        "processes": _top_processes(),
         "memory": {"used": used_memory, "total": total_memory, "percent": round(used_memory / total_memory * 100, 1) if total_memory else 0},
         "disk": {"used": used_disk, "total": total_disk, "percent": round(used_disk / total_disk * 100, 1) if total_disk else 0},
         "network": {"download": round(download_rate), "upload": round(upload_rate)},
@@ -325,6 +375,246 @@ def metrics_history(window: str = "5m", user=Depends(require_user)):
         "window": window,
         "interval": f"{_METRICS_INTERVAL_SECONDS}s",
         "samples": history[-sample_count:],
+    }
+
+
+@router.get("/system/cpu-details")
+def cpu_details(user=Depends(require_user)):
+    """Return one CPU/process snapshot for the on-demand CPU inspector."""
+    try:
+        total_start, user_start, system_start, idle_start = _cpu_breakdown()
+        time.sleep(0.08)
+        total_end, user_end, system_end, idle_end = _cpu_breakdown()
+        total_delta = max(total_end - total_start, 1)
+        cpu = {
+            "percent": round(max(0, min(100, (1 - (idle_end - idle_start) / total_delta) * 100)), 1),
+            "user": round((user_end - user_start) / total_delta * 100, 1),
+            "system": round((system_end - system_start) / total_delta * 100, 1),
+            "idle": round((idle_end - idle_start) / total_delta * 100, 1),
+            "load": [round(value, 2) for value in os.getloadavg()],
+        }
+    except (OSError, ValueError, IndexError, ZeroDivisionError):
+        cpu = {"percent": 0, "user": 0, "system": 0, "idle": 100, "load": [0, 0, 0]}
+
+    memory = {}
+    try:
+        for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+            key, separator, value = line.partition(":")
+            if separator:
+                memory[key] = int(value.strip().split()[0]) * 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    total_memory = memory.get("MemTotal", 0)
+    available_memory = memory.get("MemAvailable", memory.get("MemFree", 0))
+    try:
+        uptime_seconds = max(0, int(float(Path("/proc/uptime").read_text().split()[0])))
+    except (OSError, ValueError, IndexError):
+        uptime_seconds = 0
+    return {
+        "cpu": cpu,
+        "processes": _top_processes(),
+        "processor": {"cores": os.cpu_count() or 1},
+        "memory": {
+            "used": max(total_memory - available_memory, 0),
+            "total": total_memory,
+            "percent": round((total_memory - available_memory) / total_memory * 100, 1) if total_memory else 0,
+        },
+        "uptime_seconds": uptime_seconds,
+    }
+
+
+@router.get("/system/memory-details")
+def memory_details(user=Depends(require_user)):
+    """Return one memory/process snapshot for the on-demand memory inspector."""
+    memory = {}
+    try:
+        for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+            key, separator, value = line.partition(":")
+            if separator:
+                memory[key] = int(value.strip().split()[0]) * 1024
+    except (OSError, ValueError, IndexError):
+        pass
+
+    total = memory.get("MemTotal", 0)
+    available = memory.get("MemAvailable", memory.get("MemFree", 0))
+    free = max(available, 0)
+    used = max(total - free, 0)
+    swap_total = memory.get("SwapTotal", 0)
+    swap_free = memory.get("SwapFree", 0)
+    swap_used = max(swap_total - swap_free, 0)
+    categories = {
+        "wired": memory.get("SReclaimable", 0) + memory.get("SUnreclaim", 0),
+        "active": memory.get("Active", 0),
+        "compressed": memory.get("SwapCached", 0),
+        "free": free,
+    }
+
+    processes = []
+    try:
+        result = subprocess.run(
+            ["ps", "-eo", "pid=,comm=,pmem=,rss=", "--sort=-rss"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        for line in result.stdout.splitlines()[:8]:
+            columns = line.split(None, 3)
+            if len(columns) != 4:
+                continue
+            try:
+                processes.append({
+                    "pid": int(columns[0]),
+                    "name": columns[1],
+                    "percent": round(float(columns[2]), 1),
+                    "bytes": int(columns[3]) * 1024,
+                })
+            except ValueError:
+                continue
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+    pressure = 0
+    try:
+        pressure_line = next(
+            line for line in Path("/proc/pressure/memory").read_text(encoding="utf-8").splitlines()
+            if line.startswith("some ")
+        )
+        pressure_value = re.search(r"avg10=([0-9.]+)", pressure_line)
+        pressure = round(float(pressure_value.group(1)), 1) if pressure_value else 0
+    except (OSError, ValueError, AttributeError, StopIteration):
+        pass
+
+    paging = {}
+    try:
+        for line in Path("/proc/vmstat").read_text(encoding="utf-8").splitlines():
+            key, value = line.split()[:2]
+            if key in {"pgpgin", "pgpgout", "pswpin", "pswpout"}:
+                paging[key] = int(value)
+    except (OSError, ValueError, IndexError):
+        pass
+
+    return {
+        "memory": {
+            "total": total,
+            "used": used,
+            "free": free,
+            "percent": round(used / total * 100, 1) if total else 0,
+            "categories": categories,
+        },
+        "pressure": pressure,
+        "processes": processes,
+        "swap": {
+            "total": swap_total,
+            "used": swap_used,
+            "free": swap_free,
+            "percent": round(swap_used / swap_total * 100, 1) if swap_total else 0,
+        },
+        "paging": paging,
+    }
+
+
+@router.get("/system/network-details")
+def network_details(user=Depends(require_user)):
+    """Return interface information for the on-demand network inspector."""
+    addresses = {}
+    try:
+        result = subprocess.run(
+            ["ip", "-o", "-4", "addr", "show"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        for line in result.stdout.splitlines():
+            columns = line.split()
+            if len(columns) >= 4:
+                addresses[columns[1]] = columns[3].split("/", 1)[0]
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+    interfaces = []
+    net_path = Path("/sys/class/net")
+    try:
+        for interface_path in sorted(net_path.iterdir()):
+            name = interface_path.name
+            if name == "lo":
+                continue
+            try:
+                state = (interface_path / "operstate").read_text(encoding="utf-8").strip()
+            except OSError:
+                state = "unknown"
+            interfaces.append({
+                "name": name,
+                "state": state,
+                "connected": state == "up",
+                "address": addresses.get(name, ""),
+            })
+    except OSError:
+        pass
+
+    public_ip = ""
+    try:
+        request = urllib.request.Request("https://api.ipify.org", headers={"User-Agent": "ServerEngine"})
+        with urllib.request.urlopen(request, timeout=2) as response:
+            public_ip = response.read().decode("utf-8").strip()
+    except (OSError, urllib.error.URLError, TimeoutError, UnicodeDecodeError):
+        pass
+
+    return {"public_ip": public_ip, "interfaces": interfaces}
+
+
+def _process_io_snapshot() -> dict[int, dict]:
+    snapshot = {}
+    for process_path in Path("/proc").iterdir():
+        if not process_path.name.isdigit():
+            continue
+        try:
+            values = {}
+            for line in (process_path / "io").read_text(encoding="utf-8").splitlines():
+                key, value = line.split(":", 1)
+                if key in {"read_bytes", "write_bytes"}:
+                    values[key] = int(value.strip())
+            name = (process_path / "comm").read_text(encoding="utf-8").strip()
+            snapshot[int(process_path.name)] = {
+                "name": name,
+                "read": values.get("read_bytes", 0),
+                "write": values.get("write_bytes", 0),
+            }
+        except (OSError, ValueError, IndexError):
+            continue
+    return snapshot
+
+
+@router.get("/system/disk-details")
+def disk_details(user=Depends(require_user)):
+    """Return filesystem and on-demand process disk I/O details."""
+    disk = shutil.disk_usage("/")
+    before = _process_io_snapshot()
+    time.sleep(0.1)
+    after = _process_io_snapshot()
+    processes = []
+    total_read = total_write = 0
+    for pid, current in after.items():
+        previous = before.get(pid, current)
+        read = max(current["read"] - previous["read"], 0) * 10
+        write = max(current["write"] - previous["write"], 0) * 10
+        total_read += read
+        total_write += write
+        if read or write:
+            processes.append({"pid": pid, "name": current["name"], "read": read, "write": write})
+    processes.sort(key=lambda item: item["read"] + item["write"], reverse=True)
+    return {
+        "disks": [{
+            "name": "Root filesystem",
+            "path": "/",
+            "total": disk.total,
+            "used": disk.total - disk.free,
+            "free": disk.free,
+            "percent": round((disk.total - disk.free) / disk.total * 100, 1) if disk.total else 0,
+        }],
+        "io": {"read": total_read, "write": total_write},
+        "processes": processes[:8],
     }
 
 

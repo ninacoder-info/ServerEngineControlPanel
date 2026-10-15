@@ -4,6 +4,45 @@ Release notes for the Server Engine control panel and control-plane runtime.
 
 ## Unreleased
 
+## v0.1.65
+
+- Updated the open CPU inspector’s top-process list from the shared live
+  metrics WebSocket instead of leaving the initial process snapshot frozen.
+- Improved network and disk throughput formatting so decimal values are shown
+  only for rates below 10 KB/s or MB/s.
+
+## v0.1.64
+
+- Added on-demand CPU, memory, network, and disk inspectors to the global
+  status bar with live metrics, top-process details, filesystem information,
+  interface state, and disk I/O snapshots.
+- Made resource inspectors mutually exclusive so only one popover can be open
+  at a time, and limited detailed snapshots to the active inspector.
+- Added network rate formatting that switches to KB/s and MB/s at readable
+  thresholds.
+- Updated inspector colors and typography to match the existing web UI instead
+  of copying the reference image styling.
+
+## v0.1.63
+
+- Added automatic Application Shield audit-index cleanup when application logs
+  are cleared.
+- Fixed recursive log rotation for nested Nginx site log directories.
+- Added live connector attach/detach feedback and state updates in the
+  Application Shield configuration modal.
+- Added configurable ModSecurity audit engine, status filtering, transaction
+  parts, output type, format, and critical-only lightweight defaults.
+- Suppressed noisy successful-response audit entries and normal GET/HEAD HTML
+  content-type false positives by default.
+
+## v0.1.62
+
+- Allowed website project folders to contain ordinary spaces, including names
+  such as `Untitled Folder` and `My Website 2`.
+- Continued rejecting path separators and unsafe directory names such as `.`,
+  `..`, `/`, and `\\` while preserving existing length and path-safety checks.
+- Added focused backend tests for valid spaced names and rejected unsafe names.
+
 ## v0.1.61
 
 - Increased live system metric collection and WebSocket publishing from every

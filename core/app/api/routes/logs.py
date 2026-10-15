@@ -4,6 +4,7 @@ from pathlib import Path
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
 from app.api.dependencies import require_user
+from app.services.application_shield_service import application_shield_service
 from app.services.job_service import job_store
 from app.services.website_service import website_service
 
@@ -105,6 +106,7 @@ def clean(payload: dict = Body(default={}), user=Depends(require_user)):
                 failed.append(f"{path}: {exc}")
     if failed:
         raise HTTPException(status_code=500, detail=f"Cleared {cleared} log files, but could not clear {len(failed)} files")
+    application_shield_service.clear_traffic_index()
     job_store.publish({"type": "logs-updated", "action": "cleaned", "summary": _summary_payload()})
     return {"cleared": cleared, "size": _size(root)}
 
@@ -156,6 +158,8 @@ def clear_source(source_id: str, user=Depends(require_user)):
         path.write_bytes(b"")
     except OSError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+    if application_shield_service.is_traffic_log(path):
+        application_shield_service.clear_traffic_index()
     job_store.publish({"type": "logs-updated", "action": "cleared", "id": source_id, "summary": _summary_payload()})
     return {"id": source_id, "cleared": True, "size": 0}
 

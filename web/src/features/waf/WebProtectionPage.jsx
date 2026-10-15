@@ -6,6 +6,7 @@ import {
   BarChart3,
   CheckCircle2,
   ChevronDown,
+  FileText,
   Globe2,
   ListFilter,
   Map,
@@ -44,6 +45,20 @@ const tabs = [
 ];
 const input =
   "mt-1.5 block min-h-10 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100";
+const auditLogParts = [
+  ["A", "Audit header", "Required transaction metadata"],
+  ["B", "Request headers", "Request line and headers"],
+  ["C", "Request body", "May contain credentials or personal data"],
+  ["D", "Intermediary headers", "Reserved by ModSecurity"],
+  ["E", "Intermediary body", "Can be very large; requires response-body inspection"],
+  ["F", "Final response", "Response headers and body metadata"],
+  ["G", "Response body", "Not implemented by the current engine"],
+  ["H", "Rule messages", "Matched rule details"],
+  ["I", "Multipart body", "Reduced multipart request body"],
+  ["J", "Multipart files", "Multipart file information"],
+  ["K", "Matched rules", "Detailed matched-rule data"],
+  ["Z", "Audit footer", "Transaction terminator"],
+];
 let currentProtectionActivity = null;
 function statusClass(status) {
   if (status === "attached") return "text-emerald-600 dark:text-emerald-400";
@@ -1343,7 +1358,7 @@ function LegacyApplicationShieldConfigModalV2({ overview, onClose, onSaved }) {
   };
 
   const savePolicy = async (event) => {
-    event.preventDefault();
+    event?.preventDefault();
     setBusy(true);
     const response = await apiRequest("/api/v1/application-shield/policy", {
       method: "PATCH",
@@ -1401,6 +1416,7 @@ function LegacyApplicationShieldConfigModalV2({ overview, onClose, onSaved }) {
           {[
             ["connectors", "Connectors", Server],
             ["policy", "Policy", Settings2],
+            ["audit", "Audit log", FileText],
             ["install", "Reinstall", RefreshCw],
             ["logs", "Logs", Activity],
           ].map(([key, label, Icon]) => (
@@ -1534,6 +1550,196 @@ function LegacyApplicationShieldConfigModalV2({ overview, onClose, onSaved }) {
               </div>
             </form>
           )}
+          {tab === "audit" && (
+            <div className="space-y-5">
+              <div>
+                <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
+                  ModSecurity audit log
+                </h3>
+                <p className="mt-1 text-sm leading-6 text-neutral-500 dark:text-neutral-400">
+                  These controls map directly to SecAuditEngine,
+                  SecAuditLogRelevantStatus, SecAuditLogParts, and the audit
+                  output directives. Native serial logging keeps the traffic
+                  index available in this panel.
+                </p>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                  Audit engine
+                  <select
+                    className={input}
+                    value={policy.audit_engine || "RelevantOnly"}
+                    onChange={(event) =>
+                      setPolicy({ ...policy, audit_engine: event.target.value })
+                    }
+                  >
+                    <option value="Off">Off — no audit transactions</option>
+                    <option value="RelevantOnly">
+                      RelevantOnly — warnings, errors, matching statuses
+                    </option>
+                    <option value="On">On — every transaction</option>
+                  </select>
+                </label>
+                <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                  Audit log type
+                  <select
+                    className={input}
+                    value={policy.audit_log_type || "Serial"}
+                    onChange={(event) =>
+                      setPolicy({ ...policy, audit_log_type: event.target.value })
+                    }
+                  >
+                    <option value="Serial">Serial — one audit file</option>
+                    <option value="Concurrent">
+                      Concurrent — one file per transaction
+                    </option>
+                  </select>
+                </label>
+                <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                  Audit format
+                  <select
+                    className={input}
+                    value={policy.audit_log_format || "Native"}
+                    onChange={(event) =>
+                      setPolicy({ ...policy, audit_log_format: event.target.value })
+                    }
+                  >
+                    <option value="Native">Native — panel index compatible</option>
+                    <option value="JSON">JSON — requires YAJL support</option>
+                  </select>
+                </label>
+                <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                  Relevant status regex
+                  <input
+                    className={input}
+                    value={policy.audit_relevant_status || ""}
+                    onChange={(event) =>
+                      setPolicy({
+                        ...policy,
+                        audit_relevant_status: event.target.value,
+                      })
+                    }
+                    spellCheck="false"
+                    autoComplete="off"
+                  />
+                </label>
+              </div>
+              <div>
+                <h4 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                  Transaction parts
+                </h4>
+                <p className="mt-1 text-xs leading-5 text-neutral-500 dark:text-neutral-400">
+                  A is mandatory. Request/response bodies can expose sensitive
+                  data and substantially increase disk and CPU use.
+                </p>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  {auditLogParts.map(([part, label, description]) => {
+                    const selected = (policy.audit_log_parts || "ABFHZ").includes(
+                      part,
+                    );
+                    return (
+                      <label
+                        key={part}
+                        className="flex items-start gap-3 rounded-md border border-neutral-200 px-3 py-2.5 dark:border-neutral-800"
+                      >
+                        <input
+                          type="checkbox"
+                          className="mt-1 h-4 w-4 accent-blue-600"
+                          checked={selected}
+                          disabled={part === "A"}
+                          onChange={(event) => {
+                            const current = new Set(
+                              policy.audit_log_parts || "ABFHZ",
+                            );
+                            if (event.target.checked) current.add(part);
+                            else current.delete(part);
+                            setPolicy({
+                              ...policy,
+                              audit_log_parts: auditLogParts
+                                .map(([key]) => key)
+                                .filter((key) => current.has(key))
+                                .join(""),
+                            });
+                          }}
+                        />
+                        <span>
+                          <span className="block text-sm font-medium text-neutral-800 dark:text-neutral-200">
+                            {part} — {label}
+                          </span>
+                          <span className="block text-xs text-neutral-500 dark:text-neutral-400">
+                            {description}
+                          </span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="divide-y divide-neutral-200 border-y border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
+                <label className="flex cursor-pointer items-start justify-between gap-4 py-4">
+                  <span>
+                    <span className="block text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                      Keep rule matches on successful responses
+                    </span>
+                    <span className="mt-1 block text-xs leading-5 text-neutral-500 dark:text-neutral-400">
+                      ModSecurity rules can explicitly request auditing and
+                      bypass the status regex. Leave this off to suppress
+                      routine 2xx/3xx rule matches.
+                    </span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    className="mt-1 h-4 w-4 shrink-0 accent-blue-600"
+                    checked={policy.audit_successful_responses === true}
+                    onChange={(event) =>
+                      setPolicy({
+                        ...policy,
+                        audit_successful_responses: event.target.checked,
+                      })
+                    }
+                  />
+                </label>
+                <label className="flex cursor-pointer items-start justify-between gap-4 py-4">
+                  <span>
+                    <span className="block text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                      Ignore HTML content type on GET/HEAD
+                    </span>
+                    <span className="mt-1 block text-xs leading-5 text-neutral-500 dark:text-neutral-400">
+                      Prevent CRS 920420 from treating normal browser page
+                      requests as a protocol violation.
+                    </span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    className="mt-1 h-4 w-4 shrink-0 accent-blue-600"
+                    checked={policy.audit_ignore_get_content_type !== false}
+                    onChange={(event) =>
+                      setPolicy({
+                        ...policy,
+                        audit_ignore_get_content_type: event.target.checked,
+                      })
+                    }
+                  />
+                </label>
+              </div>
+              <div className="rounded-md bg-neutral-50 px-4 py-3 text-xs leading-5 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
+                Generated directives are written to the managed ModSecurity
+                JSON output may not be indexable by the panel’s native traffic
+                parser.
+              </div>
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => savePolicy(null)}
+                  className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                >
+                  <FileText size={15} />
+                  {busy ? "Saving…" : "Save audit settings"}
+                </button>
+              </div>
+            </div>
+          )}
           {tab === "install" && (
             <div className="space-y-5">
               <div>
@@ -1634,6 +1840,12 @@ function ApplicationShieldConfigModal({
   const [policy, setPolicy] = React.useState(initialOverview.policy);
   const [logs, setLogs] = React.useState(null);
   const [connectorJob, setConnectorJob] = React.useState(null);
+  const [pendingConnectorAction, setPendingConnectorAction] =
+    React.useState(null);
+
+  React.useEffect(() => {
+    setOverview(initialOverview);
+  }, [initialOverview]);
   React.useEffect(() => {
     const cells = document.querySelectorAll(
       "section.w-full.max-w-3xl tbody tr td:nth-child(2)",
@@ -1701,6 +1913,63 @@ function ApplicationShieldConfigModal({
     };
   }, [connectorJob, onSaved, refreshConnectorJob]);
 
+  React.useEffect(() => {
+    if (!pendingConnectorAction) return undefined;
+    let active = true;
+
+    const finishAction = async (job) => {
+      if (
+        !active ||
+        !job ||
+        job.id !== pendingConnectorAction.jobId ||
+        !["succeeded", "failed", "cancelled"].includes(job.status)
+      ) {
+        return;
+      }
+      const response = await apiRequest(
+        "/api/v1/application-shield/overview",
+      );
+      if (active && response.ok) {
+        const updated = await response.json();
+        setOverview(updated);
+        onSaved(updated);
+      }
+      if (!active) return;
+      setPendingConnectorAction(null);
+      setConnectorJob(null);
+      setBusy(false);
+      setToast({
+        type: job.status === "succeeded" ? "success" : "error",
+        message:
+          job.status === "succeeded"
+            ? `${pendingConnectorAction.connectorName} connector ${pendingConnectorAction.action}ed.`
+            : job.message ||
+              `${pendingConnectorAction.connectorName} connector ${pendingConnectorAction.action} failed.`,
+      });
+      window.dispatchEvent(new CustomEvent("serverengine:shield-updated"));
+    };
+
+    const onJobsUpdated = async (event) => {
+      const eventJob = event.detail?.job;
+      if (eventJob?.id === pendingConnectorAction.jobId) {
+        await finishAction(eventJob);
+        return;
+      }
+      const response = await apiRequest("/api/v1/jobs");
+      if (!active || !response.ok) return;
+      const jobs = await response.json();
+      await finishAction(
+        jobs.find((job) => job.id === pendingConnectorAction.jobId),
+      );
+    };
+
+    window.addEventListener("serverengine:jobs-updated", onJobsUpdated);
+    return () => {
+      active = false;
+      window.removeEventListener("serverengine:jobs-updated", onJobsUpdated);
+    };
+  }, [onSaved, pendingConnectorAction]);
+
   const connectorAction = async (connector) => {
     const action = connector.attached ? "detach" : "attach";
     setBusy(true);
@@ -1729,10 +1998,17 @@ function ApplicationShieldConfigModal({
             : `${connector.name} connector ${action}ed.`,
       });
       if (updated.status === "queued") {
+        setPendingConnectorAction({
+          jobId: updated.job_id,
+          action,
+          connectorName: connector.name,
+        });
         await refreshConnectorJob();
         window.dispatchEvent(new CustomEvent("serverengine:jobs-updated"));
+        setBusy(false);
         return;
       }
+      setPendingConnectorAction(null);
       window.dispatchEvent(new CustomEvent("serverengine:shield-updated"));
     }
     setBusy(false);
@@ -1765,7 +2041,7 @@ function ApplicationShieldConfigModal({
   };
 
   const savePolicy = async (event) => {
-    event.preventDefault();
+    event?.preventDefault();
     setBusy(true);
     const response = await apiRequest("/api/v1/application-shield/policy", {
       method: "PATCH",
@@ -1830,6 +2106,7 @@ function ApplicationShieldConfigModal({
           {[
             ["connectors", "Connectors", Server],
             ["policy", "Policy", Settings2],
+            ["audit", "Audit log", FileText],
             ["install", "Reinstall", RefreshCw],
             ["logs", "Logs", Activity],
           ].map(([key, label, Icon]) => (
@@ -1982,6 +2259,196 @@ function ApplicationShieldConfigModal({
                 </button>
               </div>
             </form>
+          )}
+          {tab === "audit" && (
+            <div className="space-y-5">
+              <div>
+                <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
+                  ModSecurity audit log
+                </h3>
+                <p className="mt-1 text-sm leading-6 text-neutral-500 dark:text-neutral-400">
+                  These controls map directly to SecAuditEngine,
+                  SecAuditLogRelevantStatus, SecAuditLogParts, and the audit
+                  output directives. Native serial logging keeps the traffic
+                  index available in this panel.
+                </p>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                  Audit engine
+                  <select
+                    className={input}
+                    value={policy.audit_engine || "RelevantOnly"}
+                    onChange={(event) =>
+                      setPolicy({ ...policy, audit_engine: event.target.value })
+                    }
+                  >
+                    <option value="Off">Off — no audit transactions</option>
+                    <option value="RelevantOnly">
+                      RelevantOnly — warnings, errors, matching statuses
+                    </option>
+                    <option value="On">On — every transaction</option>
+                  </select>
+                </label>
+                <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                  Audit log type
+                  <select
+                    className={input}
+                    value={policy.audit_log_type || "Serial"}
+                    onChange={(event) =>
+                      setPolicy({ ...policy, audit_log_type: event.target.value })
+                    }
+                  >
+                    <option value="Serial">Serial — one audit file</option>
+                    <option value="Concurrent">
+                      Concurrent — one file per transaction
+                    </option>
+                  </select>
+                </label>
+                <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                  Audit format
+                  <select
+                    className={input}
+                    value={policy.audit_log_format || "Native"}
+                    onChange={(event) =>
+                      setPolicy({ ...policy, audit_log_format: event.target.value })
+                    }
+                  >
+                    <option value="Native">Native — panel index compatible</option>
+                    <option value="JSON">JSON — requires YAJL support</option>
+                  </select>
+                </label>
+                <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                  Relevant status regex
+                  <input
+                    className={input}
+                    value={policy.audit_relevant_status || ""}
+                    onChange={(event) =>
+                      setPolicy({
+                        ...policy,
+                        audit_relevant_status: event.target.value,
+                      })
+                    }
+                    spellCheck="false"
+                    autoComplete="off"
+                  />
+                </label>
+              </div>
+              <div>
+                <h4 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                  Transaction parts
+                </h4>
+                <p className="mt-1 text-xs leading-5 text-neutral-500 dark:text-neutral-400">
+                  A is mandatory. Request/response bodies can expose sensitive
+                  data and substantially increase disk and CPU use.
+                </p>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  {auditLogParts.map(([part, label, description]) => {
+                    const selected = (policy.audit_log_parts || "ABFHZ").includes(
+                      part,
+                    );
+                    return (
+                      <label
+                        key={part}
+                        className="flex items-start gap-3 rounded-md border border-neutral-200 px-3 py-2.5 dark:border-neutral-800"
+                      >
+                        <input
+                          type="checkbox"
+                          className="mt-1 h-4 w-4 accent-blue-600"
+                          checked={selected}
+                          disabled={part === "A"}
+                          onChange={(event) => {
+                            const current = new Set(
+                              policy.audit_log_parts || "ABFHZ",
+                            );
+                            if (event.target.checked) current.add(part);
+                            else current.delete(part);
+                            setPolicy({
+                              ...policy,
+                              audit_log_parts: auditLogParts
+                                .map(([key]) => key)
+                                .filter((key) => current.has(key))
+                                .join(""),
+                            });
+                          }}
+                        />
+                        <span>
+                          <span className="block text-sm font-medium text-neutral-800 dark:text-neutral-200">
+                            {part} — {label}
+                          </span>
+                          <span className="block text-xs text-neutral-500 dark:text-neutral-400">
+                            {description}
+                          </span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="divide-y divide-neutral-200 border-y border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
+                <label className="flex cursor-pointer items-start justify-between gap-4 py-4">
+                  <span>
+                    <span className="block text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                      Keep rule matches on successful responses
+                    </span>
+                    <span className="mt-1 block text-xs leading-5 text-neutral-500 dark:text-neutral-400">
+                      ModSecurity rules can explicitly request auditing and
+                      bypass the status regex. Leave this off to suppress
+                      routine 2xx/3xx rule matches.
+                    </span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    className="mt-1 h-4 w-4 shrink-0 accent-blue-600"
+                    checked={policy.audit_successful_responses === true}
+                    onChange={(event) =>
+                      setPolicy({
+                        ...policy,
+                        audit_successful_responses: event.target.checked,
+                      })
+                    }
+                  />
+                </label>
+                <label className="flex cursor-pointer items-start justify-between gap-4 py-4">
+                  <span>
+                    <span className="block text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                      Ignore HTML content type on GET/HEAD
+                    </span>
+                    <span className="mt-1 block text-xs leading-5 text-neutral-500 dark:text-neutral-400">
+                      Prevent CRS rule 920420 from treating normal browser
+                      page requests as a protocol violation.
+                    </span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    className="mt-1 h-4 w-4 shrink-0 accent-blue-600"
+                    checked={policy.audit_ignore_get_content_type !== false}
+                    onChange={(event) =>
+                      setPolicy({
+                        ...policy,
+                        audit_ignore_get_content_type: event.target.checked,
+                      })
+                    }
+                  />
+                </label>
+              </div>
+              <div className="rounded-md bg-neutral-50 px-4 py-3 text-xs leading-5 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
+                Generated directives are written to the managed ModSecurity
+                JSON output may not be indexable by the panel’s native traffic
+                parser.
+              </div>
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => savePolicy(null)}
+                  className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                >
+                  <FileText size={15} />
+                  {busy ? "Saving…" : "Save audit settings"}
+                </button>
+              </div>
+            </div>
           )}
           {tab === "install" && (
             <div className="space-y-5">

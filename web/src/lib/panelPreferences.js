@@ -61,9 +61,10 @@ export function panelTimeZone() {
 export function formatPanelDate(value, options = {}) {
   const settings = readPanelPreferences();
   const format = settings.panel_date_format || "local";
+  const { relative, ...dateOptions } = options;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
-  if (format === "relative") {
+  if (relative ?? format === "relative") {
     const seconds = Math.round((date.getTime() - Date.now()) / 1000);
     const absolute = Math.abs(seconds);
     if (absolute < 60) return "just now";
@@ -77,6 +78,6 @@ export function formatPanelDate(value, options = {}) {
     dateStyle: format === "iso" ? "short" : "medium",
     timeStyle: "short",
     timeZone: settings.timezone || undefined,
-    ...options,
+    ...dateOptions,
   }).format(date);
 }

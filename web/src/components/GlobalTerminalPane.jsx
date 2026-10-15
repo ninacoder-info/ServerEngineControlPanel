@@ -302,7 +302,9 @@ export default function GlobalTerminalPane({
           </span>
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-hidden">
+      <div
+        className={`min-h-0 flex-1 ${panel === "logs" ? "overflow-visible" : "overflow-hidden"}`}
+      >
         {panel === "logs" ? (
           <RawLogsPanel category={logCategory} toolbarHostRef={logToolbarRef} />
         ) : (

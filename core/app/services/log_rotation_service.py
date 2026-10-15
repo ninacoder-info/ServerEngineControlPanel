@@ -180,10 +180,16 @@ class LogRotationService:
         count = 0
         max_bytes = int(policy["max_size_mb"]) * 1024 * 1024
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-        for path in directory.glob("*.log"):
+        # Website-specific Nginx logs live below nginx/sites/, while most
+        # service logs remain directly under their service log directory.
+        # Walk recursively so every managed log receives the same size and
+        # retention protection.
+        for path in directory.rglob("*.log"):
             try:
                 size = path.stat().st_size
             except OSError:
+                continue
+            if not path.is_file():
                 continue
             scheduled = force or self._scheduled_due_for(settings, policy["schedule"])
             if size == 0 or (size < max_bytes and not scheduled):
@@ -202,12 +208,17 @@ class LogRotationService:
                 count += 1
             except OSError:
                 archive.unlink(missing_ok=True)
-        archives = sorted(
-            [item for item in directory.iterdir() if item.is_file() and ".log." in item.name],
-            key=lambda item: item.stat().st_mtime,
-            reverse=True,
-        )
-        for old in archives[int(policy["retention_count"]):]:
+        archives = []
+        for item in directory.rglob("*"):
+            if not item.is_file() or ".log." not in item.name:
+                continue
+            try:
+                modified = item.stat().st_mtime
+            except OSError:
+                continue
+            archives.append((modified, item))
+        archives.sort(key=lambda entry: entry[0], reverse=True)
+        for _, old in archives[int(policy["retention_count"]):]:
             old.unlink(missing_ok=True)
         return count
 

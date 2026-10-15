@@ -1,16 +1,19 @@
 import React from "react";
 import { createPortal } from "react-dom";
 import {
+  ArrowDownUp,
   Check,
   Clipboard,
   Download,
   Eraser,
   FileText,
   RefreshCw,
+  Search,
   Trash2,
   WrapText,
 } from "lucide-react";
 import { apiRequest } from "../lib/api";
+import { formatPanelDate } from "../lib/panelPreferences";
 import ActionDialog from "./ActionDialog";
 
 export const logCategories = [
@@ -39,10 +42,12 @@ function formatBytes(value) {
 
 function formatModified(value) {
   if (!value) return "Never";
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value * 1000));
+  return formatPanelDate(value * 1000, { relative: false });
+}
+
+function formatModifiedRelative(value) {
+  if (!value) return "Never";
+  return formatPanelDate(value * 1000, { relative: true });
 }
 
 export default function RawLogsPanel({
@@ -58,9 +63,12 @@ export default function RawLogsPanel({
   const [tailing, setTailing] = React.useState(false);
   const [lineLimit, setLineLimit] = React.useState(100);
   const [wrap, setWrap] = React.useState(true);
+  const [latestFirst, setLatestFirst] = React.useState(true);
   const [copied, setCopied] = React.useState(false);
   const [confirmDialog, setConfirmDialog] = React.useState(null);
   const [toolbarReady, setToolbarReady] = React.useState(false);
+  const [sourceQuery, setSourceQuery] = React.useState("");
+  const [sourceSort, setSourceSort] = React.useState("name-asc");
 
   React.useLayoutEffect(() => {
     setToolbarReady(Boolean(toolbarHostRef?.current));
@@ -136,6 +144,10 @@ export default function RawLogsPanel({
     };
   }, [loadSources, selected]);
 
+  const displayedContent = latestFirst
+    ? content.split("\n").reverse().join("\n")
+    : content;
+
   const clearSource = async (event, item) => {
     event.stopPropagation();
     setConfirmDialog({
@@ -192,14 +204,16 @@ export default function RawLogsPanel({
 
   const copyContent = async () => {
     if (!content) return;
-    await navigator.clipboard?.writeText(content);
+    await navigator.clipboard?.writeText(displayedContent);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1200);
   };
 
   const downloadContent = () => {
     if (!selectedItem) return;
-    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+    const blob = new Blob([displayedContent], {
+      type: "text/plain;charset=utf-8",
+    });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
@@ -282,12 +296,28 @@ export default function RawLogsPanel({
     </span>
   );
 
-  const visibleSources = sources.filter(
-    (item) => category === "All" || item.category === category,
-  );
-  const orderedSources = [...visibleSources].sort((left, right) =>
-    (left.label || left.name).localeCompare(right.label || right.name),
-  );
+  const visibleSources = sources.filter((item) => {
+    const label = item.label || item.name;
+    const matchesCategory = category === "All" || item.category === category;
+    const matchesQuery = label
+      .toLowerCase()
+      .includes(sourceQuery.trim().toLowerCase());
+    return matchesCategory && matchesQuery;
+  });
+  const orderedSources = [...visibleSources].sort((left, right) => {
+    const leftName = (left.label || left.name).toLowerCase();
+    const rightName = (right.label || right.name).toLowerCase();
+    if (sourceSort === "name-desc") return rightName.localeCompare(leftName);
+    if (sourceSort === "size-desc") return (right.size || 0) - (left.size || 0);
+    if (sourceSort === "size-asc") return (left.size || 0) - (right.size || 0);
+    if (sourceSort === "modified-desc") {
+      return (right.modified || 0) - (left.modified || 0);
+    }
+    if (sourceSort === "modified-asc") {
+      return (left.modified || 0) - (right.modified || 0);
+    }
+    return leftName.localeCompare(rightName);
+  });
   const selectedItem = sources.find((item) => item.id === selected);
   const toolbar = (
     <div className="flex items-center gap-0.5">
@@ -306,6 +336,12 @@ export default function RawLogsPanel({
       )}
       {toolButton("Download log", Download, downloadContent)}
       {toolButton(
+        latestFirst ? "Show oldest lines first" : "Show latest lines first",
+        ArrowDownUp,
+        () => setLatestFirst((value) => !value),
+        latestFirst,
+      )}
+      {toolButton(
         "Wrap lines",
         WrapText,
         () => setWrap((value) => !value),
@@ -318,16 +354,36 @@ export default function RawLogsPanel({
       {toolbarReady &&
         toolbarHostRef?.current &&
         createPortal(toolbar, toolbarHostRef.current)}
-      <div className="grid min-h-0 h-full grid-cols-[13rem_minmax(0,1fr)]">
+      <div className="grid min-h-0 h-full grid-cols-[280px_minmax(0,1fr)]">
         <div className="min-h-0 overflow-y-auto border-r border-neutral-200 dark:border-neutral-800">
-          <div className="flex items-center justify-between pl-2">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
-              Log files
-            </span>
+          <div className="flex items-center gap-1.5 border-b border-neutral-200 px-2 py-2 dark:border-neutral-800">
+            <label className="flex min-w-0 flex-1 items-center rounded border border-neutral-200 px-2 dark:border-neutral-700">
+              <Search size={12} className="shrink-0 text-neutral-400" />
+              <input
+                aria-label="Filter log files by name"
+                value={sourceQuery}
+                onChange={(event) => setSourceQuery(event.target.value)}
+                placeholder="Filter by name"
+                className="min-w-0 w-full bg-transparent px-1.5 py-1 text-[10px] text-neutral-700 outline-none dark:text-neutral-300"
+              />
+            </label>
+            <select
+              aria-label="Sort log files"
+              value={sourceSort}
+              onChange={(event) => setSourceSort(event.target.value)}
+              className="h-7 max-w-[98px] cursor-pointer rounded border border-neutral-200 bg-transparent px-1 text-[10px] text-neutral-600 outline-none dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300"
+            >
+              <option value="name-asc">Name A–Z</option>
+              <option value="name-desc">Name Z–A</option>
+              <option value="size-desc">Largest first</option>
+              <option value="size-asc">Smallest first</option>
+              <option value="modified-desc">Newest first</option>
+              <option value="modified-asc">Oldest first</option>
+            </select>
             <button
               type="button"
               title="Refresh logs"
-              className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
+              className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
               onClick={loadSources}
             >
               <RefreshCw size={13} />
@@ -350,7 +406,12 @@ export default function RawLogsPanel({
                   onClick={() => setSelected(item.id)}
                 >
                   <FileText size={13} className="shrink-0" />
-                  <span className="truncate">{item.label || item.name}</span>
+                  <span className="min-w-0 flex-1 truncate">
+                    {item.label || item.name}
+                  </span>
+                  <span className="shrink-0 text-[10px] font-normal text-neutral-400 dark:text-neutral-500">
+                    {formatBytes(item.size || 0)}
+                  </span>
                 </button>
                 <span className="absolute right-1 flex items-center gap-0.5 rounded bg-white/75 px-0.5 backdrop-blur-sm opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 dark:bg-neutral-900/75">
                   {toolButton(
@@ -388,21 +449,37 @@ export default function RawLogsPanel({
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-3 text-right text-[10px] text-neutral-500 dark:text-neutral-400">
+                <span
+                  className="css-tooltip relative inline-flex cursor-help flex-col items-end"
+                  data-tooltip={
+                    latestFirst
+                      ? "Log output is currently ordered newest to oldest."
+                      : "Log output is currently ordered oldest to newest."
+                  }
+                >
+                  <strong className="block font-semibold text-neutral-700 dark:text-neutral-300">
+                    {latestFirst ? "Latest first" : "Oldest first"}
+                  </strong>
+                  Order
+                </span>
                 <span>
                   <strong className="block font-semibold text-neutral-700 dark:text-neutral-300">
                     {formatBytes(selectedItem?.size || 0)}
                   </strong>
                   Size
                 </span>
-                <span>
+                <span
+                  className="css-tooltip relative inline-flex cursor-help flex-col items-end"
+                  data-tooltip={formatModified(selectedItem?.modified)}
+                >
                   <strong className="block font-semibold text-neutral-700 dark:text-neutral-300">
-                    {formatModified(selectedItem?.modified)}
+                    {formatModifiedRelative(selectedItem?.modified)}
                   </strong>
                   Last modified
                 </span>
                 <span>
                   <strong className="block font-semibold text-neutral-700 dark:text-neutral-300">
-                    {content ? content.split("\n").length : 0}
+                    {displayedContent ? displayedContent.split("\n").length : 0}
                   </strong>
                   Lines shown
                 </span>
@@ -418,7 +495,7 @@ export default function RawLogsPanel({
               <pre
                 className={`${wrap ? "whitespace-pre-wrap break-words" : "whitespace-pre"} font-mono text-[11px] leading-5 text-neutral-800 dark:text-neutral-300`}
               >
-                {content || "No log entries recorded."}
+                {displayedContent || "No log entries recorded."}
               </pre>
             )}
           </div>

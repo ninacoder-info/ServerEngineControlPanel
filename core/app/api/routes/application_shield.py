@@ -29,7 +29,7 @@ def update_policy(payload: ApplicationShieldPolicyUpdate, user=Depends(require_u
             "policy": updated.model_dump(mode="json"),
         })
         return updated
-    except RuntimeError as error:
+    except (RuntimeError, ValueError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 
