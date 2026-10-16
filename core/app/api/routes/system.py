@@ -351,6 +351,54 @@ def _collect_metrics():
     }
 
 
+def _temperature_sensors() -> list[dict]:
+    """Read temperatures exposed by Linux hwmon and thermal-zone devices."""
+    sensors = []
+    seen = set()
+    hwmon_root = Path("/sys/class/hwmon")
+    for device in sorted(hwmon_root.glob("hwmon*")):
+        try:
+            name = (device / "name").read_text(encoding="utf-8").strip()
+        except OSError:
+            name = device.name
+        for input_path in sorted(device.glob("temp*_input")):
+            try:
+                millidegrees = int(input_path.read_text(encoding="utf-8").strip())
+                temperature = round(millidegrees / 1000, 1)
+            except (OSError, ValueError):
+                continue
+            index = input_path.name.removesuffix("_input")
+            label_path = device / f"{index}_label"
+            try:
+                label = label_path.read_text(encoding="utf-8").strip()
+            except OSError:
+                label = index.replace("_", " ").title()
+            display_name = f"{name} {label}".strip()
+            key = display_name.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            sensors.append({"name": display_name, "temperature": temperature, "source": "hwmon"})
+
+    thermal_root = Path("/sys/class/thermal")
+    for zone in sorted(thermal_root.glob("thermal_zone*")):
+        try:
+            millidegrees = int((zone / "temp").read_text(encoding="utf-8").strip())
+            temperature = round(millidegrees / 1000, 1)
+        except (OSError, ValueError):
+            continue
+        try:
+            label = (zone / "type").read_text(encoding="utf-8").strip()
+        except OSError:
+            label = zone.name
+        key = label.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        sensors.append({"name": label, "temperature": temperature, "source": "thermal-zone"})
+    return sensors
+
+
 @router.get("/metrics")
 def metrics(user=Depends(require_user)):
     sample = _collect_metrics()
@@ -421,6 +469,12 @@ def cpu_details(user=Depends(require_user)):
         },
         "uptime_seconds": uptime_seconds,
     }
+
+
+@router.get("/system/temperature-sensors")
+def temperature_sensors(user=Depends(require_user)):
+    sensors = _temperature_sensors()
+    return {"available": bool(sensors), "sensors": sensors}
 
 
 @router.get("/system/memory-details")

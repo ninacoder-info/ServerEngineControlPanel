@@ -113,7 +113,20 @@ function MemorySegmentBar({ memory }) {
   );
 }
 
-function MemoryPopover({ metrics, details, onClose }) {
+function PopoverSkeleton() {
+  return (
+    <div className="space-y-3 p-3" aria-label="Loading details">
+      <div className="h-28 animate-pulse rounded-md bg-neutral-200 dark:bg-neutral-800" />
+      <div className="space-y-2">
+        <div className="h-3 w-3/4 animate-pulse rounded bg-neutral-200 dark:bg-neutral-800" />
+        <div className="h-3 w-full animate-pulse rounded bg-neutral-200 dark:bg-neutral-800" />
+        <div className="h-3 w-5/6 animate-pulse rounded bg-neutral-200 dark:bg-neutral-800" />
+      </div>
+    </div>
+  );
+}
+
+function MemoryPopover({ metrics, details, loading, onClose }) {
   const memory = details?.memory || metrics?.memory;
   const processes = Array.isArray(details?.processes) ? details.processes : [];
   const pressure = Number(details?.pressure) || 0;
@@ -132,7 +145,7 @@ function MemoryPopover({ metrics, details, onClose }) {
           <X size={14} />
         </button>
       </div>
-      <div className="divide-y divide-neutral-200 dark:divide-neutral-800">
+      {loading ? <PopoverSkeleton /> : <div className="divide-y divide-neutral-200 dark:divide-neutral-800">
         <section className="space-y-2 p-3">
           <div className="flex items-center justify-between text-xs">
             <span className="font-medium">Memory pressure</span>
@@ -192,6 +205,54 @@ function MemoryPopover({ metrics, details, onClose }) {
             <span>Page outs total</span><strong className="text-right text-neutral-700 dark:text-neutral-200">{formatDetailBytes((paging.pgpgout || 0) * 1024)}</strong>
           </div>
         </section>
+      </div>}
+    </div>
+  );
+}
+
+function TemperatureSensorsPopover({ sensors, loading, onClose }) {
+  return (
+    <div className="absolute bottom-full right-0 z-50 mb-2 w-[340px] max-w-[calc(100vw-1rem)] overflow-hidden rounded-lg border border-neutral-300 bg-white text-left text-neutral-700 shadow-2xl dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200">
+      <div className="relative flex items-center justify-center border-b border-neutral-200 px-3 py-2 dark:border-neutral-800">
+        <strong className="text-sm font-semibold text-neutral-800 dark:text-neutral-100">
+          Temperature sensors
+        </strong>
+        <button
+          type="button"
+          aria-label="Close temperature sensors"
+          className="absolute right-2 inline-flex h-6 w-6 items-center justify-center rounded text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+          onClick={onClose}
+        >
+          <X size={14} />
+        </button>
+      </div>
+      <div className="space-y-2 p-3">
+        {loading ? (
+          <PopoverSkeleton />
+        ) : sensors.length ? (
+          sensors.map((sensor) => {
+            const temperature = Number(sensor.temperature);
+            const fill = Math.max(8, Math.min(100, ((temperature - 20) / 80) * 100));
+            const tone = temperature >= 80 ? "bg-rose-400" : temperature >= 65 ? "bg-amber-400" : "bg-sky-400";
+            return (
+              <div key={`${sensor.source}-${sensor.name}`} className="flex items-center gap-2 text-xs">
+                <span className="min-w-0 flex-1 truncate text-neutral-500 dark:text-neutral-400">
+                  {sensor.name}
+                </span>
+                <strong className="w-12 text-right tabular-nums text-neutral-700 dark:text-neutral-200">
+                  {Number.isFinite(temperature) ? `${temperature.toFixed(1)}°` : "—"}
+                </strong>
+                <span className="h-3 w-24 overflow-hidden rounded bg-neutral-200 dark:bg-neutral-700">
+                  <span className={`block h-full ${tone}`} style={{ width: `${fill}%` }} />
+                </span>
+              </div>
+            );
+          })
+        ) : (
+          <p className="text-center text-xs text-neutral-500">
+            No temperature sensors are exposed by this host.
+          </p>
+        )}
       </div>
     </div>
   );
@@ -216,7 +277,7 @@ function NetworkHistoryChart({ download, upload }) {
   );
 }
 
-function NetworkPopover({ metrics, details, download, upload, onClose }) {
+function NetworkPopover({ metrics, details, download, upload, loading, onClose }) {
   const network = metrics?.network || {};
   const connected = details?.interfaces?.filter((item) => item.connected) || [];
   const disconnected = details?.interfaces?.filter((item) => !item.connected) || [];
@@ -230,7 +291,7 @@ function NetworkPopover({ metrics, details, download, upload, onClose }) {
           <X size={14} />
         </button>
       </div>
-      <div className="divide-y divide-neutral-200 dark:divide-neutral-800">
+      {loading ? <PopoverSkeleton /> : <div className="divide-y divide-neutral-200 dark:divide-neutral-800">
         <section className="space-y-2 p-3">
           <div className="flex items-center justify-between text-sm">
             <span className="text-neutral-500 dark:text-neutral-400">Public IP</span>
@@ -262,12 +323,12 @@ function NetworkPopover({ metrics, details, download, upload, onClose }) {
             {disconnected.length ? disconnected.map((item) => <div key={item.name}>{item.name}</div>) : <p>No disconnected interfaces</p>}
           </div>
         </section>
-      </div>
+      </div>}
     </div>
   );
 }
 
-function DiskPopover({ details, onClose }) {
+function DiskPopover({ details, loading, onClose }) {
   const disk = details?.disks?.[0];
   const processes = Array.isArray(details?.processes) ? details.processes : [];
   return (
@@ -278,7 +339,7 @@ function DiskPopover({ details, onClose }) {
           <X size={14} />
         </button>
       </div>
-      <div className="divide-y divide-neutral-200 dark:divide-neutral-800">
+      {loading ? <PopoverSkeleton /> : <div className="divide-y divide-neutral-200 dark:divide-neutral-800">
         <section className="space-y-2 p-3">
           <div className="flex items-center justify-between text-sm">
             <span className="font-medium">{disk?.name || "Root filesystem"}</span>
@@ -306,21 +367,22 @@ function DiskPopover({ details, onClose }) {
             )) : <p className="text-xs text-neutral-500">No disk activity detected</p>}
           </div>
         </section>
-      </div>
+      </div>}
     </div>
   );
 }
 
-function CpuPopover({ metrics, details, history, onClose }) {
+function CpuPopover({ metrics, details, history, loading, onClose }) {
   const cpu = metrics?.cpu;
   const detailCpu = details?.cpu || {};
   const memory = details?.memory || metrics?.memory;
   const processes = Array.isArray(details?.processes) ? details.processes : [];
-  const load = Array.isArray(detailCpu.load)
-    ? detailCpu.load
-    : [cpu?.load1, cpu?.load5, cpu?.load15].filter(Number.isFinite);
-  const peakLoad = Math.max(...load.map((value) => Number(value) || 0), 0);
   const processorPercent = detailCpu.percent ?? cpu?.percent ?? 0;
+  const peakLoad = Math.max(
+    ...history.map((value) => Number(value) || 0),
+    Number(processorPercent) || 0,
+    0,
+  );
   return (
     <div className="absolute bottom-full right-0 z-50 mb-2 w-[340px] max-w-[calc(100vw-1rem)] overflow-hidden rounded-lg border border-neutral-300 bg-white text-left text-neutral-700 shadow-2xl dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200">
       <div className="flex items-center justify-center border-b border-neutral-200 px-3 py-2 dark:border-neutral-800">
@@ -334,7 +396,7 @@ function CpuPopover({ metrics, details, history, onClose }) {
           <X size={14} />
         </button>
       </div>
-      <div className="divide-y divide-neutral-200 dark:divide-neutral-800">
+      {loading ? <PopoverSkeleton /> : <div className="divide-y divide-neutral-200 dark:divide-neutral-800">
         <section className="p-3">
           <CpuHistoryChart values={history} />
           <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
@@ -351,6 +413,18 @@ function CpuPopover({ metrics, details, history, onClose }) {
                 </strong>
               </div>
             ))}
+          </div>
+          <div className="mt-2 flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
+            <span>Peak Load</span>
+            <strong className="tabular-nums text-neutral-700 dark:text-neutral-200">
+              {peakLoad.toFixed(1)}%
+            </strong>
+          </div>
+          <div className="mt-1 flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
+            <span>Uptime</span>
+            <strong className="font-normal text-neutral-700 dark:text-neutral-200">
+              {formatDuration(details?.uptime_seconds)}
+            </strong>
           </div>
         </section>
 
@@ -380,24 +454,13 @@ function CpuPopover({ metrics, details, history, onClose }) {
               <DetailBar value={processorPercent} tone="bg-sky-400" />
               <strong className="w-12 text-right tabular-nums">{Number(processorPercent).toFixed(1)}%</strong>
             </div>
-            <p className="text-right text-[10px] text-neutral-500">{details?.processor?.cores || "—"} logical cores · {formatDetailBytes(memory?.used)} used</p>
+            <p className="text-right text-xs text-neutral-500 dark:text-neutral-400">
+              {details?.processor?.cores || "—"} logical cores · {formatDetailBytes(memory?.used)} used
+            </p>
           </div>
         </section>
 
-        <section className="px-3 py-2.5">
-          <h3 className="mb-2 text-xs font-semibold text-neutral-700 dark:text-neutral-200">Load average</h3>
-          <CpuHistoryChart values={history} />
-          <div className="mt-1 flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
-            <span>Peak Load: {peakLoad.toFixed(2)}</span>
-            <span className="tabular-nums">{load.map((value) => Number(value || 0).toFixed(2)).join(" · ")}</span>
-          </div>
-        </section>
-
-        <section className="px-3 py-2.5">
-          <h3 className="mb-1 text-xs font-semibold text-neutral-700 dark:text-neutral-200">Uptime</h3>
-          <p className="text-center text-sm text-neutral-500 dark:text-neutral-400">{formatDuration(details?.uptime_seconds)}</p>
-        </section>
-      </div>
+      </div>}
     </div>
   );
 }
@@ -421,13 +484,20 @@ export default function GlobalJobStatusBar({
   const [cpuPopoverMetrics, setCpuPopoverMetrics] = React.useState(null);
   const [cpuPopoverDetails, setCpuPopoverDetails] = React.useState(null);
   const [cpuPopoverHistory, setCpuPopoverHistory] = React.useState([]);
+  const [cpuPopoverLoading, setCpuPopoverLoading] = React.useState(false);
   const [memoryPopoverOpen, setMemoryPopoverOpen] = React.useState(false);
   const [memoryPopoverDetails, setMemoryPopoverDetails] = React.useState(null);
+  const [memoryPopoverLoading, setMemoryPopoverLoading] = React.useState(false);
   const [networkPopoverOpen, setNetworkPopoverOpen] = React.useState(false);
   const [networkPopoverDetails, setNetworkPopoverDetails] = React.useState(null);
+  const [networkPopoverLoading, setNetworkPopoverLoading] = React.useState(false);
   const [networkHistory, setNetworkHistory] = React.useState({ download: [], upload: [] });
   const [diskPopoverOpen, setDiskPopoverOpen] = React.useState(false);
   const [diskPopoverDetails, setDiskPopoverDetails] = React.useState(null);
+  const [diskPopoverLoading, setDiskPopoverLoading] = React.useState(false);
+  const [temperaturePopoverOpen, setTemperaturePopoverOpen] = React.useState(false);
+  const [temperatureSensors, setTemperatureSensors] = React.useState([]);
+  const [temperatureSensorsLoading, setTemperatureSensorsLoading] = React.useState(false);
   const [metricHistory, setMetricHistory] = React.useState({
     cpu: [],
     memory: [],
@@ -457,12 +527,14 @@ export default function GlobalJobStatusBar({
       return undefined;
     }
     let alive = true;
+    setCpuPopoverLoading(true);
     setCpuPopoverMetrics(metrics);
     setCpuPopoverHistory(metricHistory.cpu);
     apiRequest("/api/v1/system/cpu-details")
       .then((response) => (response.ok ? response.json() : null))
       .then((value) => {
         if (alive && value) setCpuPopoverDetails(value);
+        if (alive) setCpuPopoverLoading(false);
       })
       .catch(() => {});
     apiRequest("/api/v1/metrics/history?window=30m")
@@ -512,10 +584,12 @@ export default function GlobalJobStatusBar({
       return undefined;
     }
     let alive = true;
+    setMemoryPopoverLoading(true);
     apiRequest("/api/v1/system/memory-details")
       .then((response) => (response.ok ? response.json() : null))
       .then((value) => {
         if (alive && value) setMemoryPopoverDetails(value);
+        if (alive) setMemoryPopoverLoading(false);
       })
       .catch(() => {});
     const onMetrics = (event) => {
@@ -540,10 +614,12 @@ export default function GlobalJobStatusBar({
       return undefined;
     }
     let alive = true;
+    setNetworkPopoverLoading(true);
     apiRequest("/api/v1/system/network-details")
       .then((response) => (response.ok ? response.json() : null))
       .then((value) => {
         if (alive && value) setNetworkPopoverDetails(value);
+        if (alive) setNetworkPopoverLoading(false);
       })
       .catch(() => {});
     return () => {
@@ -557,16 +633,35 @@ export default function GlobalJobStatusBar({
       return undefined;
     }
     let alive = true;
+    setDiskPopoverLoading(true);
     apiRequest("/api/v1/system/disk-details")
       .then((response) => (response.ok ? response.json() : null))
       .then((value) => {
         if (alive && value) setDiskPopoverDetails(value);
+        if (alive) setDiskPopoverLoading(false);
       })
       .catch(() => {});
     return () => {
       alive = false;
     };
   }, [diskPopoverOpen]);
+
+  React.useEffect(() => {
+    let alive = true;
+    setTemperatureSensorsLoading(true);
+    apiRequest("/api/v1/system/temperature-sensors")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((value) => {
+        if (alive && value) setTemperatureSensors(value.sensors || []);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (alive) setTemperatureSensorsLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   React.useEffect(() => {
     let alive = true;
@@ -781,6 +876,17 @@ export default function GlobalJobStatusBar({
       : logSize >= logWarningBytes
         ? "Large"
         : "Healthy";
+  const maxTemperature = temperatureSensors.length
+    ? Math.max(
+        ...temperatureSensors.map(
+          (sensor) => Number(sensor.temperature) || 0,
+        ),
+      )
+    : 0;
+  const primaryTemperature = temperatureSensors.find((sensor) =>
+    /cpu|package|core|soc/i.test(sensor.name),
+  );
+  const displayedTemperature = primaryTemperature || temperatureSensors[0];
   const formatBytes = (bytes) => {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -795,6 +901,7 @@ export default function GlobalJobStatusBar({
     values,
     tone,
     chart = false,
+    compactValue = false,
     onClick,
   }) => {
     const current = Math.max(
@@ -815,7 +922,11 @@ export default function GlobalJobStatusBar({
               <span key={`${label}-${index}`}>{letter}</span>
             ))}
           </span>
-          {chart ? (
+          {compactValue ? (
+            <span className="text-[10px] font-semibold tabular-nums">
+              {value ?? "—"}
+            </span>
+          ) : chart ? (
             <span className="flex h-5 w-12 items-end gap-px border border-white/35 bg-black/10 px-0.5 pb-0.5">
               {(values.length ? values : [0]).map((sample, index) => (
                 <span
@@ -965,6 +1076,7 @@ export default function GlobalJobStatusBar({
                 metrics={cpuPopoverMetrics || metrics}
                 details={cpuPopoverDetails}
                 history={cpuPopoverHistory.length ? cpuPopoverHistory : metricHistory.cpu}
+                loading={cpuPopoverLoading}
                 onClose={() => setCpuPopoverOpen(false)}
               />
             )}
@@ -972,6 +1084,7 @@ export default function GlobalJobStatusBar({
               <MemoryPopover
                 metrics={metrics}
                 details={memoryPopoverDetails}
+                loading={memoryPopoverLoading}
                 onClose={() => setMemoryPopoverOpen(false)}
               />
             )}
@@ -981,13 +1094,22 @@ export default function GlobalJobStatusBar({
                 details={networkPopoverDetails}
                 download={networkHistory.download}
                 upload={networkHistory.upload}
+                loading={networkPopoverLoading}
                 onClose={() => setNetworkPopoverOpen(false)}
               />
             )}
             {diskPopoverOpen && (
               <DiskPopover
                 details={diskPopoverDetails}
+                loading={diskPopoverLoading}
                 onClose={() => setDiskPopoverOpen(false)}
+              />
+            )}
+            {temperaturePopoverOpen && (
+              <TemperatureSensorsPopover
+                sensors={temperatureSensors}
+                loading={temperatureSensorsLoading}
+                onClose={() => setTemperaturePopoverOpen(false)}
               />
             )}
             <MiniResource
@@ -1000,7 +1122,22 @@ export default function GlobalJobStatusBar({
                 setMemoryPopoverOpen(false);
                 setNetworkPopoverOpen(false);
                 setDiskPopoverOpen(false);
+                setTemperaturePopoverOpen(false);
                 setCpuPopoverOpen((value) => !value);
+              }}
+            />
+            <MiniResource
+              label="SEN"
+              value={displayedTemperature ? `${Number(displayedTemperature.temperature).toFixed(1)}°C` : "—"}
+              values={temperatureSensors.length ? [maxTemperature] : []}
+              tone="bg-amber-200"
+              compactValue
+              onClick={() => {
+                setCpuPopoverOpen(false);
+                setMemoryPopoverOpen(false);
+                setNetworkPopoverOpen(false);
+                setDiskPopoverOpen(false);
+                setTemperaturePopoverOpen((value) => !value);
               }}
             />
             <MiniResource
@@ -1014,6 +1151,7 @@ export default function GlobalJobStatusBar({
                 setCpuPopoverOpen(false);
                 setNetworkPopoverOpen(false);
                 setDiskPopoverOpen(false);
+                setTemperaturePopoverOpen(false);
                 setMemoryPopoverOpen((value) => !value);
               }}
             />
@@ -1026,6 +1164,7 @@ export default function GlobalJobStatusBar({
                 setCpuPopoverOpen(false);
                 setMemoryPopoverOpen(false);
                 setNetworkPopoverOpen(false);
+                setTemperaturePopoverOpen(false);
                 setDiskPopoverOpen((value) => !value);
               }}
             />
@@ -1039,8 +1178,9 @@ export default function GlobalJobStatusBar({
                 onClick={() => {
                   setCpuPopoverOpen(false);
                   setMemoryPopoverOpen(false);
+                  setTemperaturePopoverOpen(false);
                   setNetworkPopoverOpen((value) => !value);
-                setDiskPopoverOpen(false);
+                  setDiskPopoverOpen(false);
                 }}
               >
                 <span className="flex items-center justify-end gap-1">

@@ -1728,34 +1728,15 @@ export default function FirewallPage() {
     }
   });
   const [wafMessage, setWafMessage] = React.useState("");
-  const [ddos, setDdos] = React.useState(() => {
-    try {
-      return (
-        JSON.parse(
-          localStorage.getItem("serverengine:ddos-policy") || "null",
-        ) || {
-          enabled: true,
-          requestsPerSecond: 25,
-          burst: 50,
-          concurrent: 200,
-          banDuration: "10m",
-          trustedProxies: "",
-          mode: "rate-limit",
-          logMitigations: true,
-        }
-      );
-    } catch {
-      return {
-        enabled: true,
-        requestsPerSecond: 25,
-        burst: 50,
-        concurrent: 200,
-        banDuration: "10m",
-        trustedProxies: "",
-        mode: "rate-limit",
-        logMitigations: true,
-      };
-    }
+  const [ddos, setDdos] = React.useState({
+    enabled: true,
+    requestsPerSecond: 25,
+    burst: 50,
+    concurrent: 200,
+    banDuration: "10m",
+    trustedProxies: "",
+    mode: "rate-limit",
+    logMitigations: true,
   });
   const [ddosMessage, setDdosMessage] = React.useState("");
   const load = React.useCallback(async () => {
@@ -2069,9 +2050,22 @@ export default function FirewallPage() {
   };
   const updateDdos = (key, value) =>
     setDdos((current) => ({ ...current, [key]: value }));
-  const saveDdos = () => {
-    localStorage.setItem("serverengine:ddos-policy", JSON.stringify(ddos));
-    setDdosMessage("DDoS protection policy saved for this panel profile.");
+  const saveDdos = async () => {
+    const response = await apiRequest("/api/v1/firewall/ddos-policy", {
+      method: "PUT",
+      body: JSON.stringify(ddos),
+    });
+    if (!response.ok) {
+      showToast(
+        await readApiError(response, "Unable to save DDoS protection policy"),
+        "error",
+      );
+      return false;
+    }
+    setDdos(await response.json());
+    setDdosMessage("");
+    showToast("DDoS protection policy saved", "success");
+    return true;
   };
   const firewallDisabled = !loading && firewallStatus === "disabled";
   return (
@@ -2786,6 +2780,7 @@ export default function FirewallPage() {
           onClose={() => setNftablesModal(false)}
           ddos={ddos}
           onDdosChange={updateDdos}
+          onDdosLoaded={setDdos}
           onDdosSave={saveDdos}
           onSaved={async () => {
             await load();

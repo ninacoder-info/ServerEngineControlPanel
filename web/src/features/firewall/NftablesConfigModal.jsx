@@ -155,11 +155,13 @@ export default function NftablesConfigModal({
   onSaved,
   ddos,
   onDdosChange,
+  onDdosLoaded,
   onDdosSave,
 }) {
   const [activeTab, setActiveTab] = React.useState("nftables");
   const [config, setConfig] = React.useState(null);
   const [overview, setOverview] = React.useState(null);
+  const [mitigationEvents, setMitigationEvents] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
   const form = useForm({
@@ -182,18 +184,31 @@ export default function NftablesConfigModal({
     Promise.all([
       apiRequest("/api/v1/firewall/config"),
       apiRequest("/api/v1/firewall"),
+      apiRequest("/api/v1/firewall/ddos-policy"),
+      apiRequest("/api/v1/firewall/mitigation-events"),
     ])
-      .then(async ([configResponse, overviewResponse]) => {
+      .then(async ([configResponse, overviewResponse, policyResponse, eventsResponse]) => {
         if (!configResponse.ok)
           throw new Error(await readApiError(configResponse));
         if (!overviewResponse.ok)
           throw new Error(await readApiError(overviewResponse));
-        return Promise.all([configResponse.json(), overviewResponse.json()]);
+        if (!policyResponse.ok)
+          throw new Error(await readApiError(policyResponse));
+        if (!eventsResponse.ok)
+          throw new Error(await readApiError(eventsResponse));
+        return Promise.all([
+          configResponse.json(),
+          overviewResponse.json(),
+          policyResponse.json(),
+          eventsResponse.json(),
+        ]);
       })
-      .then(([value, currentOverview]) => {
+      .then(([value, currentOverview, policy, eventData]) => {
         if (!active) return;
         setConfig(value);
         setOverview(currentOverview);
+        onDdosLoaded(policy);
+        setMitigationEvents(eventData.events || []);
         reset({
           enabled: value.enabled,
           input_policy: value.input_policy,
@@ -214,7 +229,7 @@ export default function NftablesConfigModal({
     return () => {
       active = false;
     };
-  }, [reset]);
+  }, [onDdosLoaded, reset]);
 
   const save = async (values) => {
     setSaving(true);
@@ -295,7 +310,50 @@ export default function NftablesConfigModal({
         >
           <div className="space-y-6 p-6">
             {activeTab === "ddos" ? (
-              <DdosTab value={ddos} onChange={onDdosChange} />
+              <>
+                <DdosTab value={ddos} onChange={onDdosChange} />
+                <div className="border-t border-neutral-200 pt-5 dark:border-neutral-800">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                        Recent mitigation events
+                      </h3>
+                      <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                        Stored in {"/server-engine/logs/firewall/mitigation-events.jsonl"}.
+                      </p>
+                    </div>
+                    <span className="text-xs text-neutral-500 dark:text-neutral-400">
+                      {mitigationEvents.length} shown
+                    </span>
+                  </div>
+                  {mitigationEvents.length ? (
+                    <div className="mt-3 max-h-48 overflow-auto rounded-md border border-neutral-200 dark:border-neutral-800">
+                      {mitigationEvents.map((event, index) => (
+                        <div
+                          key={`${event.timestamp}-${index}`}
+                          className="border-b border-neutral-200 px-3 py-2 text-xs last:border-b-0 dark:border-neutral-800"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="font-medium text-neutral-800 dark:text-neutral-200">
+                              {event.event}
+                            </span>
+                            <span className="text-neutral-500 dark:text-neutral-400">
+                              {event.source_ip}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-neutral-500 dark:text-neutral-400">
+                            {event.detail}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-sm text-neutral-500 dark:text-neutral-400">
+                      No mitigation events have been recorded.
+                    </p>
+                  )}
+                </div>
+              </>
             ) : loading ? (
               <div className="py-12 text-center text-sm text-neutral-500 dark:text-neutral-400">
                 Loading nftables configuration…

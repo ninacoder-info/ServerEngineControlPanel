@@ -4,6 +4,7 @@ from app.api.dependencies import require_user
 from app.models.firewall import (
     BlockedAddressPatch,
     BlockedAddressRequest,
+    DdosPolicyRequest,
     FirewallAliasPatch,
     FirewallAliasRequest,
     FirewallRulePatch,
@@ -14,6 +15,7 @@ from app.models.firewall import (
 )
 from app.services.firewall_service import firewall_service
 from app.services.job_service import job_store
+from app.services.mitigation_log_service import mitigation_log_service
 
 router = APIRouter(prefix="/api/v1/firewall", tags=["firewall"])
 
@@ -26,6 +28,24 @@ def overview(user=Depends(require_user)):
 @router.get("/config")
 def nftables_config(user=Depends(require_user)):
     return firewall_service.nftables_config()
+
+
+@router.get("/ddos-policy")
+def ddos_policy(user=Depends(require_user)):
+    return mitigation_log_service.read_policy()
+
+
+@router.put("/ddos-policy")
+def update_ddos_policy(payload: DdosPolicyRequest, user=Depends(require_user)):
+    return mitigation_log_service.save_policy(payload.model_dump())
+
+
+@router.get("/mitigation-events")
+def mitigation_events(limit: int = 50, user=Depends(require_user)):
+    return {
+        "path": str(mitigation_log_service.log_path),
+        "events": mitigation_log_service.recent(limit),
+    }
 
 
 @router.put("/config")

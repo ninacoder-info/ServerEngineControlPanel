@@ -37,6 +37,17 @@ class NftablesConfigRequest(BaseModel):
     output_policy: NftablesPolicy = "accept"
 
 
+class DdosPolicyRequest(BaseModel):
+    enabled: bool = True
+    requestsPerSecond: int = Field(default=25, ge=1, le=1_000_000)
+    burst: int = Field(default=50, ge=1, le=1_000_000)
+    concurrent: int = Field(default=200, ge=1, le=1_000_000)
+    banDuration: str = Field(default="10m", min_length=1, max_length=32)
+    trustedProxies: str = Field(default="", max_length=10_000)
+    mode: Literal["rate-limit", "challenge", "block"] = "rate-limit"
+    logMitigations: bool = True
+
+
 class PortForwardRequest(BaseModel):
     protocol: Literal["TCP", "UDP", "TCP / UDP"] = "TCP"
     source: str = Field(default="Any", min_length=1, max_length=64)
