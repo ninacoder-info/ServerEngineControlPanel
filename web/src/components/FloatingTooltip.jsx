@@ -36,7 +36,7 @@ export default function FloatingTooltip({
   return (
     <span
       ref={refs.setReference}
-      className={`inline-flex ${className}`}
+      className={className || "inline-flex"}
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => setOpen(false)}
       onFocus={() => setOpen(true)}

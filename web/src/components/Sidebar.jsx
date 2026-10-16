@@ -120,7 +120,7 @@ export default function Sidebar({
                       key={path}
                       content={collapsed ? label : ""}
                       placement="right"
-                      className="block"
+                      className="block w-full"
                     >
                       <a
                         href={path}
