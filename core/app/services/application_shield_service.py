@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import ipaddress
+import logging
 import os
 import shutil
 import sqlite3
@@ -13,7 +14,7 @@ import uuid
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
-from threading import RLock
+from threading import RLock, Thread
 from urllib.parse import urlsplit
 
 from app.models.application_shield import (
@@ -44,6 +45,7 @@ _AUDIT_LOG_PATH = Path("/server-engine/logs/application-shield/audit.log")
 _AUDIT_LOG_STORAGE_DIR = Path("/server-engine/logs/application-shield/audit")
 _AUDIT_LOG_FILE_MODE = "0600"
 _AUDIT_LOG_DIR_MODE = "0700"
+_LOGGER = logging.getLogger(__name__)
 
 
 def _continent_for_country(code: str) -> tuple[str, str]:
@@ -70,6 +72,7 @@ class ApplicationShieldService:
         ))
         self.service_root = Path(os.getenv("SE_SERVICE_ROOT", "/opt/server-engine/services"))
         self._lock = RLock()
+        self._provider_refresh_lock = RLock()
         self._traffic_cache_signature: tuple[int, int] | None = None
         self._traffic_cache_events: list[dict] = []
         self._activity_cache_expires = 0.0
@@ -225,8 +228,9 @@ class ApplicationShieldService:
 
     def create_ip_entry(self, payload: ApplicationShieldIpRequest) -> ApplicationShieldIpEntry:
         address = str(ipaddress.ip_network(payload.address.strip(), strict=False))
+        hosts = self._normalize_ip_hosts(payload.hosts)
         now = datetime.now(timezone.utc).isoformat()
-        entry = ApplicationShieldIpEntry(id=str(uuid.uuid4()), address=address, **payload.model_dump(exclude={"address"}), created_at=now, updated_at=now)
+        entry = ApplicationShieldIpEntry(id=str(uuid.uuid4()), address=address, **payload.model_dump(exclude={"address", "hosts"}), hosts=hosts, created_at=now, updated_at=now)
         self._save_ip_entries(self.ip_entries() + [entry])
         self._refresh_ip_config()
         return entry
@@ -237,7 +241,8 @@ class ApplicationShieldService:
         if current is None:
             raise KeyError("Application Shield IP entry not found")
         address = str(ipaddress.ip_network(payload.address.strip(), strict=False))
-        updated = ApplicationShieldIpEntry(id=current.id, address=address, **payload.model_dump(exclude={"address"}), created_at=current.created_at, updated_at=datetime.now(timezone.utc).isoformat())
+        hosts = self._normalize_ip_hosts(payload.hosts)
+        updated = ApplicationShieldIpEntry(id=current.id, address=address, **payload.model_dump(exclude={"address", "hosts"}), hosts=hosts, created_at=current.created_at, updated_at=datetime.now(timezone.utc).isoformat())
         self._save_ip_entries([updated if item.id == entry_id else item for item in values])
         self._refresh_ip_config()
         return updated
@@ -254,6 +259,21 @@ class ApplicationShieldService:
         temporary = self.ip_path.with_suffix(".tmp")
         temporary.write_text(json.dumps([item.model_dump(mode="json") for item in values], indent=2) + "\n")
         os.replace(temporary, self.ip_path)
+
+    @staticmethod
+    def _normalize_ip_hosts(hosts: list[str]) -> list[str]:
+        values = []
+        for value in hosts or ["*"]:
+            host = str(value).strip().lower()
+            if not host:
+                continue
+            if host == "*":
+                return ["*"]
+            if re.search(r'[\s"\\]', host) or len(host) > 253:
+                raise ValueError("IP entry hosts must be valid host names")
+            if host not in values:
+                values.append(host)
+        return values or ["*"]
 
     def geo_entries(self) -> list[ApplicationShieldGeoEntry]:
         if not self.geo_path.exists():
@@ -291,6 +311,37 @@ class ApplicationShieldService:
         self._refresh_geo_config()
         return entry
 
+    def create_geo_entries(
+        self, payloads: list[ApplicationShieldGeoRequest]
+    ) -> list[ApplicationShieldGeoEntry]:
+        if not payloads:
+            raise ValueError("At least one country policy is required")
+        if not geoip_service.status().get("ready"):
+            raise RuntimeError("The optional DB-IP country database is not ready")
+        values = self.geo_entries()
+        existing_codes = {item.country_code for item in values}
+        requested_codes = [payload.country_code for payload in payloads]
+        if len(requested_codes) != len(set(requested_codes)):
+            raise ValueError("Each country may only have one policy")
+        duplicate = next(
+            (code for code in requested_codes if code in existing_codes), None
+        )
+        if duplicate:
+            raise ValueError(f"A Geo policy for {duplicate} already exists")
+        now = datetime.now(timezone.utc).isoformat()
+        entries = [
+            ApplicationShieldGeoEntry(
+                id=str(uuid.uuid4()),
+                **payload.model_dump(),
+                created_at=now,
+                updated_at=now,
+            )
+            for payload in payloads
+        ]
+        self._save_geo_entries(values + entries)
+        self._refresh_geo_config()
+        return entries
+
     def update_geo_entry(self, entry_id: str, payload: ApplicationShieldGeoRequest) -> ApplicationShieldGeoEntry:
         values = self.geo_entries()
         current = next((item for item in values if item.id == entry_id), None)
@@ -318,10 +369,29 @@ class ApplicationShieldService:
 
     def _refresh_geo_config(self) -> None:
         self._write_engine_config(self.policy())
-        for provider, _, _ in self.providers:
-            root = self.service_root / provider
-            if (root / ".serverengine-application-shield-attached").exists():
-                self._validate_and_reload(provider, root)
+        attached = [
+            (provider, self.service_root / provider)
+            for provider, _, _ in self.providers
+            if (self.service_root / provider / ".serverengine-application-shield-attached").exists()
+        ]
+        if attached:
+            Thread(
+                target=self._reload_geo_providers,
+                args=(attached,),
+                name="application-shield-geo-reload",
+                daemon=True,
+            ).start()
+
+    def _reload_geo_providers(self, providers: list[tuple[str, Path]]) -> None:
+        with self._provider_refresh_lock:
+            for provider, root in providers:
+                try:
+                    self._validate_and_reload(provider, root)
+                except Exception:
+                    _LOGGER.exception(
+                        "Application Shield geo policy reload failed for %s",
+                        provider,
+                    )
 
     def _refresh_ip_config(self) -> None:
         self._write_engine_config(self.policy())
@@ -351,6 +421,7 @@ class ApplicationShieldService:
             finally:
                 handle.close()
             os.replace(temporary, self.path)
+            website_service.refresh_scheduled_maintenance()
             active_providers = [provider for provider, _, _ in self.providers if (self.service_root / provider / ".serverengine-application-shield-attached").exists()]
             if updated.enabled and updated.mode != "off":
                 try:
@@ -398,7 +469,8 @@ class ApplicationShieldService:
         audit = "Off" if not policy.enabled or policy.mode == "off" else policy.audit_engine
         audit_path = _AUDIT_LOG_PATH
         self._ensure_crs_setup(root)
-        custom_rules = self._write_custom_rules(root)
+        shield_block_status = 418 if policy.block_page_enabled and policy.mode == "blocking" else 403
+        custom_rules = self._write_custom_rules(root, shield_block_status)
         geo_rules = self._write_geo_rules(root)
         crs_setup = root / "crs/crs-setup.conf"
         crs_rules = root / "crs/rules"
@@ -425,6 +497,15 @@ class ApplicationShieldService:
             crs_lines.insert(0, f"Include {geo_rules}")
         if not crs_lines:
             crs_lines.append("# OWASP CRS rules are not installed")
+        management_api_exclusion = (
+            'SecRule REQUEST_URI "@beginsWith /api/v1/" '
+            '"id:1999996,phase:1,pass,nolog,ctl:ruleRemoveByTag=OWASP_CRS"'
+        )
+        crs_block_page_override = (
+            'SecRuleUpdateActionByTag "OWASP_CRS" "status:418"'
+            if shield_block_status == 418 and policy.crs_enabled
+            else "# OWASP CRS keeps its normal 403 response"
+        )
         content = "\n".join([
             "# Generated by Server Engine Application Shield. Edit policy in the panel.",
             f"SecRuleEngine {mode}",
@@ -440,6 +521,11 @@ class ApplicationShieldService:
             *([f"SecAuditLogStorageDir {audit_storage_dir}"] if policy.audit_log_type == "Concurrent" else []),
             *([f"SecAuditLogFileMode {_AUDIT_LOG_FILE_MODE}"] if policy.audit_log_type == "Concurrent" else []),
             *([f"SecAuditLogDirMode {_AUDIT_LOG_DIR_MODE}"] if policy.audit_log_type == "Concurrent" else []),
+            # Authenticated panel API requests contain user-provided JSON and
+            # configuration values. Do not let CRS block the control plane it
+            # is configuring, but keep managed IP, geo, and custom rules.
+            management_api_exclusion,
+            crs_block_page_override,
             # IncludeOptional is Apache-only syntax. This file is consumed
             # by Nginx's ModSecurity rules parser, so use native ModSecurity
             # Include directives and only reference files that exist.
@@ -546,16 +632,26 @@ class ApplicationShieldService:
         target.write_text("\n".join(lines) + "\n")
         return target
 
-    def _write_custom_rules(self, root: Path) -> Path | None:
+    def _write_custom_rules(self, root: Path, block_status: int = 403) -> Path | None:
         rules = [rule for rule in self.rules() if rule.enabled]
         ip_entries = self.ip_entries()
         target = root / "conf/custom-rules.conf"
         lines = ["# Managed by Server Engine Application Shield. Edit rules in the panel."]
+        deny_action = f"deny,status:{block_status}"
         for entry in ip_entries:
-            rule_id = 1900000 + (uuid.uuid5(uuid.NAMESPACE_URL, f"server-engine:shield-ip:{entry.id}").int % 899999)
-            action = "allow" if entry.decision == "Allow" else "deny,status:403"
+            action = "allow" if entry.decision == "Allow" else deny_action
             message = entry.reason.replace('"', "'")
-            lines.append(f'SecRule REMOTE_ADDR "@ipMatch {entry.address}" "id:{rule_id},phase:1,{action},log,auditlog,msg:\"{message}\""')
+            hosts = entry.hosts or ["*"]
+            for host in hosts:
+                rule_id = 1900000 + (uuid.uuid5(uuid.NAMESPACE_URL, f"server-engine:shield-ip:{entry.id}:{host}").int % 899999)
+                rule_line = f'SecRule REMOTE_ADDR "@ipMatch {entry.address}" "id:{rule_id},phase:1,{action},log,auditlog,msg:\"{message}\""'
+                if host == "*":
+                    lines.append(rule_line)
+                else:
+                    lines.extend([
+                        f'SecRule REQUEST_HEADERS:Host "@streq {host}" "id:{rule_id},phase:1,pass,nolog,chain"',
+                        rule_line.replace(f"id:{rule_id},", "", 1),
+                    ])
         for rule in rules:
             match = re.match(r"^URI contains (.+)$", rule.match.strip(), re.I)
             variable = "REQUEST_URI"
@@ -574,7 +670,7 @@ class ApplicationShieldService:
             value = value.replace('"', "\\\"")
             rule_id = 1000000 + (uuid.uuid5(uuid.NAMESPACE_URL, f"server-engine:shield-rule:{rule.id}").int % 899999)
             action = {
-                "Block": "deny,status:403",
+                "Block": deny_action,
                 "Allow": "allow",
                 "Log only": "pass",
                 "Challenge": "pass",
@@ -668,6 +764,11 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
         final = sections.get("F", "")
         status_match = re.search(r"HTTP/[0-9.]+\s+(\d{3})", final)
         status = int(status_match.group(1)) if status_match else None
+        # 418 is the private upstream status used to distinguish a Shield
+        # denial from an ordinary Nginx/application 403. Nginx exposes it to
+        # the client as 403 after rendering the custom block page.
+        if status == 418:
+            status = 403
         messages = list(dict.fromkeys(re.findall(r'\[id "([0-9]+)"\].*?\[msg "([^"]+)"\]', sections.get("H", ""))))
         country = geoip_service.lookup(source_ip) or {}
         country_code = request_headers.get("cf-ipcountry", "").strip().upper()

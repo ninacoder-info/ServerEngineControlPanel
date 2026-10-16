@@ -1,4 +1,5 @@
 import React from "react";
+import { createPortal } from "react-dom";
 import Chart from "react-apexcharts";
 import {
   Activity,
@@ -10,6 +11,7 @@ import {
   Globe2,
   ListFilter,
   Map,
+  Pencil,
   Plus,
   RefreshCw,
   Search,
@@ -19,10 +21,13 @@ import {
   Settings2,
   SlidersHorizontal,
   Sparkles,
+  Trash2,
   X,
 } from "lucide-react";
 import { apiRequest, readApiError } from "../../lib/api";
 import Toast, { showToast } from "../../components/Toast";
+import ActionDialog from "../../components/ActionDialog";
+import { formatPanelDate } from "../../lib/panelPreferences";
 import WebsiteFormModal from "../websites/WebsiteFormModal";
 import countries from "../../data/countries.json";
 import { ComposableMap, Geographies, Geography } from "react-simple-maps";
@@ -45,12 +50,20 @@ const tabs = [
 ];
 const input =
   "mt-1.5 block min-h-10 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100";
+const defaultBlockPageHtml = `<main>
+  <h1>Request blocked</h1>
+  <p>This request was blocked by the site security policy.</p>
+</main>`;
 const auditLogParts = [
   ["A", "Audit header", "Required transaction metadata"],
   ["B", "Request headers", "Request line and headers"],
   ["C", "Request body", "May contain credentials or personal data"],
   ["D", "Intermediary headers", "Reserved by ModSecurity"],
-  ["E", "Intermediary body", "Can be very large; requires response-body inspection"],
+  [
+    "E",
+    "Intermediary body",
+    "Can be very large; requires response-body inspection",
+  ],
   ["F", "Final response", "Response headers and body metadata"],
   ["G", "Response body", "Not implemented by the current engine"],
   ["H", "Rule messages", "Matched rule details"],
@@ -92,22 +105,40 @@ function countryDisplayName(country) {
   }
 }
 
-function SourceWithCountry({ event }) {
+function SourceWithCountry({ event, onSelect }) {
   const country = event.country;
   const flag = countryFlag(country?.country_code);
-  return (
-    <span
-      className="inline-flex items-center gap-2"
-      title={country?.country_name || "Country unavailable"}
-    >
+  const sourceIp = event.source_ip || "";
+  const content = (
+    <>
       <span
         className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-neutral-100 text-sm leading-none dark:bg-neutral-800"
         aria-hidden="true"
       >
         {flag || <Globe2 size={12} className="text-neutral-400" />}
       </span>
-      <span>{event.source_ip || "Unknown"}</span>
-    </span>
+      <span>{sourceIp || "Unknown"}</span>
+    </>
+  );
+  if (!sourceIp || !onSelect) {
+    return (
+      <span
+        className="inline-flex items-center gap-2"
+        title={country?.country_name || "Country unavailable"}
+      >
+        {content}
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(sourceIp)}
+      className="inline-flex cursor-pointer items-center gap-2 text-left hover:text-blue-600 dark:hover:text-blue-400"
+      title={country?.country_name || "Country unavailable"}
+    >
+      {content}
+    </button>
   );
 }
 
@@ -115,6 +146,109 @@ function trafficTime(value) {
   if (!value) return "—";
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+function validateIpNetwork(value) {
+  const address = value.trim();
+  if (!address) return "IP address or CIDR range is required.";
+  if (/\s/.test(address))
+    return "Enter an IP address or CIDR range without spaces.";
+
+  const slashIndex = address.indexOf("/");
+  const host = slashIndex === -1 ? address : address.slice(0, slashIndex);
+  const prefix = slashIndex === -1 ? null : address.slice(slashIndex + 1);
+  if (slashIndex !== -1 && (!/^\d+$/.test(prefix) || prefix === "")) {
+    return "CIDR prefix must be a number.";
+  }
+
+  if (host.includes(":")) {
+    const hasCompression = host.includes("::");
+    const groups = host.split(":");
+    const groupCount = groups.filter(Boolean).length;
+    if (
+      !/^[0-9a-fA-F:]+$/.test(host) ||
+      (!hasCompression && groupCount !== 8) ||
+      (hasCompression && groupCount >= 8)
+    ) {
+      return "Enter a valid IPv6 address or CIDR range.";
+    }
+    if (prefix !== null && Number(prefix) > 128) {
+      return "IPv6 CIDR prefix must be between 0 and 128.";
+    }
+    return "";
+  }
+
+  const octets = host.split(".");
+  if (
+    octets.length !== 4 ||
+    octets.some((octet) => !/^\d+$/.test(octet) || Number(octet) > 255)
+  ) {
+    return "Enter a valid IPv4 address or CIDR range.";
+  }
+  if (prefix !== null && Number(prefix) > 32) {
+    return "IPv4 CIDR prefix must be between 0 and 32.";
+  }
+  return "";
+}
+
+function TrafficTime({ value }) {
+  const triggerRef = React.useRef(null);
+  const [tooltip, setTooltip] = React.useState(null);
+  const absoluteTime = trafficTime(value);
+  const relativeTime = value ? formatPanelDate(value, { relative: true }) : "—";
+
+  const updateTooltipPosition = React.useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    setTooltip({
+      left: rect.left + rect.width / 2,
+      top: rect.top - 8,
+    });
+  }, []);
+
+  const showTooltip = () => {
+    updateTooltipPosition();
+  };
+
+  React.useEffect(() => {
+    if (!tooltip) return undefined;
+    window.addEventListener("resize", updateTooltipPosition);
+    window.addEventListener("scroll", updateTooltipPosition, true);
+    return () => {
+      window.removeEventListener("resize", updateTooltipPosition);
+      window.removeEventListener("scroll", updateTooltipPosition, true);
+    };
+  }, [tooltip, updateTooltipPosition]);
+
+  return (
+    <>
+      <span
+        ref={triggerRef}
+        className="css-tooltip traffic-time-tooltip-trigger relative inline-flex cursor-help"
+        data-tooltip={absoluteTime}
+        aria-label={absoluteTime}
+        onMouseEnter={showTooltip}
+        onMouseLeave={() => setTooltip(null)}
+        onFocus={showTooltip}
+        onBlur={() => setTooltip(null)}
+        tabIndex={0}
+      >
+        {relativeTime}
+      </span>
+      {tooltip &&
+        createPortal(
+          <span
+            className="traffic-time-tooltip-portal"
+            style={{ left: tooltip.left, top: tooltip.top }}
+            role="tooltip"
+          >
+            {absoluteTime}
+          </span>,
+          document.body,
+        )}
+    </>
+  );
 }
 
 function Section({ title, description, actions, children }) {
@@ -655,7 +789,7 @@ function SitesTab() {
           </p>
         </div>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="overflow-visible">
           <table className="w-full min-w-[780px] text-left">
             <thead>
               <tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
@@ -1416,6 +1550,7 @@ function LegacyApplicationShieldConfigModalV2({ overview, onClose, onSaved }) {
           {[
             ["connectors", "Connectors", Server],
             ["policy", "Policy", Settings2],
+            ["block-page", "Block page", FileText],
             ["audit", "Audit log", FileText],
             ["install", "Reinstall", RefreshCw],
             ["logs", "Logs", Activity],
@@ -1550,6 +1685,75 @@ function LegacyApplicationShieldConfigModalV2({ overview, onClose, onSaved }) {
               </div>
             </form>
           )}
+          {tab === "block-page" && (
+            <form className="space-y-5" onSubmit={savePolicy}>
+              <div>
+                <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
+                  Custom blocked-response page
+                </h3>
+                <p className="mt-1 text-sm leading-6 text-neutral-500 dark:text-neutral-400">
+                  This page is returned for Nginx 403 responses generated while
+                  Application Shield is in blocking mode. It does not change
+                  detection-only traffic or API responses.
+                </p>
+              </div>
+              <label className="flex cursor-pointer items-start gap-3">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 accent-blue-600"
+                  checked={policy.block_page_enabled === true}
+                  onChange={(event) =>
+                    setPolicy({
+                      ...policy,
+                      block_page_enabled: event.target.checked,
+                    })
+                  }
+                />
+                <span>
+                  <span className="block text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                    Use custom HTML for blocked requests
+                  </span>
+                  <span className="mt-1 block text-xs text-neutral-500 dark:text-neutral-400">
+                    The page is shown with HTTP status 403.
+                  </span>
+                </span>
+              </label>
+              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                HTML body
+                <textarea
+                  className={`${input} min-h-64 font-mono text-xs leading-5`}
+                  value={policy.block_page_html || defaultBlockPageHtml}
+                  onChange={(event) =>
+                    setPolicy({
+                      ...policy,
+                      block_page_html: event.target.value,
+                    })
+                  }
+                  spellCheck="false"
+                  placeholder={defaultBlockPageHtml}
+                />
+                <span className="mt-1 block text-xs font-normal leading-5 text-neutral-500 dark:text-neutral-400">
+                  Safe body tags are kept. Scripts, styles, forms, and unsafe
+                  links are removed before the page is rendered.
+                </span>
+              </label>
+              <div className="rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-xs leading-5 text-blue-800 dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-200">
+                Nginx is supported now. Apache, OpenLiteSpeed, and Caddy keep
+                their provider-native 403 response until a provider-specific
+                error-page renderer is added.
+              </div>
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  disabled={busy}
+                  className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                >
+                  <FileText size={15} />
+                  {busy ? "Saving…" : "Save block page"}
+                </button>
+              </div>
+            </form>
+          )}
           {tab === "audit" && (
             <div className="space-y-5">
               <div>
@@ -1586,7 +1790,10 @@ function LegacyApplicationShieldConfigModalV2({ overview, onClose, onSaved }) {
                     className={input}
                     value={policy.audit_log_type || "Serial"}
                     onChange={(event) =>
-                      setPolicy({ ...policy, audit_log_type: event.target.value })
+                      setPolicy({
+                        ...policy,
+                        audit_log_type: event.target.value,
+                      })
                     }
                   >
                     <option value="Serial">Serial — one audit file</option>
@@ -1601,10 +1808,15 @@ function LegacyApplicationShieldConfigModalV2({ overview, onClose, onSaved }) {
                     className={input}
                     value={policy.audit_log_format || "Native"}
                     onChange={(event) =>
-                      setPolicy({ ...policy, audit_log_format: event.target.value })
+                      setPolicy({
+                        ...policy,
+                        audit_log_format: event.target.value,
+                      })
                     }
                   >
-                    <option value="Native">Native — panel index compatible</option>
+                    <option value="Native">
+                      Native — panel index compatible
+                    </option>
                     <option value="JSON">JSON — requires YAJL support</option>
                   </select>
                 </label>
@@ -1634,9 +1846,9 @@ function LegacyApplicationShieldConfigModalV2({ overview, onClose, onSaved }) {
                 </p>
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
                   {auditLogParts.map(([part, label, description]) => {
-                    const selected = (policy.audit_log_parts || "ABFHZ").includes(
-                      part,
-                    );
+                    const selected = (
+                      policy.audit_log_parts || "ABFHZ"
+                    ).includes(part);
                     return (
                       <label
                         key={part}
@@ -1723,8 +1935,8 @@ function LegacyApplicationShieldConfigModalV2({ overview, onClose, onSaved }) {
                 </label>
               </div>
               <div className="rounded-md bg-neutral-50 px-4 py-3 text-xs leading-5 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
-                Generated directives are written to the managed ModSecurity
-                JSON output may not be indexable by the panel’s native traffic
+                Generated directives are written to the managed ModSecurity JSON
+                output may not be indexable by the panel’s native traffic
                 parser.
               </div>
               <div className="flex justify-end">
@@ -1926,9 +2138,7 @@ function ApplicationShieldConfigModal({
       ) {
         return;
       }
-      const response = await apiRequest(
-        "/api/v1/application-shield/overview",
-      );
+      const response = await apiRequest("/api/v1/application-shield/overview");
       if (active && response.ok) {
         const updated = await response.json();
         setOverview(updated);
@@ -2106,6 +2316,7 @@ function ApplicationShieldConfigModal({
           {[
             ["connectors", "Connectors", Server],
             ["policy", "Policy", Settings2],
+            ["block-page", "Block page", FileText],
             ["audit", "Audit log", FileText],
             ["install", "Reinstall", RefreshCw],
             ["logs", "Logs", Activity],
@@ -2260,6 +2471,64 @@ function ApplicationShieldConfigModal({
               </div>
             </form>
           )}
+          {tab === "block-page" && (
+            <form className="space-y-5" onSubmit={savePolicy}>
+              <div>
+                <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">
+                  Custom blocked-response page
+                </h3>
+              </div>
+              <label className="flex items-start gap-3 text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 accent-blue-600"
+                  checked={policy.block_page_enabled === true}
+                  onChange={(event) =>
+                    setPolicy({
+                      ...policy,
+                      block_page_enabled: event.target.checked,
+                    })
+                  }
+                />
+                <span>
+                  Enable custom blocked page
+                  <span className="mt-1 block text-xs font-normal leading-5 text-neutral-500 dark:text-neutral-400">
+                    This applies only while protection mode is set to Blocking.
+                  </span>
+                </span>
+              </label>
+              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                HTML body
+                <textarea
+                  className={`${input} min-h-64 font-mono text-xs leading-5`}
+                  value={policy.block_page_html || defaultBlockPageHtml}
+                  onChange={(event) =>
+                    setPolicy({
+                      ...policy,
+                      block_page_html: event.target.value,
+                    })
+                  }
+                  maxLength={50000}
+                  spellCheck="false"
+                />
+                <span className="mt-1 block text-xs font-normal leading-5 text-neutral-500 dark:text-neutral-400">
+                  Safe HTML and CSS are retained. Scripts, forms, external CSS
+                  imports, CSS URLs, and unsafe links are removed before the
+                  response is served.
+                </span>
+              </label>
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  disabled={busy}
+                  className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <FileText size={15} />
+                  {busy ? "Saving…" : "Save block page"}
+                </button>
+              </div>
+            </form>
+          )}
           {tab === "audit" && (
             <div className="space-y-5">
               <div>
@@ -2296,7 +2565,10 @@ function ApplicationShieldConfigModal({
                     className={input}
                     value={policy.audit_log_type || "Serial"}
                     onChange={(event) =>
-                      setPolicy({ ...policy, audit_log_type: event.target.value })
+                      setPolicy({
+                        ...policy,
+                        audit_log_type: event.target.value,
+                      })
                     }
                   >
                     <option value="Serial">Serial — one audit file</option>
@@ -2311,10 +2583,15 @@ function ApplicationShieldConfigModal({
                     className={input}
                     value={policy.audit_log_format || "Native"}
                     onChange={(event) =>
-                      setPolicy({ ...policy, audit_log_format: event.target.value })
+                      setPolicy({
+                        ...policy,
+                        audit_log_format: event.target.value,
+                      })
                     }
                   >
-                    <option value="Native">Native — panel index compatible</option>
+                    <option value="Native">
+                      Native — panel index compatible
+                    </option>
                     <option value="JSON">JSON — requires YAJL support</option>
                   </select>
                 </label>
@@ -2344,9 +2621,9 @@ function ApplicationShieldConfigModal({
                 </p>
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
                   {auditLogParts.map(([part, label, description]) => {
-                    const selected = (policy.audit_log_parts || "ABFHZ").includes(
-                      part,
-                    );
+                    const selected = (
+                      policy.audit_log_parts || "ABFHZ"
+                    ).includes(part);
                     return (
                       <label
                         key={part}
@@ -2415,8 +2692,8 @@ function ApplicationShieldConfigModal({
                       Ignore HTML content type on GET/HEAD
                     </span>
                     <span className="mt-1 block text-xs leading-5 text-neutral-500 dark:text-neutral-400">
-                      Prevent CRS rule 920420 from treating normal browser
-                      page requests as a protocol violation.
+                      Prevent CRS rule 920420 from treating normal browser page
+                      requests as a protocol violation.
                     </span>
                   </span>
                   <input
@@ -2433,8 +2710,8 @@ function ApplicationShieldConfigModal({
                 </label>
               </div>
               <div className="rounded-md bg-neutral-50 px-4 py-3 text-xs leading-5 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
-                Generated directives are written to the managed ModSecurity
-                JSON output may not be indexable by the panel’s native traffic
+                Generated directives are written to the managed ModSecurity JSON
+                output may not be indexable by the panel’s native traffic
                 parser.
               </div>
               <div className="flex justify-end">
@@ -2537,37 +2814,155 @@ function ApplicationShieldConfigModal({
   );
 }
 
-function IpEntryModal({ entry, onClose, onSaved }) {
+function IpTagInput({
+  label,
+  values,
+  draft,
+  onDraftChange,
+  onAdd,
+  onRemove,
+  placeholder,
+  suggestions = [],
+}) {
+  return (
+    <div className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+      <span>{label}</span>
+      <div className="mt-1.5 flex min-h-11 flex-wrap items-center gap-2 rounded-md border border-neutral-300 px-2 py-1.5 dark:border-neutral-700">
+        {values.map((value) => (
+          <span
+            key={value}
+            className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 dark:bg-blue-950/40 dark:text-blue-300"
+          >
+            <span>{value === "*" ? "All hosts" : value}</span>
+            <button
+              type="button"
+              className="cursor-pointer rounded-full p-0.5 hover:bg-blue-600/10"
+              aria-label={`Remove ${value}`}
+              onClick={() => onRemove(value)}
+            >
+              <X size={12} />
+            </button>
+          </span>
+        ))}
+        <input
+          className="min-w-[14rem] flex-1 bg-transparent px-1 py-1 text-sm text-neutral-900 outline-none placeholder:text-neutral-400 dark:text-neutral-100"
+          value={draft}
+          placeholder={placeholder}
+          onChange={(event) => onDraftChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === ",") {
+              event.preventDefault();
+              onAdd(draft);
+            }
+          }}
+          onBlur={() => onAdd(draft)}
+        />
+      </div>
+      {suggestions.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {suggestions.map((suggestion) => (
+            <button
+              key={suggestion}
+              type="button"
+              onClick={() => onAdd(suggestion)}
+              className="cursor-pointer rounded-full border border-neutral-300 px-2 py-1 text-xs text-neutral-600 hover:border-blue-400 hover:text-blue-600 dark:border-neutral-700 dark:text-neutral-400 dark:hover:border-blue-500 dark:hover:text-blue-400"
+            >
+              {suggestion}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function IpEntryModal({ entry, onClose, onSaved, hostOptions = [] }) {
+  const editing = Boolean(entry?.id);
+  const [addresses, setAddresses] = React.useState(
+    entry?.address ? [entry.address] : [],
+  );
+  const [addressDraft, setAddressDraft] = React.useState("");
+  const [hosts, setHosts] = React.useState(entry?.hosts || ["*"]);
+  const [hostDraft, setHostDraft] = React.useState("");
   const [form, setForm] = React.useState({
-    address: entry?.address || "",
     decision: entry?.decision || "Block",
-    reason: entry?.reason || "",
+    reason: entry?.reason || "Blocked from recent traffic",
     expires_at: entry?.expires_at ? entry.expires_at.slice(0, 16) : "",
   });
   const [error, setError] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const set = (key, value) =>
     setForm((current) => ({ ...current, [key]: value }));
+  const addAddress = (raw) => {
+    const value = raw.trim();
+    if (!value) return;
+    const validationError = validateIpNetwork(value);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    if (!addresses.includes(value))
+      setAddresses((current) => [...current, value]);
+    setAddressDraft("");
+    setError("");
+  };
+  const addHost = (raw) => {
+    const value = raw.trim().toLowerCase();
+    if (!value) return;
+    if (value === "*") setHosts(["*"]);
+    else
+      setHosts((current) => [...current.filter((item) => item !== "*"), value]);
+    setHostDraft("");
+  };
   async function submit(event) {
     event.preventDefault();
+    addAddress(addressDraft);
+    const values =
+      addressDraft.trim() && !addresses.includes(addressDraft.trim())
+        ? [...addresses, addressDraft.trim()]
+        : addresses;
+    if (values.length === 0) {
+      setError("Add at least one IP address or CIDR range.");
+      return;
+    }
+    const addressError = values.map(validateIpNetwork).find(Boolean);
+    if (addressError) {
+      setError(addressError);
+      return;
+    }
     setBusy(true);
     setError("");
-    const payload = {
-      ...form,
-      expires_at: form.expires_at
-        ? new Date(form.expires_at).toISOString()
-        : null,
-    };
-    const response = await apiRequest(
-      entry
-        ? `/api/v1/application-shield/ip-lists/${entry.id}`
-        : "/api/v1/application-shield/ip-lists",
-      { method: entry ? "PATCH" : "POST", body: JSON.stringify(payload) },
-    );
-    if (response.ok) onSaved(await response.json());
-    else
-      setError(await readApiError(response, "Unable to save IP list entry."));
-    setBusy(false);
+    try {
+      const payload = {
+        ...form,
+        hosts,
+        expires_at: form.expires_at
+          ? new Date(form.expires_at).toISOString()
+          : null,
+      };
+      const saved = [];
+      for (const address of editing ? [values[0]] : values) {
+        const response = await apiRequest(
+          editing
+            ? `/api/v1/application-shield/ip-lists/${entry.id}`
+            : "/api/v1/application-shield/ip-lists",
+          {
+            method: editing ? "PATCH" : "POST",
+            body: JSON.stringify({ ...payload, address }),
+          },
+        );
+        if (!response.ok)
+          throw new Error(
+            await readApiError(response, "Unable to save IP list entry."),
+          );
+        saved.push(await response.json());
+      }
+      onSaved(saved);
+    } catch (reason) {
+      setError(reason.message || "Unable to save IP list entry.");
+    } finally {
+      setBusy(false);
+    }
   }
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8">
@@ -2578,7 +2973,7 @@ function IpEntryModal({ entry, onClose, onSaved }) {
               Application Shield
             </p>
             <h2 className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">
-              {entry ? "Edit IP entry" : "Add IP entry"}
+              {editing ? "Edit IP entry" : "Add IP entry"}
             </h2>
           </div>
           <button
@@ -2591,15 +2986,47 @@ function IpEntryModal({ entry, onClose, onSaved }) {
         </div>
         <form onSubmit={submit} className="space-y-4 p-5">
           <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
-            Address or network
-            <input
-              required
-              className={input}
-              value={form.address}
-              onChange={(event) => set("address", event.target.value)}
-              placeholder="203.0.113.42 or 198.51.100.0/24"
+            <IpTagInput
+              label="Addresses or networks"
+              values={addresses}
+              draft={addressDraft}
+              onDraftChange={(value) => {
+                setAddressDraft(value);
+                setError("");
+              }}
+              onAdd={addAddress}
+              onRemove={(value) =>
+                setAddresses((current) =>
+                  current.filter((item) => item !== value),
+                )
+              }
+              placeholder="Type an IP/CIDR and press Enter"
             />
+            <p className="mt-1 text-xs font-normal text-neutral-500 dark:text-neutral-400">
+              Add multiple addresses or CIDR ranges as tags.
+            </p>
+            {error && (
+              <span className="mt-1 block text-xs font-normal text-rose-600 dark:text-rose-400">
+                {error}
+              </span>
+            )}
           </label>
+          <IpTagInput
+            label="Protected hosts"
+            values={hosts}
+            draft={hostDraft}
+            onDraftChange={setHostDraft}
+            onAdd={addHost}
+            onRemove={(value) =>
+              setHosts((current) => current.filter((item) => item !== value))
+            }
+            placeholder="Type a host and press Enter"
+            suggestions={hostOptions.filter((host) => !hosts.includes(host))}
+          />
+          <p className="-mt-3 text-xs text-neutral-500 dark:text-neutral-400">
+            All hosts are selected by default. Add a host to limit this entry to
+            that host.
+          </p>
           <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
             Decision
             <select
@@ -2749,6 +3176,7 @@ function ListsTab() {
             <thead>
               <tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
                 <th className="px-3 py-3">Address or range</th>
+                <th className="px-3 py-3">Hosts</th>
                 <th className="px-3 py-3">Decision</th>
                 <th className="px-3 py-3">Reason</th>
                 <th className="px-3 py-3">Expiry</th>
@@ -2765,6 +3193,11 @@ function ListsTab() {
                     <code className="text-sm text-neutral-700 dark:text-neutral-300">
                       {entry.address}
                     </code>
+                  </td>
+                  <td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">
+                    {entry.hosts?.includes("*") || !entry.hosts?.length
+                      ? "All hosts"
+                      : entry.hosts.join(", ")}
                   </td>
                   <td className="px-3 py-4">
                     <span
@@ -2786,16 +3219,20 @@ function ListsTab() {
                       <button
                         type="button"
                         onClick={() => setModal(entry)}
-                        className="cursor-pointer text-sm font-semibold text-blue-600 dark:text-blue-400"
+                        className="css-tooltip inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/40"
+                        data-tooltip="Edit IP entry"
+                        aria-label="Edit IP entry"
                       >
-                        Edit
+                        <Pencil size={15} />
                       </button>
                       <button
                         type="button"
                         onClick={() => remove(entry)}
-                        className="cursor-pointer text-sm font-semibold text-rose-600 dark:text-rose-400"
+                        className="css-tooltip inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40"
+                        data-tooltip="Delete IP entry"
+                        aria-label="Delete IP entry"
                       >
-                        Delete
+                        <Trash2 size={15} />
                       </button>
                     </div>
                   </td>
@@ -2816,29 +3253,143 @@ function ListsTab() {
   );
 }
 
+function CountryMultiSelect({ value, onChange }) {
+  const [open, setOpen] = React.useState(false);
+  const [query, setQuery] = React.useState("");
+  const containerRef = React.useRef(null);
+  const visibleCountries = countries
+    .filter((country) =>
+      `${country.name} ${country.code}`
+        .toLowerCase()
+        .includes(query.trim().toLowerCase()),
+    )
+    .slice(0, 80);
+
+  React.useEffect(() => {
+    const close = (event) => {
+      if (!containerRef.current?.contains(event.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, []);
+
+  const toggleCountry = (country) => {
+    const selected = value.some((item) => item.code === country.code);
+    onChange(
+      selected
+        ? value.filter((item) => item.code !== country.code)
+        : [...value, country],
+    );
+  };
+
+  return (
+    <div ref={containerRef} className="relative mt-1.5">
+      <div
+        onClick={() => setOpen((current) => !current)}
+        className="flex min-h-11 w-full cursor-pointer items-center justify-between gap-3 rounded-md border border-neutral-300 bg-white px-3 py-2 text-left text-sm dark:border-neutral-700 dark:bg-neutral-950"
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        role="combobox"
+        tabIndex={0}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            setOpen((current) => !current);
+          }
+        }}
+      >
+        <span className="flex flex-wrap gap-1.5">
+          {value.length ? (
+            value.map((country) => (
+              <span
+                key={country.code}
+                className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 dark:bg-blue-950/40 dark:text-blue-300"
+              >
+                {country.name}
+                <span className="font-mono text-[10px] opacity-70">
+                  {country.code}
+                </span>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    toggleCountry(country);
+                  }}
+                  className="cursor-pointer text-blue-500 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-100"
+                  aria-label={`Remove ${country.name}`}
+                >
+                  <X size={13} />
+                </button>
+              </span>
+            ))
+          ) : (
+            <span className="text-neutral-400">Select countries…</span>
+          )}
+        </span>
+        <ChevronDown
+          size={16}
+          className={`shrink-0 text-neutral-400 transition-transform ${open ? "rotate-180" : ""}`}
+        />
+      </div>
+      {open && (
+        <div className="absolute z-[70] mt-1 w-full overflow-hidden rounded-md border border-neutral-200 bg-white shadow-xl dark:border-neutral-700 dark:bg-neutral-900">
+          <div className="border-b border-neutral-200 p-2 dark:border-neutral-700">
+            <div className="relative">
+              <Search
+                size={15}
+                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400"
+              />
+              <input
+                autoFocus
+                className={`${input} mt-0 pl-9`}
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search countries…"
+                aria-label="Search countries"
+              />
+            </div>
+          </div>
+          <div className="max-h-64 overflow-y-auto p-2" role="listbox">
+            {visibleCountries.length ? (
+              visibleCountries.map((country) => {
+                const active = value.some((item) => item.code === country.code);
+                return (
+                  <button
+                    type="button"
+                    key={country.code}
+                    onClick={() => toggleCountry(country)}
+                    className={`flex w-full cursor-pointer items-center justify-between rounded-md px-3 py-2 text-left text-sm ${active ? "bg-blue-50 font-semibold text-blue-700 dark:bg-blue-950/40 dark:text-blue-300" : "text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800"}`}
+                    role="option"
+                    aria-selected={active}
+                  >
+                    <span>{country.name}</span>
+                    <span className="font-mono text-xs text-neutral-400">
+                      {country.code}
+                    </span>
+                  </button>
+                );
+              })
+            ) : (
+              <p className="px-3 py-4 text-center text-sm text-neutral-500">
+                No countries found.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CountryPolicyModal({ entry, onClose, onSaved }) {
   const initial = entry
     ? [{ code: entry.country_code, name: entry.country_name }]
     : [];
   const [selected, setSelected] = React.useState(initial);
-  const [query, setQuery] = React.useState("");
   const [decision, setDecision] = React.useState(entry?.decision || "Block");
   const [enabled, setEnabled] = React.useState(entry?.enabled ?? true);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState("");
-  const visibleCountries = countries
-    .filter((country) =>
-      `${country.name} ${country.code}`
-        .toLowerCase()
-        .includes(query.toLowerCase()),
-    )
-    .slice(0, 80);
-  const toggleCountry = (country) =>
-    setSelected((current) =>
-      current.some((item) => item.code === country.code)
-        ? current.filter((item) => item.code !== country.code)
-        : [...current, country],
-    );
   const save = async (event) => {
     event.preventDefault();
     if (!selected.length) {
@@ -2848,26 +3399,26 @@ function CountryPolicyModal({ entry, onClose, onSaved }) {
     setSaving(true);
     setError("");
     try {
-      for (const [index, country] of selected.entries()) {
-        const editing = Boolean(entry && index === 0);
-        const response = await apiRequest(
-          editing
-            ? `/api/v1/application-shield/geo-controls/${entry.id}`
-            : "/api/v1/application-shield/geo-controls",
-          {
-            method: editing ? "PATCH" : "POST",
-            body: JSON.stringify({
-              country_code: country.code,
-              country_name: country.name,
-              decision,
-              enabled,
-            }),
-          },
+      const payload = selected.map((country) => ({
+        country_code: country.code,
+        country_name: country.name,
+        decision,
+        enabled,
+      }));
+      const editing = Boolean(entry);
+      const response = await apiRequest(
+        editing
+          ? `/api/v1/application-shield/geo-controls/${entry.id}`
+          : "/api/v1/application-shield/geo-controls/bulk",
+        {
+          method: editing ? "PATCH" : "POST",
+          body: JSON.stringify(editing ? payload[0] : payload),
+        },
+      );
+      if (!response.ok) {
+        throw new Error(
+          await readApiError(response, "Unable to save country policies."),
         );
-        if (!response.ok)
-          throw new Error(
-            await readApiError(response, `Unable to save ${country.name}.`),
-          );
       }
       onSaved();
       showToast(
@@ -2875,7 +3426,7 @@ function CountryPolicyModal({ entry, onClose, onSaved }) {
         "success",
       );
     } catch (reason) {
-      setError(reason.message || "Unable to save country policies.");
+      showToast(reason.message || "Unable to save country policies.", "error");
     } finally {
       setSaving(false);
     }
@@ -2905,57 +3456,7 @@ function CountryPolicyModal({ entry, onClose, onSaved }) {
             <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
               Countries
             </label>
-            <div className="mt-1.5 flex min-h-11 flex-wrap gap-2 rounded-md border border-neutral-300 bg-white p-2 dark:border-neutral-700 dark:bg-neutral-950">
-              {selected.map((country) => (
-                <span
-                  key={country.code}
-                  className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 dark:bg-blue-950/40 dark:text-blue-300"
-                >
-                  {country.name}
-                  <button
-                    type="button"
-                    onClick={() => toggleCountry(country)}
-                    className="cursor-pointer text-blue-500 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-100"
-                    aria-label={`Remove ${country.name}`}
-                  >
-                    <X size={13} />
-                  </button>
-                </span>
-              ))}
-              {!selected.length && (
-                <span className="px-1 text-sm text-neutral-400">
-                  Choose one or more countries below
-                </span>
-              )}
-            </div>
-            <input
-              className={input}
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search countries…"
-            />
-          </div>
-          <div className="max-h-64 overflow-y-auto rounded-md border border-neutral-200 p-2 dark:border-neutral-800">
-            <div className="grid gap-1 sm:grid-cols-2">
-              {visibleCountries.map((country) => {
-                const active = selected.some(
-                  (item) => item.code === country.code,
-                );
-                return (
-                  <button
-                    type="button"
-                    key={country.code}
-                    onClick={() => toggleCountry(country)}
-                    className={`flex cursor-pointer items-center justify-between rounded-md px-3 py-2 text-left text-sm ${active ? "bg-blue-50 font-semibold text-blue-700 dark:bg-blue-950/40 dark:text-blue-300" : "text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800"}`}
-                  >
-                    <span>{country.name}</span>
-                    <span className="font-mono text-xs text-neutral-400">
-                      {country.code}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+            <CountryMultiSelect value={selected} onChange={setSelected} />
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
@@ -3006,9 +3507,9 @@ function CountryPolicyModal({ entry, onClose, onSaved }) {
 
 function RegionsTabV2() {
   const [data, setData] = React.useState(null);
-  const [traffic, setTraffic] = React.useState(null);
   const [error, setError] = React.useState("");
   const [form, setForm] = React.useState(null);
+  const [confirmDialog, setConfirmDialog] = React.useState(null);
   const load = React.useCallback(
     () =>
       apiRequest("/api/v1/application-shield/geo-controls")
@@ -3024,47 +3525,37 @@ function RegionsTabV2() {
         ),
     [],
   );
-  const loadTrafficSources = React.useCallback(
-    () =>
-      apiRequest("/api/v1/application-shield/traffic?limit=200")
-        .then(async (response) => {
-          if (response.ok) setTraffic(await response.json());
-        })
-        .catch(() => {}),
-    [],
-  );
   React.useEffect(() => {
     load();
   }, [load]);
-  React.useEffect(() => {
-    loadTrafficSources();
-  }, [loadTrafficSources]);
   const entries = data?.entries || [];
   const database = data?.database;
-  const sources = Object.entries(
-    (traffic?.events || []).reduce((groups, event) => {
-      const source = event.source_ip || "Unknown";
-      const current = groups[source] || { count: 0, country: event.country };
-      groups[source] = {
-        count: current.count + 1,
-        country: current.country || event.country,
-      };
-      return groups;
-    }, {}),
-  )
-    .sort((a, b) => b[1].count - a[1].count)
-    .slice(0, 8);
+  const loading = !data && !error;
   const remove = async (entry) => {
-    const response = await apiRequest(
-      `/api/v1/application-shield/geo-controls/${entry.id}`,
-      { method: "DELETE" },
-    );
-    if (!response.ok) {
-      setError(await readApiError(response, "Unable to remove Geo policy."));
-      return;
-    }
-    await load();
-    showToast("Country policy removed", "success");
+    setConfirmDialog({
+      kind: "confirm",
+      tone: "danger",
+      title: "Delete country policy?",
+      message: `Delete the ${entry.country_name || entry.country_code} country policy? This cannot be undone.`,
+      submitLabel: "Delete policy",
+      onSubmit: async () => {
+        setConfirmDialog(null);
+        const response = await apiRequest(
+          `/api/v1/application-shield/geo-controls/${entry.id}`,
+          { method: "DELETE" },
+        );
+        if (!response.ok) {
+          showToast(
+            await readApiError(response, "Unable to remove Geo policy."),
+            "error",
+          );
+          return;
+        }
+        await load();
+        showToast("Country policy removed", "success");
+      },
+    });
+    return;
   };
   return (
     <div className="space-y-5">
@@ -3089,7 +3580,7 @@ function RegionsTabV2() {
             <button
               type="button"
               onClick={() => setForm({})}
-              disabled={!database?.ready}
+              disabled={loading || !database?.ready}
               className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Plus size={15} />
@@ -3098,27 +3589,43 @@ function RegionsTabV2() {
           </div>
         }
       >
-        <div
-          className={`rounded-md p-4 ${database?.ready ? "bg-emerald-50 dark:bg-emerald-950/20" : "bg-amber-50 dark:bg-amber-950/20"}`}
-        >
-          <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
-            {database?.ready
-              ? "Country database ready"
-              : "Country database unavailable"}
-          </p>
-          <p className="mt-1 text-xs text-neutral-600 dark:text-neutral-400">
-            {database?.ready
-              ? `${database.provider || "DB-IP Lite"} · ${entries.length} policy entries`
-              : database?.message ||
-                "Download the country database before creating Geo policies."}
-          </p>
-        </div>
+        {loading ? (
+          <div className="space-y-3 rounded-md border border-neutral-200 p-4 dark:border-neutral-800">
+            <div className="h-4 w-48 animate-pulse rounded bg-neutral-200 dark:bg-neutral-700" />
+            <div className="h-3 w-80 max-w-full animate-pulse rounded bg-neutral-200 dark:bg-neutral-700" />
+          </div>
+        ) : (
+          <div
+            className={`rounded-md p-4 ${database?.ready ? "bg-emerald-50 dark:bg-emerald-950/20" : "bg-amber-50 dark:bg-amber-950/20"}`}
+          >
+            <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+              {database?.ready
+                ? "Country database ready"
+                : "Country database unavailable"}
+            </p>
+            <p className="mt-1 text-xs text-neutral-600 dark:text-neutral-400">
+              {database?.ready
+                ? `${database.provider || "DB-IP Lite"} · ${entries.length} policy entries`
+                : database?.message ||
+                  "Download the country database before creating Geo policies."}
+            </p>
+          </div>
+        )}
       </Section>
       <Section
         title="Country policies"
         description="Active allow and block decisions applied to requests resolved to these countries."
       >
-        {entries.length === 0 ? (
+        {loading ? (
+          <div className="space-y-3 rounded-md border border-neutral-200 p-4 dark:border-neutral-800">
+            {["w-11/12", "w-10/12", "w-9/12", "w-8/12"].map((width) => (
+              <div
+                key={width}
+                className={`h-10 ${width} animate-pulse rounded bg-neutral-200 dark:bg-neutral-700`}
+              />
+            ))}
+          </div>
+        ) : entries.length === 0 ? (
           <div className="rounded-md border border-dashed border-neutral-300 px-5 py-12 text-center dark:border-neutral-700">
             <Map className="mx-auto text-neutral-400" size={28} />
             <p className="mt-3 text-sm font-semibold text-neutral-700 dark:text-neutral-300">
@@ -3162,16 +3669,20 @@ function RegionsTabV2() {
                       <button
                         type="button"
                         onClick={() => setForm(entry)}
-                        className="mr-3 cursor-pointer text-sm font-semibold text-blue-600 dark:text-blue-400"
+                        className="css-tooltip mr-2 inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/40"
+                        data-tooltip="Edit country policy"
+                        aria-label="Edit country policy"
                       >
-                        Edit
+                        <Pencil size={15} />
                       </button>
                       <button
                         type="button"
                         onClick={() => remove(entry)}
-                        className="cursor-pointer text-sm font-semibold text-rose-600 dark:text-rose-400"
+                        className="css-tooltip inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40"
+                        data-tooltip="Delete country policy"
+                        aria-label="Delete country policy"
                       >
-                        Delete
+                        <Trash2 size={15} />
                       </button>
                     </td>
                   </tr>
@@ -3181,51 +3692,11 @@ function RegionsTabV2() {
           </div>
         )}
       </Section>
-      <Section
-        title="Top sources"
-        description="Sources with the most recent audited traffic."
-      >
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[520px] text-left">
-            <thead>
-              <tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
-                <th className="px-3 py-3">Source</th>
-                <th className="px-3 py-3">Events</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sources.map(([source, item]) => (
-                <tr
-                  key={source}
-                  className="border-b border-neutral-100 dark:border-neutral-800"
-                >
-                  <td className="px-3 py-4">
-                    <span className="text-base" aria-hidden="true">
-                      {countryFlag(item.country?.country_code) || "🌐"}
-                    </span>
-                    <code className="text-sm text-neutral-700 dark:text-neutral-300">
-                      {source}
-                    </code>
-                  </td>
-                  <td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">
-                    {item.count}
-                  </td>
-                </tr>
-              ))}
-              {traffic && !sources.length && (
-                <tr>
-                  <td
-                    colSpan="2"
-                    className="px-3 py-8 text-center text-sm text-neutral-500 dark:text-neutral-400"
-                  >
-                    No audited sources yet.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </Section>
+      <ActionDialog
+        dialog={confirmDialog}
+        onClose={() => setConfirmDialog(null)}
+        onSubmit={() => confirmDialog?.onSubmit?.()}
+      />
       {form && (
         <CountryPolicyModal
           entry={form.id ? form : null}
@@ -3244,6 +3715,7 @@ function RegionsTab() {
   const [data, setData] = React.useState(null);
   const [error, setError] = React.useState("");
   const [form, setForm] = React.useState(null);
+  const [confirmDialog, setConfirmDialog] = React.useState(null);
   const [saving, setSaving] = React.useState(false);
   const [downloading, setDownloading] = React.useState(false);
   const load = React.useCallback(
@@ -3293,16 +3765,29 @@ function RegionsTab() {
     showToast("Geo policy saved", "success");
   };
   const remove = async (entry) => {
-    const response = await apiRequest(
-      `/api/v1/application-shield/geo-controls/${entry.id}`,
-      { method: "DELETE" },
-    );
-    if (!response.ok) {
-      setError(await readApiError(response, "Unable to remove Geo policy."));
-      return;
-    }
-    await load();
-    showToast("Geo policy removed", "success");
+    setConfirmDialog({
+      kind: "confirm",
+      tone: "danger",
+      title: "Delete country policy?",
+      message: `Delete the ${entry.country_name || entry.country_code} country policy? This cannot be undone.`,
+      submitLabel: "Delete policy",
+      onSubmit: async () => {
+        setConfirmDialog(null);
+        const response = await apiRequest(
+          `/api/v1/application-shield/geo-controls/${entry.id}`,
+          { method: "DELETE" },
+        );
+        if (!response.ok) {
+          showToast(
+            await readApiError(response, "Unable to remove Geo policy."),
+            "error",
+          );
+          return;
+        }
+        await load();
+        showToast("Geo policy removed", "success");
+      },
+    });
   };
   const downloadDatabase = async () => {
     setDownloading(true);
@@ -3491,16 +3976,20 @@ function RegionsTab() {
                       <button
                         type="button"
                         onClick={() => setForm(entry)}
-                        className="mr-3 cursor-pointer text-sm font-semibold text-blue-600 dark:text-blue-400"
+                        className="css-tooltip mr-2 inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/40"
+                        data-tooltip="Edit country policy"
+                        aria-label="Edit country policy"
                       >
-                        Edit
+                        <Pencil size={15} />
                       </button>
                       <button
                         type="button"
                         onClick={() => remove(entry)}
-                        className="cursor-pointer text-sm font-semibold text-rose-600 dark:text-rose-400"
+                        className="css-tooltip inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40"
+                        data-tooltip="Delete country policy"
+                        aria-label="Delete country policy"
                       >
-                        Delete
+                        <Trash2 size={15} />
                       </button>
                     </td>
                   </tr>
@@ -3532,6 +4021,11 @@ function RegionsTab() {
           </div>
         )}
       </Section>
+      <ActionDialog
+        dialog={confirmDialog}
+        onClose={() => setConfirmDialog(null)}
+        onSubmit={() => confirmDialog?.onSubmit?.()}
+      />
       {form && (
         <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-neutral-950/60 p-4 sm:p-8">
           <section className="w-full max-w-lg rounded-xl bg-white p-5 shadow-xl dark:bg-neutral-900">
@@ -3630,6 +4124,8 @@ function TrafficTabPaginated() {
   const [page, setPage] = React.useState(1);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState("");
+  const [ipModal, setIpModal] = React.useState(null);
+  const [toast, setToast] = React.useState(null);
   const initialLoadStarted = React.useRef(false);
 
   const load = React.useCallback(async (requestedPage = page) => {
@@ -3662,6 +4158,17 @@ function TrafficTabPaginated() {
   const pagination = data?.pagination || {};
   const total = Number(pagination.total || 0);
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const hostOptions = [
+    ...new Set(
+      events
+        .map((event) =>
+          String(event.host || "")
+            .trim()
+            .toLowerCase(),
+        )
+        .filter((host) => host && host !== "unknown"),
+    ),
+  ];
   return (
     <div className="space-y-5">
       {error && (
@@ -3721,9 +4228,9 @@ function TrafficTabPaginated() {
             <thead>
               <tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
                 <th className="px-3 py-3">Time</th>
+                <th className="px-3 py-3">Host</th>
                 <th className="px-3 py-3">Request</th>
                 <th className="px-3 py-3">Source</th>
-                <th className="px-3 py-3">Host</th>
                 <th className="px-3 py-3">Status</th>
                 <th className="px-3 py-3">Outcome</th>
               </tr>
@@ -3735,7 +4242,10 @@ function TrafficTabPaginated() {
                   className="border-b border-neutral-100 dark:border-neutral-800"
                 >
                   <td className="px-3 py-4 text-xs text-neutral-500 dark:text-neutral-400">
-                    {trafficTime(event.time)}
+                    <TrafficTime value={event.time} />
+                  </td>
+                  <td className="max-w-xs px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">
+                    <span className="block truncate">{event.host}</span>
                   </td>
                   <td className="max-w-md px-3 py-4">
                     <code className="block truncate text-xs text-neutral-700 dark:text-neutral-300">
@@ -3748,10 +4258,10 @@ function TrafficTabPaginated() {
                     )}
                   </td>
                   <td className="px-3 py-4 font-mono text-xs text-neutral-600 dark:text-neutral-400">
-                    <SourceWithCountry event={event} />
-                  </td>
-                  <td className="max-w-xs px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">
-                    <span className="block truncate">{event.host}</span>
+                    <SourceWithCountry
+                      event={event}
+                      onSelect={(address) => setIpModal({ address })}
+                    />
                   </td>
                   <td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">
                     {event.status || "—"}
@@ -3812,6 +4322,28 @@ function TrafficTabPaginated() {
           </div>
         </div>
       </Section>
+      {ipModal && (
+        <IpEntryModal
+          entry={ipModal}
+          hostOptions={hostOptions}
+          onClose={() => setIpModal(null)}
+          onSaved={() => {
+            setIpModal(null);
+            setToast({
+              type: "success",
+              message: "IP entry added.",
+            });
+            window.dispatchEvent(
+              new CustomEvent("serverengine:shield-updated"),
+            );
+          }}
+        />
+      )}
+      <Toast
+        message={toast?.message}
+        type={toast?.type}
+        onClose={() => setToast(null)}
+      />
     </div>
   );
 }

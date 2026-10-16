@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import ipaddress
 import os
 import re
 import shutil
@@ -36,16 +37,23 @@ _PORT_ITEM = re.compile(r"^(?:\d{1,5})(?:-\d{1,5})?$")
 _ALIAS_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
 _IPV4 = re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?$")
 _DEFAULT_RULES = [
-    {"id": "web", "enabled": True, "action": "Allow", "protocol": "TCP", "source": "Any", "destination": "Any", "service": "HTTP / HTTPS", "port": "80, 443", "interface": "WAN", "states": 1284, "note": "Public websites"},
-    {"id": "panel", "enabled": True, "action": "Allow", "protocol": "TCP", "source": "Management network", "destination": "Panel", "service": "Control panel", "port": "2309", "interface": "WAN", "states": 42, "note": "Trusted administrators only"},
-    {"id": "ssh", "enabled": True, "action": "Allow", "protocol": "TCP", "source": "Any", "destination": "Any", "service": "SSH", "port": "22", "interface": "WAN", "states": 8, "note": "Review source restriction"},
-    {"id": "blocklist", "enabled": True, "action": "Deny", "protocol": "TCP", "source": "Threat blocklist", "destination": "Any", "service": "All services", "port": "Any", "interface": "WAN", "states": 317, "note": "Automated protection"},
+    {"id": "web", "enabled": True, "action": "Allow", "protocol": "TCP", "source": "0.0.0.0/0", "destination": "0.0.0.0/0", "service": "HTTP / HTTPS", "port": "80, 443", "interface": "WAN", "states": 1284, "note": "Public websites"},
+    {"id": "panel", "enabled": True, "action": "Allow", "protocol": "TCP", "source": "0.0.0.0/0", "destination": "0.0.0.0/0", "service": "Control panel", "port": "2309", "interface": "WAN", "states": 42, "note": "Restrict source before exposing"},
+    {"id": "ssh", "enabled": True, "action": "Allow", "protocol": "TCP", "source": "0.0.0.0/0", "destination": "0.0.0.0/0", "service": "SSH", "port": "22", "interface": "WAN", "states": 8, "note": "Review source restriction"},
 ]
+_DEFAULT_OUTBOUND_RULES: list[dict] = []
+_DEFAULT_INPUT_POLICY = (
+    "accept"
+    if os.getenv("APP_ENV", "").lower() in {"development", "dev", "test"}
+    else "drop"
+)
 _DEFAULT_NFTABLES_CONFIG = {
     "enabled": True,
-    "input_policy": "accept",
+    "input_policy": _DEFAULT_INPUT_POLICY,
     "forward_policy": "accept",
+    "output_policy": "accept",
 }
+_NFTABLES_POLICY_VERSION = 3
 
 
 class FirewallService:
@@ -59,6 +67,7 @@ class FirewallService:
     def overview(self) -> dict:
         with self._lock:
             rules = self._read()
+            outbound_rules = self._read_outbound_rules()
             backend = self._backend_status()
             state = self._read_state()
             nftables = self._nftables_config_from_state(state)
@@ -68,11 +77,14 @@ class FirewallService:
             counters = self._read_counters() if backend["available"] else {}
             for rule in rules:
                 rule["states"] = counters.get(rule["id"], 0)
+            for rule in outbound_rules:
+                rule["states"] = counters.get(rule["id"], 0)
             return {
                 "enabled": nftables["enabled"] and backend["available"],
                 "status": "disabled" if not nftables["enabled"] else ("protected" if state.get("last_apply") and backend["available"] else "not-applied"),
                 "last_reload": state.get("last_reload"),
                 "rules": rules,
+                "outbound_rules": outbound_rules,
                 "forwardings": [self._with_forwarding_counter(item, counters) for item in forwardings],
                 "aliases": aliases,
                 "blocked_addresses": [self._with_forwarding_counter(item, counters) for item in blocked_addresses],
@@ -96,6 +108,7 @@ class FirewallService:
     def update_nftables_config(self, payload: NftablesConfigRequest) -> dict:
         with self._lock:
             rules = self._read()
+            outbound_rules = self._read_outbound_rules()
             forwardings = self._read_forwardings()
             aliases = self._read_aliases()
             blocked_addresses = self._read_blocked_addresses()
@@ -106,6 +119,7 @@ class FirewallService:
                 aliases,
                 blocked_addresses,
                 nftables_config=config,
+                outbound_rules=outbound_rules,
             )
             if not result.get("applied") and payload.enabled:
                 raise HTTPException(503, "Unable to apply nftables configuration: " + " ".join(result.get("warnings", [])))
@@ -117,6 +131,7 @@ class FirewallService:
                 reloaded=False,
                 apply_result=result,
                 nftables_config=config,
+                outbound_rules=outbound_rules,
             )
             return self.nftables_config()
 
@@ -162,6 +177,51 @@ class FirewallService:
             if len(remaining) == len(rules):
                 raise HTTPException(404, "Firewall rule not found")
             self._save_and_apply(remaining)
+            return {"deleted": True, "id": rule_id}
+
+    def create_outbound_rule(self, payload: FirewallRuleRequest) -> FirewallRule:
+        self._validate(payload)
+        with self._lock:
+            rules = self._read()
+            outbound_rules = self._read_outbound_rules()
+            rule = FirewallRule(id=f"out-{uuid.uuid4()}", **payload.model_dump())
+            outbound_rules.append(rule.model_dump())
+            self._save_and_apply(rules, outbound_rules=outbound_rules)
+            return rule
+
+    def update_outbound_rule(self, rule_id: str, payload: FirewallRuleRequest) -> FirewallRule:
+        self._validate(payload)
+        with self._lock:
+            outbound_rules = self._read_outbound_rules()
+            item = next((rule for rule in outbound_rules if rule["id"] == rule_id), None)
+            if item is None:
+                raise HTTPException(404, "Outbound firewall rule not found")
+            enabled = item.get("enabled", True)
+            states = item.get("states", 0)
+            item.update(payload.model_dump())
+            item["enabled"] = enabled
+            item["states"] = states
+            self._save_and_apply(self._read(), outbound_rules=outbound_rules)
+            return FirewallRule.model_validate(item)
+
+    def patch_outbound_rule(self, rule_id: str, payload: FirewallRulePatch) -> FirewallRule:
+        with self._lock:
+            outbound_rules = self._read_outbound_rules()
+            item = next((rule for rule in outbound_rules if rule["id"] == rule_id), None)
+            if item is None:
+                raise HTTPException(404, "Outbound firewall rule not found")
+            for key, value in payload.model_dump(exclude_unset=True).items():
+                item[key] = value
+            self._save_and_apply(self._read(), outbound_rules=outbound_rules)
+            return FirewallRule.model_validate(item)
+
+    def delete_outbound_rule(self, rule_id: str) -> dict:
+        with self._lock:
+            outbound_rules = self._read_outbound_rules()
+            remaining = [rule for rule in outbound_rules if rule["id"] != rule_id]
+            if len(remaining) == len(outbound_rules):
+                raise HTTPException(404, "Outbound firewall rule not found")
+            self._save_and_apply(self._read(), outbound_rules=remaining)
             return {"deleted": True, "id": rule_id}
 
     def reload(self) -> dict:
@@ -318,6 +378,16 @@ class FirewallService:
                     "packets": rule.get("states", 0),
                     "note": rule.get("note", ""),
                 })
+            for rule in overview["outbound_rules"]:
+                entries.append({
+                    "id": rule["id"],
+                    "type": "Outbound firewall rule",
+                    "name": rule.get("service", "Outbound firewall rule"),
+                    "match": f"{rule.get('protocol', 'TCP')} · {rule.get('port', 'Any')}",
+                    "action": rule.get("action", "Allow"),
+                    "packets": rule.get("states", 0),
+                    "note": rule.get("note", ""),
+                })
             for forwarding in overview["forwardings"]:
                 entries.append({
                     "id": forwarding["id"],
@@ -360,7 +430,46 @@ class FirewallService:
         except (OSError, json.JSONDecodeError) as exc:
             raise HTTPException(500, f"Firewall policy is unreadable: {exc}")
         rules = value.get("rules", []) if isinstance(value, dict) else []
+        normalized_rules = []
+        for item in rules:
+            rule = FirewallRule.model_validate(item).model_dump()
+            if (
+                rule.get("id") == "blocklist"
+                and rule.get("source") == "Threat blocklist"
+                and rule.get("destination") == "Any"
+            ):
+                continue
+            normalized_rules.append(self._normalize_default_rule_addresses(rule))
+        return normalized_rules
+
+    def _read_outbound_rules(self) -> list[dict]:
+        if not self.path.exists():
+            return [dict(item) for item in _DEFAULT_OUTBOUND_RULES]
+        state = self._read_state()
+        rules = state.get("outbound_rules", []) if isinstance(state, dict) else []
         return [FirewallRule.model_validate(item).model_dump() for item in rules]
+
+    @staticmethod
+    def _normalize_default_rule_addresses(rule: dict) -> dict:
+        """Convert legacy built-in defaults to explicit CIDR values."""
+        if rule.get("id") == "web":
+            if rule.get("source") == "Any":
+                rule["source"] = "0.0.0.0/0"
+            if rule.get("destination") in {"Any", "0.0.0.0/32"}:
+                rule["destination"] = "0.0.0.0/0"
+        elif rule.get("id") == "panel":
+            if rule.get("source") == "Management network":
+                rule["source"] = "0.0.0.0/0"
+            if rule.get("destination") == "Panel":
+                rule["destination"] = "0.0.0.0/0"
+            if rule.get("note") == "Trusted administrators only":
+                rule["note"] = "Restrict source before exposing"
+        elif rule.get("id") == "ssh":
+            if rule.get("source") == "Any":
+                rule["source"] = "0.0.0.0/0"
+            if rule.get("destination") == "Any":
+                rule["destination"] = "0.0.0.0/0"
+        return rule
 
     def _read_state(self) -> dict:
         if not self.path.exists():
@@ -395,18 +504,21 @@ class FirewallService:
     def _last_reload(self) -> str | None:
         return self._read_state().get("last_reload")
 
-    def _save_and_apply(self, rules: list[dict], forwardings: list[dict] | None = None, aliases: list[dict] | None = None, blocked_addresses: list[dict] | None = None, reloaded: bool = False):
+    def _save_and_apply(self, rules: list[dict], forwardings: list[dict] | None = None, aliases: list[dict] | None = None, blocked_addresses: list[dict] | None = None, reloaded: bool = False, outbound_rules: list[dict] | None = None):
         forwardings = self._read_forwardings() if forwardings is None else forwardings
         aliases = self._read_aliases() if aliases is None else aliases
         blocked_addresses = self._read_blocked_addresses() if blocked_addresses is None else blocked_addresses
-        result = self._apply_rules(rules, forwardings, aliases, blocked_addresses)
-        self._write(rules, forwardings, aliases, blocked_addresses, reloaded=reloaded, apply_result=result)
+        outbound_rules = self._read_outbound_rules() if outbound_rules is None else outbound_rules
+        result = self._apply_rules(rules, forwardings, aliases, blocked_addresses, outbound_rules=outbound_rules)
+        self._write(rules, forwardings, aliases, blocked_addresses, reloaded=reloaded, apply_result=result, outbound_rules=outbound_rules)
 
-    def _write(self, rules: list[dict], forwardings: list[dict], aliases: list[dict], blocked_addresses: list[dict], reloaded: bool, apply_result: dict | None = None, nftables_config: dict | None = None):
+    def _write(self, rules: list[dict], forwardings: list[dict], aliases: list[dict], blocked_addresses: list[dict], reloaded: bool, apply_result: dict | None = None, nftables_config: dict | None = None, outbound_rules: list[dict] | None = None):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         current = self._read_state()
+        outbound_rules = current.get("outbound_rules", _DEFAULT_OUTBOUND_RULES) if outbound_rules is None else outbound_rules
         value = {
             "rules": rules,
+            "outbound_rules": outbound_rules,
             "forwardings": forwardings,
             "aliases": aliases,
             "blocked_addresses": blocked_addresses,
@@ -414,6 +526,7 @@ class FirewallService:
             "last_apply": self._now() if apply_result and apply_result.get("applied") else current.get("last_apply"),
             "apply_warnings": (apply_result or {}).get("warnings", current.get("apply_warnings", [])),
             "nftables": nftables_config or current.get("nftables", dict(_DEFAULT_NFTABLES_CONFIG)),
+            "nftables_policy_version": _NFTABLES_POLICY_VERSION,
         }
         fd, temporary = tempfile.mkstemp(prefix="firewall.", suffix=".tmp", dir=self.path.parent)
         try:
@@ -427,21 +540,37 @@ class FirewallService:
             if os.path.exists(temporary):
                 os.unlink(temporary)
 
-    @staticmethod
-    def _validate(payload: FirewallRuleRequest):
+    def _validate(self, payload: FirewallRuleRequest):
         if not _PORTS.fullmatch(payload.port):
             raise HTTPException(400, "Port contains unsupported characters")
         if payload.protocol == "ICMP" and payload.port.strip().lower() not in {"any", ""}:
             raise HTTPException(400, "ICMP rules cannot specify ports")
+        aliases = {
+            item["name"]
+            for item in self._read_aliases()
+            if item.get("kind") == "Address" and item.get("enabled", True)
+        }
+        built_in_aliases = {
+            "management network",
+            "panel",
+            "webservers",
+        }
         for value, label in ((payload.source, "source"), (payload.destination, "destination")):
-            if value.strip() in {"", "Any"}:
-                continue
-            if value.lower() in {"management network", "threat blocklist", "panel", "webservers"}:
-                continue
-            if _ALIAS_NAME.fullmatch(value):
-                continue
-            if not _ADDRESS.fullmatch(value.strip()):
-                raise HTTPException(400, f"{label} must be an IP address, CIDR range, or supported alias")
+            values = [item.strip() for item in value.split(",") if item.strip()]
+            if not values:
+                raise HTTPException(400, f"{label} requires at least one IP or CIDR")
+            for item in values:
+                if item in {"Any", "0.0.0.0/0", "::/0"}:
+                    continue
+                if item.lower() in built_in_aliases or item in aliases:
+                    continue
+                try:
+                    ipaddress.ip_network(item, strict=False)
+                except ValueError as error:
+                    raise HTTPException(
+                        400,
+                        f"{label} must contain valid IP/CIDR tags or existing address aliases",
+                    ) from error
 
     @staticmethod
     def _validate_forwarding(payload: PortForwardRequest):
@@ -503,10 +632,17 @@ class FirewallService:
         value = state.get("nftables", {}) if isinstance(state, dict) else {}
         input_policy = value.get("input_policy", _DEFAULT_NFTABLES_CONFIG["input_policy"])
         forward_policy = value.get("forward_policy", _DEFAULT_NFTABLES_CONFIG["forward_policy"])
+        output_policy = value.get("output_policy", _DEFAULT_NFTABLES_CONFIG["output_policy"])
+        if (
+            state.get("nftables_policy_version") != _NFTABLES_POLICY_VERSION
+            and input_policy == "accept"
+        ):
+            input_policy = _DEFAULT_NFTABLES_CONFIG["input_policy"]
         return {
             "enabled": bool(value.get("enabled", _DEFAULT_NFTABLES_CONFIG["enabled"])),
-            "input_policy": input_policy if input_policy in {"accept", "drop"} else "accept",
+            "input_policy": input_policy if input_policy in {"accept", "drop"} else _DEFAULT_NFTABLES_CONFIG["input_policy"],
             "forward_policy": forward_policy if forward_policy in {"accept", "drop"} else "accept",
+            "output_policy": output_policy if output_policy in {"accept", "drop"} else "accept",
         }
 
     def _nftables_config_response(self, config: dict, backend: dict) -> dict:
@@ -559,10 +695,11 @@ class FirewallService:
             message += " IP forwarding is disabled, so port forwards will not route traffic yet."
         return {"available": True, "provider": "nftables", "forwarding_enabled": forwarding_enabled, "message": message}
 
-    def _apply_rules(self, rules: list[dict], forwardings: list[dict] | None = None, aliases: list[dict] | None = None, blocked_addresses: list[dict] | None = None, nftables_config: dict | None = None) -> dict:
+    def _apply_rules(self, rules: list[dict], forwardings: list[dict] | None = None, aliases: list[dict] | None = None, blocked_addresses: list[dict] | None = None, nftables_config: dict | None = None, outbound_rules: list[dict] | None = None) -> dict:
         forwardings = self._read_forwardings() if forwardings is None else forwardings
         aliases = self._read_aliases() if aliases is None else aliases
         blocked_addresses = self._read_blocked_addresses() if blocked_addresses is None else blocked_addresses
+        outbound_rules = self._read_outbound_rules() if outbound_rules is None else outbound_rules
         config = nftables_config or self._nftables_config_from_state(self._read_state())
         backend = self._backend_status()
         if not backend["available"]:
@@ -575,8 +712,11 @@ class FirewallService:
             f"add table inet {self.nft_table}",
             f"add chain inet {self.nft_table} input {{ type filter hook input priority filter; policy {config['input_policy']}; }}",
             f"add chain inet {self.nft_table} forward {{ type filter hook forward priority filter; policy {config['forward_policy']}; }}",
+            f"add chain inet {self.nft_table} output {{ type filter hook output priority filter; policy {config['output_policy']}; }}",
             f"add rule inet {self.nft_table} input ct state established,related accept",
             f"add rule inet {self.nft_table} input iif \"lo\" accept",
+            f"add rule inet {self.nft_table} output ct state established,related accept",
+            f"add rule inet {self.nft_table} output oif \"lo\" accept",
         ]
         nat_lines = [
             f"add table ip {self.nft_table}_nat",
@@ -601,6 +741,16 @@ class FirewallService:
                 warnings.append(f"{rule.get('name') or rule.get('service')}: address or port alias was not applied")
                 continue
             lines.append(f"add rule inet {self.nft_table} input {expression}")
+            applied_count += 1
+
+        for rule in outbound_rules:
+            if not rule.get("enabled", True):
+                continue
+            expression = self._nft_expression(rule, aliases)
+            if expression is None:
+                warnings.append(f"Outbound {rule.get('service')}: address or port alias was not applied")
+                continue
+            lines.append(f"add rule inet {self.nft_table} output {expression}")
             applied_count += 1
 
         forwarding_count = 0
@@ -683,26 +833,39 @@ class FirewallService:
         protocol = rule.get("protocol", "TCP")
         port = rule.get("port", "Any").strip()
         parts = []
-        if source != "Any":
-            alias = address_aliases.get(source)
-            if alias:
-                family = "ip6" if ":" in alias["values"][0] else "ip"
-                parts.append(f"{family} saddr {{ {', '.join(alias['values'])} }}")
-            elif not _ADDRESS.fullmatch(source):
+
+        def address_expression(value: str, direction: str) -> str | None:
+            values = [item.strip() for item in value.split(",") if item.strip()]
+            families: dict[str, list[str]] = {"ip": [], "ip6": []}
+            for item in values:
+                if item == "Any":
+                    item = "0.0.0.0/0"
+                alias = address_aliases.get(item)
+                if alias:
+                    alias_values = alias.get("values", [])
+                else:
+                    alias_values = [item]
+                for address in alias_values:
+                    try:
+                        network = ipaddress.ip_network(address, strict=False)
+                    except ValueError:
+                        return None
+                    family = "ip6" if network.version == 6 else "ip"
+                    families[family].append(str(network))
+            expressions = [
+                f"{family} {direction} {{ {', '.join(dict.fromkeys(addresses))} }}"
+                for family, addresses in families.items()
+                if addresses
+            ]
+            if not expressions:
                 return None
-            else:
-                family = "ip6" if ":" in source else "ip"
-                parts.append(f"{family} saddr {source}")
-        if destination != "Any":
-            alias = address_aliases.get(destination)
-            if alias:
-                family = "ip6" if ":" in alias["values"][0] else "ip"
-                parts.append(f"{family} daddr {{ {', '.join(alias['values'])} }}")
-            elif not _ADDRESS.fullmatch(destination):
-                return None
-            else:
-                family = "ip6" if ":" in destination else "ip"
-                parts.append(f"{family} daddr {destination}")
+            return expressions[0] if len(expressions) == 1 else f"( {' or '.join(expressions)} )"
+
+        source_expression = address_expression(source, "saddr")
+        destination_expression = address_expression(destination, "daddr")
+        if source_expression is None or destination_expression is None:
+            return None
+        parts.extend([source_expression, destination_expression])
         if protocol == "ICMP":
             parts.append("icmp type echo-request")
         elif protocol in {"TCP", "UDP"}:

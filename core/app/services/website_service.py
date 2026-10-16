@@ -26,36 +26,86 @@ _DOMAIN = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+
 
 
 class _MaintenanceHtmlParser(HTMLParser):
-    """Keep maintenance messages formatted without allowing active content."""
+    """Keep custom error pages formatted without allowing active content."""
 
-    allowed_tags = {"p", "br", "strong", "b", "em", "i", "u", "h1", "h2", "h3", "ul", "ol", "li", "a"}
+    allowed_tags = {
+        "p",
+        "br",
+        "strong",
+        "b",
+        "em",
+        "i",
+        "u",
+        "h1",
+        "h2",
+        "h3",
+        "ul",
+        "ol",
+        "li",
+        "a",
+        "style",
+    }
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.output: list[str] = []
+        self.in_style = False
 
     def handle_starttag(self, tag, attrs):
         tag = tag.lower()
         if tag not in self.allowed_tags:
             return
-        if tag == "a":
+        if tag == "style":
+            self.in_style = True
+            self.output.append("<style>")
+        elif tag == "a":
             href = next((value for key, value in attrs if key.lower() == "href"), "")
             if href and re.match(r"^(?:https?://|mailto:)", href, re.I):
-                self.output.append(f'<a href="{html.escape(href, quote=True)}" target="_blank" rel="noopener noreferrer">')
+                style = next((value for key, value in attrs if key.lower() == "style"), "")
+                style_attribute = (
+                    f' style="{html.escape(_safe_css(style), quote=True)}"'
+                    if style
+                    else ""
+                )
+                self.output.append(
+                    f'<a href="{html.escape(href, quote=True)}"{style_attribute} '
+                    'target="_blank" rel="noopener noreferrer">'
+                )
             else:
                 self.output.append("<a>")
         elif tag == "br":
             self.output.append("<br>")
         else:
-            self.output.append(f"<{tag}>")
+            style = next((value for key, value in attrs if key.lower() == "style"), "")
+            style_attribute = (
+                f' style="{html.escape(_safe_css(style), quote=True)}"'
+                if style
+                else ""
+            )
+            self.output.append(f"<{tag}{style_attribute}>")
 
     def handle_endtag(self, tag):
         tag = tag.lower()
         if tag in self.allowed_tags and tag != "br":
             self.output.append(f"</{tag}>")
+        if tag == "style":
+            self.in_style = False
 
     def handle_data(self, data):
-        self.output.append(html.escape(data))
+        self.output.append(_safe_css(data) if self.in_style else html.escape(data))
+
+
+def _safe_css(value: str) -> str:
+    """Allow visual CSS while removing network loads and script-like CSS."""
+    css = str(value or "")
+    css = re.sub(r"(?is)@import\s+[^;]+;", "", css)
+    css = re.sub(r"(?is)</?style[^>]*>", "", css)
+    css = re.sub(
+        r"(?is)(?:url\s*\(|expression\s*\(|javascript\s*:|behavior\s*:|-moz-binding\s*:)",
+        "/* removed */",
+        css,
+    )
+    return css
 
 
 def _maintenance_html(value: str) -> str:
@@ -455,6 +505,7 @@ class WebsiteService:
         site_log_root = self.log_root / server_type / "sites"
         site_log_root.mkdir(parents=True, exist_ok=True)
         maintenance = self._maintenance_active(site)
+        block_page = self._application_shield_block_page()
         bypass = self._maintenance_bypass(site.maintenance_bypass)
         access_ips = self._access_ips(site.access_allowed_ips)
         auth_file = self.auth_root / f"{self._configuration_id(site)}.htpasswd"
@@ -559,6 +610,11 @@ class WebsiteService:
                 f"    error_log {site_log_root / f'{config_id}.error.log'};" if site.error_log_enabled else "    error_log off;",
                 "",
             ]
+            if block_page:
+                lines.extend([
+                    "    error_page 418 =403 @server_engine_application_shield_blocked;",
+                    "",
+                ])
             redirect_hosts = [host for host in all_names if canonical_host and host != canonical_host]
             if redirect_hosts:
                 redirect_scheme = "https" if tls_ready else "http"
@@ -614,6 +670,15 @@ class WebsiteService:
                 lines.extend(["        try_files $uri =404;", f"        fastcgi_pass unix:{socket};", f"        include {fastcgi_params};", "        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;", "    }"])
             if maintenance:
                 lines.extend(["", f"    location @server_engine_maintenance_{site.id.replace('-', '_')} {{", "        default_type text/html;", "        charset utf-8;", f"        return {site.maintenance_response_code} \"{self._config_text(_maintenance_html(site.maintenance_message))}\\n\";", "    }"])
+            if block_page:
+                lines.extend([
+                    "",
+                    "    location @server_engine_application_shield_blocked {",
+                    "        default_type text/html;",
+                    "        charset utf-8;",
+                    f'        return 403 "{self._config_text(block_page)}\\n";',
+                    "    }",
+                ])
             lines.extend(["", "    location ~ /\\.(?!well-known) {", "        deny all;", "    }", "}", ""])
         return {"website_id": site.id, "server_type": server_type, "config_path": str(config_path), "content": "\n".join(lines)}
 
@@ -796,6 +861,27 @@ class WebsiteService:
     @staticmethod
     def _nginx_access_body(allowed: list[str]) -> list[str]:
         return [*(f"        allow {value};" for value in allowed), "        deny all;"]
+
+    @staticmethod
+    def _application_shield_block_page() -> str:
+        state = Path(os.getenv("SE_STATE_DIR", "/var/lib/server-engine"))
+        path = Path(
+            os.getenv(
+                "SE_APPLICATION_SHIELD_PATH",
+                str(state / "application-shield.json"),
+            )
+        )
+        try:
+            policy = json.loads(path.read_text())
+        except (OSError, TypeError, json.JSONDecodeError):
+            return ""
+        if (
+            not policy.get("enabled")
+            or policy.get("mode") != "blocking"
+            or not policy.get("block_page_enabled")
+        ):
+            return ""
+        return _maintenance_html(policy.get("block_page_html", ""))
 
     def create(self, payload: WebsiteCreateRequest) -> Website:
         with self._lock:

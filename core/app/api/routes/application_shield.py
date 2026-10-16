@@ -163,6 +163,18 @@ def create_geo_control(payload: ApplicationShieldGeoRequest, user=Depends(requir
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 
+@router.post("/geo-controls/bulk", status_code=status.HTTP_201_CREATED)
+def create_geo_controls_bulk(
+    payload: list[ApplicationShieldGeoRequest], user=Depends(require_user)
+):
+    try:
+        return application_shield_service.create_geo_entries(payload)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
 @router.patch("/geo-controls/{entry_id}")
 def update_geo_control(entry_id: str, payload: ApplicationShieldGeoRequest, user=Depends(require_user)):
     try:

@@ -55,6 +55,26 @@ def delete_rule(rule_id: str, user=Depends(require_user)):
     return firewall_service.delete_rule(rule_id)
 
 
+@router.post("/outbound-rules", status_code=status.HTTP_201_CREATED)
+def create_outbound_rule(payload: FirewallRuleRequest, user=Depends(require_user)):
+    return firewall_service.create_outbound_rule(payload)
+
+
+@router.put("/outbound-rules/{rule_id}")
+def update_outbound_rule(rule_id: str, payload: FirewallRuleRequest, user=Depends(require_user)):
+    return firewall_service.update_outbound_rule(rule_id, payload)
+
+
+@router.patch("/outbound-rules/{rule_id}")
+def patch_outbound_rule(rule_id: str, payload: FirewallRulePatch, user=Depends(require_user)):
+    return firewall_service.patch_outbound_rule(rule_id, payload)
+
+
+@router.delete("/outbound-rules/{rule_id}")
+def delete_outbound_rule(rule_id: str, user=Depends(require_user)):
+    return firewall_service.delete_outbound_rule(rule_id)
+
+
 @router.post("/reload")
 def reload_policy(user=Depends(require_user)):
     return firewall_service.reload()

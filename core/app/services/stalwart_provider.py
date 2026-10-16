@@ -27,6 +27,16 @@ class StalwartProvider:
         # not keep stale credentials captured when the control plane imported
         # this module.
         token = os.getenv("SE_STALWART_TOKEN", "").strip()
+        configured_username = os.getenv("SE_STALWART_USER", "").strip()
+        configured_password = os.getenv("SE_STALWART_PASSWORD", "")
+        if token:
+            return {"Authorization": f"Bearer {token}"}
+        if configured_username and configured_password:
+            value = base64.b64encode(
+                f"{configured_username}:{configured_password}".encode()
+            ).decode()
+            return {"Authorization": f"Basic {value}"}
+
         username = ""
         password = ""
         credentials_path = os.getenv("SE_STALWART_CREDENTIALS_FILE", "/opt/server-engine/services/stalwart/conf/serverengine-credentials.json")
@@ -40,8 +50,6 @@ class StalwartProvider:
         if not username or not password:
             username = os.getenv("SE_STALWART_USER", "").strip()
             password = os.getenv("SE_STALWART_PASSWORD", "")
-        if token:
-            return {"Authorization": f"Bearer {token}"}
         if username and password:
             value = base64.b64encode(f"{username}:{password}".encode()).decode()
             return {"Authorization": f"Basic {value}"}
@@ -65,6 +73,16 @@ class StalwartProvider:
             )
             response.raise_for_status()
             body = response.json()
+        except httpx.HTTPStatusError as error:
+            if error.response.status_code == 401:
+                raise StalwartProviderError(
+                    "Stalwart rejected the configured management credentials (HTTP 401). "
+                    "Restart Stalwart from its Runtime tab to reapply the managed recovery credential, "
+                    "or configure SE_STALWART_TOKEN / SE_STALWART_USER and SE_STALWART_PASSWORD."
+                ) from error
+            raise StalwartProviderError(
+                f"Stalwart management API unavailable: {error}"
+            ) from error
         except httpx.HTTPError as error:
             raise StalwartProviderError(f"Stalwart management API unavailable: {error}") from error
         except ValueError as error:

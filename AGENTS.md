@@ -40,6 +40,19 @@ frontend files.
   capability there before creating a one-off implementation in a feature page.
 - New shared components must be reusable, consistently formatted, accessible,
   and documented by their props and expected behavior.
+- Reuse `web/src/components/SaveButton.jsx` for save actions whenever its
+  loading, disabled, and saved-feedback behavior fits. Do not create a
+  feature-specific save spinner or save-button implementation.
+
+## Destructive actions
+
+- Every delete, remove, purge, revoke, or other destructive UI action must
+  require explicit confirmation before making the API request.
+- Use the shared `ActionDialog` component for confirmation dialogs. Do not use
+  browser-native `window.confirm()` or custom one-off confirmation markup.
+- The destructive API call must run only from the dialog's explicit confirm
+  action; cancelling or closing the dialog must leave the resource unchanged.
+- Show the result of the destructive operation with the shared Toast component.
 
 ## CSS tooltips
 

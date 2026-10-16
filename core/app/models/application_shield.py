@@ -8,6 +8,11 @@ AuditEngine = Literal["Off", "RelevantOnly", "On"]
 AuditLogType = Literal["Serial", "Concurrent"]
 AuditLogFormat = Literal["Native", "JSON"]
 
+DEFAULT_BLOCK_PAGE_HTML = """<main>
+  <h1>Request blocked</h1>
+  <p>This request was blocked by the site security policy.</p>
+</main>"""
+
 
 class ApplicationShieldPolicy(BaseModel):
     enabled: bool = False
@@ -22,6 +27,8 @@ class ApplicationShieldPolicy(BaseModel):
     audit_log_format: AuditLogFormat = "Native"
     audit_successful_responses: bool = False
     audit_ignore_get_content_type: bool = True
+    block_page_enabled: bool = False
+    block_page_html: str = Field(default=DEFAULT_BLOCK_PAGE_HTML, max_length=50000)
 
 
 class ShieldConnector(BaseModel):
@@ -52,6 +59,8 @@ class ApplicationShieldPolicyUpdate(BaseModel):
     audit_log_format: AuditLogFormat | None = None
     audit_successful_responses: bool | None = None
     audit_ignore_get_content_type: bool | None = None
+    block_page_enabled: bool | None = None
+    block_page_html: str | None = Field(default=None, max_length=50000)
 
 
 class ApplicationShieldMetrics(BaseModel):

@@ -1,15 +1,23 @@
 import React from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { AlertTriangle, CheckCircle2, Info, Server, X } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Info,
+  Server,
+  X,
+} from "lucide-react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { apiRequest, readApiError } from "../../lib/api";
 import { showToast } from "../../components/Toast";
+import SaveButton from "../../components/SaveButton";
 
 const schema = z.object({
   enabled: z.boolean(),
   input_policy: z.enum(["accept", "drop"]),
   forward_policy: z.enum(["accept", "drop"]),
+  output_policy: z.enum(["accept", "drop"]),
 });
 
 const inputClass =
@@ -37,37 +45,160 @@ function StatusRow({ label, value, hint }) {
   );
 }
 
-export default function NftablesConfigModal({ onClose, onSaved }) {
+function DdosTab({ value, onChange }) {
+  return (
+    <div className="space-y-5">
+      <label className="flex cursor-pointer items-start gap-3 text-sm text-neutral-700 dark:text-neutral-300">
+        <input
+          type="checkbox"
+          className="mt-1 h-4 w-4 accent-blue-600"
+          checked={value.enabled}
+          onChange={(event) => onChange("enabled", event.target.checked)}
+        />
+        <span>
+          <span className="block font-semibold text-neutral-900 dark:text-neutral-100">
+            Enable local traffic protection
+          </span>
+          <span className="mt-1 block text-xs text-neutral-500 dark:text-neutral-400">
+            Apply limits before requests reach the website runtime.
+          </span>
+        </span>
+      </label>
+      <div className="grid gap-5 md:grid-cols-2">
+        <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+          Mitigation mode
+          <select
+            className={inputClass}
+            value={value.mode}
+            onChange={(event) => onChange("mode", event.target.value)}
+          >
+            <option value="rate-limit">Rate limit</option>
+            <option value="challenge">Challenge suspicious clients</option>
+            <option value="block">Block over-limit clients</option>
+          </select>
+        </label>
+        <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+          Requests per second
+          <input
+            className={inputClass}
+            type="number"
+            min="1"
+            value={value.requestsPerSecond}
+            onChange={(event) =>
+              onChange("requestsPerSecond", Number(event.target.value))
+            }
+          />
+        </label>
+        <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+          Burst allowance
+          <input
+            className={inputClass}
+            type="number"
+            min="1"
+            value={value.burst}
+            onChange={(event) => onChange("burst", Number(event.target.value))}
+          />
+        </label>
+        <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+          Concurrent connections
+          <input
+            className={inputClass}
+            type="number"
+            min="1"
+            value={value.concurrent}
+            onChange={(event) =>
+              onChange("concurrent", Number(event.target.value))
+            }
+          />
+        </label>
+        <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+          Temporary ban duration
+          <input
+            className={inputClass}
+            value={value.banDuration}
+            onChange={(event) => onChange("banDuration", event.target.value)}
+            placeholder="10m"
+          />
+        </label>
+        <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 md:col-span-2">
+          Trusted proxy networks
+          <textarea
+            className={`${inputClass} min-h-24`}
+            value={value.trustedProxies}
+            onChange={(event) => onChange("trustedProxies", event.target.value)}
+            placeholder="One CIDR range per line"
+          />
+        </label>
+      </div>
+      <label className="flex cursor-pointer items-start gap-3 text-sm text-neutral-700 dark:text-neutral-300">
+        <input
+          type="checkbox"
+          className="mt-1 h-4 w-4 accent-blue-600"
+          checked={value.logMitigations}
+          onChange={(event) =>
+            onChange("logMitigations", event.target.checked)
+          }
+        />
+        <span>
+          <span className="block font-medium">Log mitigation events</span>
+          <span className="mt-1 block text-xs text-neutral-500 dark:text-neutral-400">
+            Keep rate-limit and temporary-block decisions available for review.
+          </span>
+        </span>
+      </label>
+    </div>
+  );
+}
+
+export default function NftablesConfigModal({
+  onClose,
+  onSaved,
+  ddos,
+  onDdosChange,
+  onDdosSave,
+}) {
+  const [activeTab, setActiveTab] = React.useState("nftables");
   const [config, setConfig] = React.useState(null);
+  const [overview, setOverview] = React.useState(null);
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
   const form = useForm({
     resolver: zodResolver(schema),
     defaultValues: {
       enabled: true,
-      input_policy: "accept",
+      input_policy: "drop",
       forward_policy: "accept",
+      output_policy: "accept",
     },
   });
   const { register, handleSubmit, reset, watch } = form;
   const enabled = watch("enabled");
   const inputPolicy = watch("input_policy");
   const forwardPolicy = watch("forward_policy");
+  const outputPolicy = watch("output_policy");
 
   React.useEffect(() => {
     let active = true;
-    apiRequest("/api/v1/firewall/config")
-      .then(async (response) => {
-        if (!response.ok) throw new Error(await readApiError(response));
-        return response.json();
+    Promise.all([
+      apiRequest("/api/v1/firewall/config"),
+      apiRequest("/api/v1/firewall"),
+    ])
+      .then(async ([configResponse, overviewResponse]) => {
+        if (!configResponse.ok)
+          throw new Error(await readApiError(configResponse));
+        if (!overviewResponse.ok)
+          throw new Error(await readApiError(overviewResponse));
+        return Promise.all([configResponse.json(), overviewResponse.json()]);
       })
-      .then((value) => {
+      .then(([value, currentOverview]) => {
         if (!active) return;
         setConfig(value);
+        setOverview(currentOverview);
         reset({
           enabled: value.enabled,
           input_policy: value.input_policy,
           forward_policy: value.forward_policy,
+          output_policy: value.output_policy,
         });
       })
       .catch((error) => {
@@ -105,7 +236,10 @@ export default function NftablesConfigModal({ onClose, onSaved }) {
       enabled: value.enabled,
       input_policy: value.input_policy,
       forward_policy: value.forward_policy,
+      output_policy: value.output_policy,
     });
+    const currentOverview = await apiRequest("/api/v1/firewall");
+    if (currentOverview.ok) setOverview(await currentOverview.json());
     showToast("nftables configuration saved", "success");
     onSaved(value);
     setSaving(false);
@@ -124,10 +258,6 @@ export default function NftablesConfigModal({ onClose, onSaved }) {
               <h2 className="mt-1 text-2xl font-semibold text-neutral-900 dark:text-neutral-100">
                 Configure nftables
               </h2>
-              <p className="mt-2 text-sm leading-6 text-neutral-500 dark:text-neutral-400">
-                Configure the Server Engine managed firewall tables without
-                changing unrelated nftables rules.
-              </p>
             </div>
           </div>
           <button
@@ -140,9 +270,33 @@ export default function NftablesConfigModal({ onClose, onSaved }) {
           </button>
         </header>
 
-        <form onSubmit={handleSubmit(save)}>
+        <div className="flex border-b border-neutral-200 px-6 dark:border-neutral-800">
+          {["nftables", "ddos"].map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              className={`border-b-2 px-4 py-3 text-sm font-semibold ${activeTab === tab ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200"}`}
+              onClick={() => setActiveTab(tab)}
+            >
+              {tab === "nftables" ? "nftables" : "DDoS protection"}
+            </button>
+          ))}
+        </div>
+
+        <form
+          onSubmit={
+            activeTab === "ddos"
+              ? (event) => {
+                  event.preventDefault();
+                  onDdosSave();
+                }
+              : handleSubmit(save)
+          }
+        >
           <div className="space-y-6 p-6">
-            {loading ? (
+            {activeTab === "ddos" ? (
+              <DdosTab value={ddos} onChange={onDdosChange} />
+            ) : loading ? (
               <div className="py-12 text-center text-sm text-neutral-500 dark:text-neutral-400">
                 Loading nftables configuration…
               </div>
@@ -182,6 +336,21 @@ export default function NftablesConfigModal({ onClose, onSaved }) {
                     </span>
                   </label>
                   <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                    Output chain default policy
+                    <select
+                      className={inputClass}
+                      disabled={!enabled}
+                      {...register("output_policy")}
+                    >
+                      <option value="accept">Accept</option>
+                      <option value="drop">Drop</option>
+                    </select>
+                    <span className="mt-1 block text-xs font-normal leading-5 text-neutral-500 dark:text-neutral-400">
+                      Controls traffic leaving this server. Accept is the
+                      recommended default unless outbound traffic is restricted.
+                    </span>
+                  </label>
+                  <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
                     Forward chain default policy
                     <select
                       className={inputClass}
@@ -198,7 +367,9 @@ export default function NftablesConfigModal({ onClose, onSaved }) {
                 </div>
 
                 {enabled &&
-                  (inputPolicy === "drop" || forwardPolicy === "drop") && (
+                  (inputPolicy === "drop" ||
+                    forwardPolicy === "drop" ||
+                    outputPolicy === "drop") && (
                     <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-200">
                       <AlertTriangle className="mt-0.5 shrink-0" size={17} />
                       <p>
@@ -213,8 +384,37 @@ export default function NftablesConfigModal({ onClose, onSaved }) {
                 <div className="border-t border-neutral-200 pt-2 dark:border-neutral-800">
                   <StatusRow
                     label="Backend"
-                    value={config?.available ? "Available" : "Unavailable"}
+                    value={
+                      config?.available ? (
+                        <span className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                          <CheckCircle2 size={16} />
+                          Available
+                        </span>
+                      ) : (
+                        <span className="text-rose-600 dark:text-rose-400">
+                          Unavailable
+                        </span>
+                      )
+                    }
                     hint={config?.backend_message}
+                  />
+                  <StatusRow
+                    label="Managed rules"
+                    value={
+                      overview?.status === "protected" ? (
+                        <span className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                          <CheckCircle2 size={16} />
+                          Applied
+                        </span>
+                      ) : (
+                        <span className="text-amber-600 dark:text-amber-400">
+                          {overview?.status === "disabled"
+                            ? "Disabled"
+                            : "Not applied"}
+                        </span>
+                      )
+                    }
+                    hint="Shows whether the current managed ruleset is loaded into nftables."
                   />
                   <StatusRow
                     label="Managed filter table"
@@ -254,13 +454,20 @@ export default function NftablesConfigModal({ onClose, onSaved }) {
             >
               Cancel
             </button>
-            <button
-              type="submit"
-              className={`${buttonClass} bg-blue-600 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50`}
-              disabled={loading || saving || (!config?.available && enabled)}
+            <SaveButton
+              saving={activeTab === "nftables" && saving}
+              disabled={
+                loading || (!config?.available && enabled)
+              }
+              onClick={
+                activeTab === "ddos"
+                  ? onDdosSave
+                  : () => handleSubmit(save)()
+              }
+              savedLabel="Saved"
             >
-              {saving ? "Saving…" : "Save"}
-            </button>
+              {activeTab === "ddos" ? "Save DDoS policy" : "Save"}
+            </SaveButton>
           </footer>
         </form>
       </section>

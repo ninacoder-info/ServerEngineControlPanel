@@ -14,12 +14,12 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { apiRequest } from "../../lib/api";
-import { readApiError } from "../../lib/api";
+import { apiRequest, readApiError } from "../../lib/api";
 import ServiceNotInstalledState from "../../components/ServiceNotInstalledState";
 import { useServiceInstallationState } from "../../hooks/useServiceInstallationState";
 import StalwartConfigModal from "../services/StalwartConfigModal";
 import SecurePasswordInput from "../../components/SecurePasswordInput";
+import Toast from "../../components/Toast";
 const tabs = [
   "Mailboxes",
   "Forwarders",
@@ -1045,6 +1045,7 @@ export default function EmailPage() {
   const [mailDomainDraft, setMailDomainDraft] = React.useState("");
   const [mailDomainCheck, setMailDomainCheck] = React.useState(null);
   const [mailDomainGuide, setMailDomainGuide] = React.useState(null);
+  const [mailDomainToast, setMailDomainToast] = React.useState(null);
   const [mailDomainGuideLoading, setMailDomainGuideLoading] =
     React.useState(false);
   const [mailDomainChecking, setMailDomainChecking] = React.useState("");
@@ -1524,6 +1525,7 @@ export default function EmailPage() {
     setMailDomainStep(2);
     setMailDomainGuide(null);
     setMailDomainCheck(null);
+    setMailDomainToast(null);
     setMailDomainGuideLoading(true);
     try {
       const response = await apiRequest("/api/v1/email/domains/guide", {
@@ -1536,7 +1538,7 @@ export default function EmailPage() {
         );
       setMailDomainGuide(await response.json());
     } catch (error) {
-      setMailboxNotice({ type: "error", message: error.message });
+      setMailDomainToast({ type: "error", message: error.message });
     } finally {
       setMailDomainGuideLoading(false);
     }
@@ -1735,6 +1737,7 @@ export default function EmailPage() {
               setMailDomainDraft("");
               setMailDomainCheck(null);
               setMailDomainGuide(null);
+              setMailDomainToast(null);
             }}
             className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-neutral-300 px-3 py-2.5 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
           >
@@ -2957,9 +2960,9 @@ export default function EmailPage() {
                     </div>
                   )}
                   {!mailDomainGuideLoading && !mailDomainGuide && (
-                    <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300">
-                      Stalwart could not generate the DNS records. Start and
-                      configure Stalwart, then try again.
+                    <div className="rounded-lg border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600 dark:border-neutral-800 dark:bg-neutral-950/50 dark:text-neutral-300">
+                      No DNS records are available yet. Try again after the
+                      Stalwart management API is reachable.
                     </div>
                   )}
                 </>
@@ -2971,6 +2974,7 @@ export default function EmailPage() {
                 onClick={() => {
                   setMailDomainModal(false);
                   setMailDomainStep(1);
+                  setMailDomainToast(null);
                 }}
                 className="rounded-lg px-4 py-2 text-sm font-medium text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800"
               >
@@ -2995,6 +2999,7 @@ export default function EmailPage() {
                     onClick={() => {
                       setMailDomainStep(1);
                       setMailDomainCheck(null);
+                      setMailDomainToast(null);
                     }}
                     className="rounded-lg border border-neutral-300 px-4 py-2 text-sm font-semibold text-neutral-700 dark:border-neutral-700 dark:text-neutral-200"
                   >
@@ -3012,6 +3017,11 @@ export default function EmailPage() {
               )}
             </div>
           </div>
+          <Toast
+            message={mailDomainToast?.message}
+            type={mailDomainToast?.type}
+            onClose={() => setMailDomainToast(null)}
+          />
         </div>
       )}
       {modal && (

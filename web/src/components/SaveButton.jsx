@@ -1,5 +1,5 @@
 import React from "react";
-import { Check, Save } from "lucide-react";
+import { Check, LoaderCircle, Save } from "lucide-react";
 
 export default function SaveButton({
   onClick,
@@ -30,7 +30,7 @@ export default function SaveButton({
       onClick={submit}
     >
       {saving ? (
-        <span>Saving…</span>
+        <LoaderCircle size={15} className="animate-spin" />
       ) : saved ? (
         <Check size={15} />
       ) : (

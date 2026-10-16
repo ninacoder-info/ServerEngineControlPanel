@@ -174,7 +174,60 @@ export default function StalwartConfigModal({ service, installed, onClose }) {
   const [toast, setToast] = React.useState(null);
   const version = current?.version || service?.version || "—";
   const root = "/opt/server-engine/services/stalwart";
-  const running = current?.status === "running";
+  const [running, setRunning] = React.useState(
+    current?.running === true || current?.status === "running",
+  );
+
+  React.useEffect(() => {
+    setRunning(current?.running === true || current?.status === "running");
+  }, [current?.running, current?.status]);
+
+  React.useEffect(() => {
+    const matchesStalwart = (serviceId) =>
+      serviceId === "stalwart" || serviceId?.startsWith("stalwart@");
+
+    const updateFromServiceStatus = (event) => {
+      const detail = event.detail || {};
+      if (!matchesStalwart(detail.serviceId)) return;
+
+      if (["queued", "running"].includes(detail.status)) {
+        setAction(detail.action || "");
+        return;
+      }
+
+      if (!["succeeded", "failed", "cancelled"].includes(detail.status)) {
+        return;
+      }
+
+      setAction("");
+      if (detail.status === "succeeded") {
+        if (["start", "restart"].includes(detail.action)) {
+          setRunning(true);
+        } else if (detail.action === "stop") {
+          setRunning(false);
+        }
+      }
+
+      if (["failed", "cancelled"].includes(detail.status)) {
+        setToast({
+          type: "error",
+          message:
+            detail.message ||
+            `Stalwart ${detail.action || "service action"} ${detail.status}.`,
+        });
+      }
+    };
+
+    window.addEventListener(
+      "serverengine:service-status",
+      updateFromServiceStatus,
+    );
+    return () =>
+      window.removeEventListener(
+        "serverengine:service-status",
+        updateFromServiceStatus,
+      );
+  }, []);
 
   const set = (key, value) =>
     setSettings((currentSettings) => ({ ...currentSettings, [key]: value }));
@@ -230,10 +283,8 @@ export default function StalwartConfigModal({ service, installed, onClose }) {
         type: "success",
         message: `Stalwart ${nextAction} requested.`,
       });
-      window.dispatchEvent(new CustomEvent("serverengine:jobs-updated"));
     } catch (error) {
       setToast({ type: "error", message: error.message });
-    } finally {
       setAction("");
     }
   };

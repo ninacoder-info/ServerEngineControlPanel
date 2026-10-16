@@ -32,8 +32,9 @@ class FirewallRulePatch(BaseModel):
 
 class NftablesConfigRequest(BaseModel):
     enabled: bool = True
-    input_policy: NftablesPolicy = "accept"
+    input_policy: NftablesPolicy = "drop"
     forward_policy: NftablesPolicy = "accept"
+    output_policy: NftablesPolicy = "accept"
 
 
 class PortForwardRequest(BaseModel):

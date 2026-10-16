@@ -12,6 +12,7 @@ services:
     ports:
       - "${CORE_DEV_PORT:-18001}:8000"
     environment:
+      APP_ENV: development
       SE_DB_PATH: /var/lib/server-engine/control.db
       SE_STATE_DIR: /var/lib/server-engine
       SE_SERVICE_ROOT: /opt/server-engine/services

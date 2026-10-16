@@ -10,7 +10,6 @@ import {
   Edit3,
   Globe2,
   LockKeyhole,
-  MoreHorizontal,
   Network,
   RefreshCw,
   Search,
@@ -19,13 +18,14 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
 import ServiceStoppedState from "../../components/ServiceStoppedState";
+import ActionDialog from "../../components/ActionDialog";
 import { apiRequest, readApiError } from "../../lib/api";
 import NftablesConfigModal from "./NftablesConfigModal";
 
 const tabs = [
   ["rules", "Firewall rules"],
+  ["outbound", "Outbound rules"],
   ["forwarding", "Port forwarding"],
   ["aliases", "Aliases"],
   ["blocked", "Blocked addresses"],
@@ -37,8 +37,8 @@ const initialRules = [
     enabled: true,
     action: "Allow",
     protocol: "TCP",
-    source: "Any",
-    destination: "Any",
+    source: "0.0.0.0/0",
+    destination: "0.0.0.0/0",
     service: "HTTP / HTTPS",
     port: "80, 443",
     interface: "WAN",
@@ -50,39 +50,26 @@ const initialRules = [
     enabled: true,
     action: "Allow",
     protocol: "TCP",
-    source: "Management network",
-    destination: "Panel",
+    source: "0.0.0.0/0",
+    destination: "0.0.0.0/0",
     service: "Control panel",
     port: "2309",
     interface: "WAN",
     states: 42,
-    note: "Trusted administrators only",
+    note: "Restrict source before exposing",
   },
   {
     id: 3,
     enabled: true,
     action: "Allow",
     protocol: "TCP",
-    source: "Any",
-    destination: "Any",
+    source: "0.0.0.0/0",
+    destination: "0.0.0.0/0",
     service: "SSH",
     port: "22",
     interface: "WAN",
     states: 8,
     note: "Review source restriction",
-  },
-  {
-    id: 4,
-    enabled: true,
-    action: "Deny",
-    protocol: "TCP",
-    source: "Threat blocklist",
-    destination: "Any",
-    service: "All services",
-    port: "Any",
-    interface: "WAN",
-    states: 317,
-    note: "Automated protection",
   },
 ];
 const input =
@@ -170,12 +157,125 @@ function PortTagsField({ value, onChange }) {
   );
 }
 
-function RuleModal({ rule, onClose, onSave }) {
+function isValidFirewallAddress(value) {
+  const address = value.trim();
+  const slashIndex = address.indexOf("/");
+  const host = slashIndex === -1 ? address : address.slice(0, slashIndex);
+  const prefix = slashIndex === -1 ? null : address.slice(slashIndex + 1);
+  if (prefix !== null && !/^\d+$/.test(prefix)) return false;
+  if (host.includes(":")) {
+    const compressed = host.includes("::");
+    const groups = host.split(":").filter(Boolean).length;
+    return (
+      /^[0-9a-fA-F:]+$/.test(host) &&
+      (compressed || groups === 8) &&
+      (prefix === null || Number(prefix) <= 128)
+    );
+  }
+  const octets = host.split(".");
+  return (
+    octets.length === 4 &&
+    octets.every((octet) => /^\d+$/.test(octet) && Number(octet) <= 255) &&
+    (prefix === null || Number(prefix) <= 32)
+  );
+}
+
+function AddressTagsField({ label, value, onChange, multiple = true }) {
+  const [draft, setDraft] = React.useState("");
+  const [error, setError] = React.useState("");
+  const items = value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => (item === "Any" ? "0.0.0.0/0" : item));
+
+  function addItem() {
+    const next = draft.trim();
+    if (!next) return;
+    const normalized = next === "Any" ? "0.0.0.0/0" : next;
+    if (!multiple && items.length > 0) {
+      setError("Remove the existing address before adding another.");
+      return;
+    }
+    if (!isValidFirewallAddress(normalized)) {
+      setError("Enter an IP address or CIDR range.");
+      return;
+    }
+    if (!items.includes(normalized))
+      onChange([...items, normalized].join(", "));
+    setDraft("");
+    setError("");
+  }
+
+  function removeItem(item) {
+    onChange(items.filter((current) => current !== item).join(", "));
+  }
+
+  return (
+    <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
+      {label}
+      <div className="mt-2 rounded-md border border-neutral-300 px-2 py-2 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/20 dark:border-neutral-700">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {items.map((item) => (
+            <span
+              key={item}
+              className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 dark:bg-blue-950/40 dark:text-blue-300"
+            >
+              {item}
+              <button
+                type="button"
+                aria-label={`Remove ${item}`}
+                className="cursor-pointer text-blue-500 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-100"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => removeItem(item)}
+              >
+                <X size={12} />
+              </button>
+            </span>
+          ))}
+          <input
+            className="min-w-[12rem] flex-1 border-0 bg-transparent px-1 py-1 text-sm text-neutral-900 outline-none placeholder:text-neutral-400 dark:text-neutral-100"
+            required={items.length === 0}
+            value={draft}
+            placeholder={multiple ? "IP or CIDR, then Enter" : "IP or CIDR"}
+            onChange={(event) => {
+              setDraft(event.target.value);
+              setError("");
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === ",") {
+                event.preventDefault();
+                addItem();
+              }
+            }}
+          />
+          <button
+            type="button"
+            className="cursor-pointer px-1 text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400"
+            onClick={addItem}
+          >
+            Add
+          </button>
+        </div>
+      </div>
+      <span className="mt-1 block text-xs font-normal text-neutral-500 dark:text-neutral-400">
+        Use 0.0.0.0/0 for any IPv4 address or ::/0 for any IPv6 address.
+      </span>
+      {error && (
+        <span className="mt-1 block text-xs font-normal text-rose-600 dark:text-rose-400">
+          {error}
+        </span>
+      )}
+    </label>
+  );
+}
+
+function RuleModal({ rule, direction = "inbound", onClose, onSave }) {
   const [form, setForm] = React.useState({
     action: "Allow",
     protocol: "TCP",
-    source: "Any",
-    destination: "Any",
+    source: "0.0.0.0/0",
+    destination: "0.0.0.0/0",
     service: "Custom service",
     port: "",
     interface: "WAN",
@@ -186,11 +286,12 @@ function RuleModal({ rule, onClose, onSave }) {
       setForm({
         action: rule.action,
         protocol: rule.protocol,
-        source: rule.source,
-        destination: rule.destination,
-        service: rule.service,
+        source: rule.source === "Any" ? "0.0.0.0/0" : rule.source,
+        destination:
+          rule.destination === "Any" ? "0.0.0.0/0" : rule.destination,
+        service: rule.service || "Custom service",
         port: rule.port,
-        interface: rule.interface,
+        interface: rule.interface || "WAN",
         note: rule.note || "",
       });
   }, [rule]);
@@ -212,11 +313,14 @@ function RuleModal({ rule, onClose, onSave }) {
               Rule editor
             </p>
             <h2 className="mt-1 text-2xl font-semibold text-neutral-900 dark:text-neutral-100">
-              {rule ? "Edit firewall rule" : "Add firewall rule"}
+              {rule
+                ? `Edit ${direction} firewall rule`
+                : `Add ${direction} firewall rule`}
             </h2>
             <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
-              Rules are evaluated from top to bottom. Keep trusted allow rules
-              above broad deny rules.
+              {direction === "outbound"
+                ? "Outbound rules control traffic leaving this server."
+                : "Rules are evaluated from highest priority to lowest priority."}
             </p>
           </div>
           <button
@@ -241,18 +345,6 @@ function RuleModal({ rule, onClose, onSave }) {
             </select>
           </label>
           <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
-            Interface
-            <select
-              className={input}
-              value={form.interface}
-              onChange={(event) => change("interface", event.target.value)}
-            >
-              <option>WAN</option>
-              <option>LAN</option>
-              <option>Docker bridge</option>
-            </select>
-          </label>
-          <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
             Protocol
             <select
               className={input}
@@ -265,39 +357,16 @@ function RuleModal({ rule, onClose, onSave }) {
               <option>ICMP</option>
             </select>
           </label>
-          <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
-            Service
-            <select
-              className={input}
-              value={form.service}
-              onChange={(event) => change("service", event.target.value)}
-            >
-              <option>Custom service</option>
-              <option>SSH</option>
-              <option>HTTP / HTTPS</option>
-              <option>DNS</option>
-              <option>Mail</option>
-              <option>Database</option>
-            </select>
-          </label>
-          <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
-            Source address or alias
-            <input
-              className={input}
-              value={form.source}
-              onChange={(event) => change("source", event.target.value)}
-              placeholder="Any, 203.0.113.0/24, TrustedAdmins"
-            />
-          </label>
-          <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
-            Destination address or alias
-            <input
-              className={input}
-              value={form.destination}
-              onChange={(event) => change("destination", event.target.value)}
-              placeholder="Any, WebServers"
-            />
-          </label>
+          <AddressTagsField
+            label="Source"
+            value={form.source}
+            onChange={(value) => change("source", value)}
+          />
+          <AddressTagsField
+            label="Destination"
+            value={form.destination}
+            onChange={(value) => change("destination", value)}
+          />
           <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
             Port or port alias
             <PortTagsField
@@ -306,7 +375,7 @@ function RuleModal({ rule, onClose, onSave }) {
             />
           </label>
           <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
-            Rule note
+            Note
             <input
               className={input}
               value={form.note}
@@ -994,6 +1063,8 @@ function BlockedAddressModal({ entry, onClose, onSave }) {
     event.preventDefault();
     if (!form.address.trim())
       return setError("IP address or CIDR range is required.");
+    if (!isValidFirewallAddress(form.address))
+      return setError("Enter a valid IPv4/IPv6 address or CIDR range.");
     if (
       await onSave({
         ...form,
@@ -1032,23 +1103,22 @@ function BlockedAddressModal({ entry, onClose, onSave }) {
           </button>
         </div>
         <div className="mt-6 space-y-5">
-          <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
-            IP address or CIDR range
-            <input
-              className={`${input} ${error ? "border-rose-500" : ""}`}
+          <div>
+            <AddressTagsField
+              label="IP address or CIDR range"
               value={form.address}
-              onChange={(event) => {
-                setForm({ ...form, address: event.target.value });
+              multiple={false}
+              onChange={(value) => {
+                setForm({ ...form, address: value });
                 setError("");
               }}
-              placeholder="203.0.113.44 or 203.0.113.0/24"
             />
             {error && (
               <span className="mt-1 block text-xs font-normal text-rose-600 dark:text-rose-400">
                 {error}
               </span>
             )}
-          </label>
+          </div>
           <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
             Expires at
             <span className="mt-1 block text-xs font-normal text-neutral-500">
@@ -1460,8 +1530,8 @@ function TrafficActivityTab({
             Traffic activity
           </h3>
           <p className="mt-1 max-w-3xl text-sm leading-6 text-neutral-500 dark:text-neutral-400">
-            Live packet counters from the firewall, blocked-address list, and
-            port forwarding rules.
+            Packet counters from managed nftables rules, blocked addresses, and
+            port forwarding. This is not a request or connection log.
           </p>
         </div>
         <button
@@ -1485,7 +1555,7 @@ function TrafficActivityTab({
           icon={Network}
           label="Packets counted"
           value={data ? Number(summary.packets || 0).toLocaleString() : "—"}
-          detail="Managed nftables counters"
+          detail="Matched managed rules"
         />
         <ActivityStat
           icon={ShieldAlert}
@@ -1598,9 +1668,9 @@ function TrafficActivityTab({
 }
 
 export default function FirewallPage() {
-  const navigate = useNavigate();
   const [tab, setTab] = React.useState("rules");
   const [rules, setRules] = React.useState(initialRules);
+  const [outboundRules, setOutboundRules] = React.useState([]);
   const [forwardings, setForwardings] = React.useState([]);
   const [aliases, setAliases] = React.useState([]);
   const [blockedAddresses, setBlockedAddresses] = React.useState([]);
@@ -1609,13 +1679,12 @@ export default function FirewallPage() {
   const [query, setQuery] = React.useState("");
   const [action, setAction] = React.useState("all");
   const [modal, setModal] = React.useState(null);
+  const [ruleDirection, setRuleDirection] = React.useState("inbound");
   const [forwardingModal, setForwardingModal] = React.useState(null);
   const [aliasModal, setAliasModal] = React.useState(null);
   const [blockedModal, setBlockedModal] = React.useState(null);
-  const [ddosModal, setDdosModal] = React.useState(false);
   const [nftablesModal, setNftablesModal] = React.useState(false);
-  const [menu, setMenu] = React.useState(null);
-  const [menuPosition, setMenuPosition] = React.useState(null);
+  const [confirmDialog, setConfirmDialog] = React.useState(null);
   const [blockedStates, setBlockedStates] = React.useState(0);
   const [firewallStatus, setFirewallStatus] = React.useState("loading");
   const [backend, setBackend] = React.useState(null);
@@ -1695,6 +1764,8 @@ export default function FirewallPage() {
     if (response.ok) {
       const value = await response.json();
       setRules(value.rules || []);
+      setOutboundRules(value.outbound_rules || []);
+      setOutboundRules(value.outbound_rules || []);
       setForwardings(value.forwardings || []);
       setAliases(value.aliases || []);
       setBlockedAddresses(value.blocked_addresses || []);
@@ -1727,17 +1798,6 @@ export default function FirewallPage() {
   React.useEffect(() => {
     if (tab === "activity") loadActivity();
   }, [tab, loadActivity]);
-  React.useEffect(() => {
-    if (!menu) return undefined;
-    const close = (event) => {
-      if (!event.target.closest("[data-firewall-menu]")) {
-        setMenu(null);
-        setMenuPosition(null);
-      }
-    };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [menu]);
   const createRule = async (rule) => {
     const response = await apiRequest("/api/v1/firewall/rules", {
       method: "POST",
@@ -1781,8 +1841,6 @@ export default function FirewallPage() {
       );
       await load();
     } else setError(await readApiError(response));
-    setMenu(null);
-    setMenuPosition(null);
   };
   const deleteRule = async (rule) => {
     const response = await apiRequest(`/api/v1/firewall/rules/${rule.id}`, {
@@ -1792,20 +1850,57 @@ export default function FirewallPage() {
       setRules((current) => current.filter((item) => item.id !== rule.id));
       await load();
     } else setError(await readApiError(response));
-    setMenu(null);
-    setMenuPosition(null);
   };
-  const toggleRuleMenu = (event, ruleId) => {
-    if (menu === ruleId) {
-      setMenu(null);
-      setMenuPosition(null);
-      return;
+  const createOutboundRule = async (rule) => {
+    const response = await apiRequest("/api/v1/firewall/outbound-rules", {
+      method: "POST",
+      body: JSON.stringify(rule),
+    });
+    if (!response.ok) {
+      setError(await readApiError(response));
+      return false;
     }
-    const rect = event.currentTarget.getBoundingClientRect();
-    setMenu(ruleId);
-    setMenuPosition({
-      top: rect.bottom + 6,
-      right: Math.max(12, window.innerWidth - rect.right),
+    await load();
+    return true;
+  };
+  const updateOutboundRule = async (rule) => {
+    const response = await apiRequest(
+      `/api/v1/firewall/outbound-rules/${modal.id}`,
+      { method: "PUT", body: JSON.stringify(rule) },
+    );
+    if (!response.ok) {
+      setError(await readApiError(response));
+      return false;
+    }
+    await load();
+    return true;
+  };
+  const toggleOutboundRule = async (rule) => {
+    const response = await apiRequest(
+      `/api/v1/firewall/outbound-rules/${rule.id}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ enabled: !rule.enabled }),
+      },
+    );
+    if (!response.ok) setError(await readApiError(response));
+    else await load();
+  };
+  const deleteOutboundRule = async (rule) => {
+    setConfirmDialog({
+      kind: "confirm",
+      title: "Delete outbound rule?",
+      message: `Delete ${rule.service || "this outbound rule"}? This cannot be undone.`,
+      submitLabel: "Delete rule",
+      onSubmit: async () => {
+        setConfirmDialog(null);
+        const response = await apiRequest(
+          `/api/v1/firewall/outbound-rules/${rule.id}`,
+          { method: "DELETE" },
+        );
+        if (!response.ok) setError(await readApiError(response));
+        else await load();
+      },
     });
   };
   const reloadPolicy = async () => {
@@ -1815,6 +1910,7 @@ export default function FirewallPage() {
     if (response.ok) {
       const value = await response.json();
       setRules(value.rules || []);
+      setOutboundRules(value.outbound_rules || []);
       setBlockedStates(value.blocked_states || 0);
       setFirewallStatus(value.status || "protected");
       setBackend(value.backend || null);
@@ -1957,7 +2053,8 @@ export default function FirewallPage() {
     if (!response.ok) setError(await readApiError(response));
     else await load();
   };
-  const visible = rules.filter(
+  const displayedRules = tab === "outbound" ? outboundRules : rules;
+  const visible = displayedRules.filter(
     (rule) =>
       (action === "all" || rule.action.toLowerCase() === action) &&
       `${rule.service} ${rule.source} ${rule.destination} ${rule.note}`
@@ -1994,54 +2091,13 @@ export default function FirewallPage() {
             </p>
           </div>
           <div className="flex gap-3">
-            <details className="relative">
-              <summary className="inline-flex cursor-pointer list-none items-center gap-2 rounded-md border border-neutral-300 px-4 py-2.5 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800">
-                <Shield size={16} />
-                Security tools
-                <ChevronDown size={15} />
-              </summary>
-              <div className="absolute right-0 z-20 mt-2 w-52 overflow-hidden rounded-lg border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
-                <button
-                  type="button"
-                  className="flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
-                  onClick={() => navigate("/application-shield")}
-                >
-                  <ShieldAlert size={15} />
-                  Configure WAF
-                </button>
-                <button
-                  type="button"
-                  className="flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
-                  onClick={() => setDdosModal(true)}
-                >
-                  <Shield size={15} />
-                  Configure DDoS
-                </button>
-                <button
-                  type="button"
-                  className="flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
-                  onClick={() => setNftablesModal(true)}
-                >
-                  <Network size={15} />
-                  Configure nftables
-                </button>
-                <button
-                  type="button"
-                  onClick={reloadPolicy}
-                  disabled={loading || !backend?.available}
-                  className="flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-neutral-200 dark:hover:bg-neutral-800"
-                >
-                  <RefreshCw size={15} />
-                  Apply firewall rules
-                </button>
-              </div>
-            </details>
             <button
-              className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
-              onClick={() => setModal({})}
+              type="button"
+              className="inline-flex items-center gap-2 rounded-md border border-neutral-300 px-4 py-2.5 text-sm font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+              onClick={() => setNftablesModal(true)}
             >
-              <CirclePlus size={16} />
-              Add rule
+              <Network size={16} />
+              Configure nftables
             </button>
           </div>
         </div>
@@ -2508,20 +2564,21 @@ export default function FirewallPage() {
                 forwardings={forwardings}
                 blockedAddresses={blockedAddresses}
               />
-            ) : tab === "rules" ? (
+            ) : tab === "rules" || tab === "outbound" ? (
               <div className="p-5">
                 <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
                   <div>
                     <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">
-                      Inbound rules
+                      {tab === "outbound" ? "Outbound rules" : "Inbound rules"}
                     </h3>
                     <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
-                      Rules are ordered from highest priority to lowest
-                      priority.
+                      {tab === "outbound"
+                        ? "Outbound traffic is allowed by default. Add rules only when restricting egress."
+                        : "Rules are ordered from highest priority to lowest priority."}
                     </p>
                   </div>
                   <div className="flex flex-col gap-3 sm:flex-row">
-                    <label className="flex min-w-64 items-center gap-2 rounded-md border border-neutral-300 bg-white px-3 py-2.5 text-neutral-400 dark:border-neutral-700 dark:bg-neutral-950">
+                    <label className="flex min-w-64 items-center gap-2 rounded-md border border-neutral-300 bg-white px-3 py-2 text-neutral-400 dark:border-neutral-700 dark:bg-neutral-950">
                       <Search size={16} />
                       <input
                         className="w-full bg-transparent text-sm text-neutral-900 outline-none dark:text-neutral-100"
@@ -2531,7 +2588,7 @@ export default function FirewallPage() {
                       />
                     </label>
                     <select
-                      className="rounded-md border border-neutral-300 bg-white px-3 py-2.5 text-sm text-neutral-700 outline-none dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-300"
+                      className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-700 outline-none dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-300"
                       value={action}
                       onChange={(event) => setAction(event.target.value)}
                     >
@@ -2540,10 +2597,23 @@ export default function FirewallPage() {
                       <option value="deny">Deny</option>
                       <option value="reject">Reject</option>
                     </select>
+                    <button
+                      type="button"
+                      className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                      onClick={() => {
+                        setRuleDirection(
+                          tab === "outbound" ? "outbound" : "inbound",
+                        );
+                        setModal({});
+                      }}
+                    >
+                      <CirclePlus size={15} />
+                      Add rule
+                    </button>
                   </div>
                 </div>
                 <div className="mt-5 overflow-x-auto">
-                  <table className="w-full min-w-[1100px] border-collapse text-left">
+                  <table className="w-full min-w-[860px] border-collapse text-left">
                     <thead>
                       <tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
                         <th className="px-3 py-3 font-semibold">Order</th>
@@ -2553,8 +2623,6 @@ export default function FirewallPage() {
                         <th className="px-3 py-3 font-semibold">
                           Service / port
                         </th>
-                        <th className="px-3 py-3 font-semibold">Interface</th>
-                        <th className="px-3 py-3 font-semibold">States</th>
                         <th className="px-3 py-3" />
                       </tr>
                     </thead>
@@ -2592,24 +2660,53 @@ export default function FirewallPage() {
                               {rule.port}
                             </small>
                           </td>
-                          <td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">
-                            {rule.interface}
-                          </td>
-                          <td className="px-3 py-4 text-sm text-neutral-600 dark:text-neutral-400">
-                            {rule.states.toLocaleString()}
-                          </td>
-                          <td
-                            data-firewall-menu
-                            className="px-3 py-4 text-right"
-                          >
-                            <button
-                              onClick={(event) =>
-                                toggleRuleMenu(event, rule.id)
-                              }
-                              className="cursor-pointer rounded-md p-2 text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-                            >
-                              <MoreHorizontal size={17} />
-                            </button>
+                          <td className="px-3 py-4 text-right">
+                            <div className="flex justify-end gap-1">
+                              <button
+                                type="button"
+                                aria-label="Edit rule"
+                                data-tooltip="Edit rule"
+                                className="css-tooltip cursor-pointer rounded-md p-2 text-neutral-500 hover:bg-neutral-100 hover:text-blue-600 dark:hover:bg-neutral-800 dark:hover:text-blue-400"
+                                onClick={() => {
+                                  setRuleDirection(
+                                    tab === "outbound" ? "outbound" : "inbound",
+                                  );
+                                  setModal(rule);
+                                }}
+                              >
+                                <Edit3 size={16} />
+                              </button>
+                              <button
+                                type="button"
+                                aria-label={
+                                  rule.enabled ? "Disable rule" : "Enable rule"
+                                }
+                                data-tooltip={
+                                  rule.enabled ? "Disable rule" : "Enable rule"
+                                }
+                                className="css-tooltip cursor-pointer rounded-md p-2 text-neutral-500 hover:bg-neutral-100 hover:text-amber-600 dark:hover:bg-neutral-800 dark:hover:text-amber-400"
+                                onClick={() =>
+                                  tab === "outbound"
+                                    ? toggleOutboundRule(rule)
+                                    : toggleRule(rule)
+                                }
+                              >
+                                <CheckCircle2 size={16} />
+                              </button>
+                              <button
+                                type="button"
+                                aria-label="Delete rule"
+                                data-tooltip="Delete rule"
+                                className="css-tooltip cursor-pointer rounded-md p-2 text-neutral-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/30 dark:hover:text-red-400"
+                                onClick={() =>
+                                  tab === "outbound"
+                                    ? deleteOutboundRule(rule)
+                                    : deleteRule(rule)
+                                }
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -2647,50 +2744,20 @@ export default function FirewallPage() {
           </section>
         </>
       )}
-      {menu &&
-        menuPosition &&
-        (() => {
-          const rule = rules.find((item) => item.id === menu);
-          if (!rule) return null;
-          return (
-            <div
-              data-firewall-menu
-              className="fixed z-[60] w-44 rounded-md border border-neutral-200 bg-white py-1 text-left shadow-lg dark:border-neutral-700 dark:bg-neutral-900"
-              style={menuPosition}
-            >
-              <button
-                className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800"
-                onClick={() => {
-                  setModal(rule);
-                  setMenu(null);
-                  setMenuPosition(null);
-                }}
-              >
-                <Edit3 size={15} />
-                Edit rule
-              </button>
-              <button
-                className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800"
-                onClick={() => toggleRule(rule)}
-              >
-                <CheckCircle2 size={15} />
-                {rule.enabled ? "Disable rule" : "Enable rule"}
-              </button>
-              <button
-                className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/30"
-                onClick={() => deleteRule(rule)}
-              >
-                <Trash2 size={15} />
-                Delete rule
-              </button>
-            </div>
-          );
-        })()}
       {modal && (
         <RuleModal
           rule={modal.id ? modal : null}
+          direction={ruleDirection}
           onClose={() => setModal(false)}
-          onSave={modal.id ? updateRule : createRule}
+          onSave={
+            ruleDirection === "outbound"
+              ? modal.id
+                ? updateOutboundRule
+                : createOutboundRule
+              : modal.id
+                ? updateRule
+                : createRule
+          }
         />
       )}
       {forwardingModal && (
@@ -2714,25 +2781,22 @@ export default function FirewallPage() {
           onSave={blockedModal.id ? updateBlockedAddress : createBlockedAddress}
         />
       )}
-      {ddosModal && (
-        <DdosConfigModal
-          value={ddos}
-          onChange={updateDdos}
-          onSave={() => {
-            saveDdos();
-            setDdosModal(false);
-          }}
-          onClose={() => setDdosModal(false)}
-        />
-      )}
       {nftablesModal && (
         <NftablesConfigModal
           onClose={() => setNftablesModal(false)}
+          ddos={ddos}
+          onDdosChange={updateDdos}
+          onDdosSave={saveDdos}
           onSaved={async () => {
             await load();
           }}
         />
       )}
+      <ActionDialog
+        dialog={confirmDialog}
+        onClose={() => setConfirmDialog(null)}
+        onSubmit={() => confirmDialog?.onSubmit?.()}
+      />
     </div>
   );
 }
