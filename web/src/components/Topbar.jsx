@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { apiRequest } from "../lib/api";
 import Toast from "./Toast";
+import FloatingMenu from "./FloatingMenu";
 import { formatPanelDate } from "../lib/panelPreferences";
 import { setJobFavicon } from "../lib/jobFavicon";
 import englishFlag from "../assets/flags/en.svg";
@@ -467,7 +468,11 @@ export default function Topbar({
             )}
           </button>
           {jobsOpen && (
-            <div className="absolute right-0 top-11 z-50 w-96 max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-xl dark:border-dark-border dark:bg-dark">
+            <FloatingMenu
+              open={jobsOpen}
+              anchorRef={jobsRef}
+              className="w-96 max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-xl dark:border-dark-border dark:bg-dark"
+            >
               <div className="flex items-start justify-between gap-3 border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
                 <div>
                   <strong className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
@@ -567,7 +572,7 @@ export default function Topbar({
                   ))}
                 </div>
               )}
-            </div>
+            </FloatingMenu>
           )}
         </div>
         <button
@@ -596,7 +601,11 @@ export default function Topbar({
             />
           </button>
           {languageOpen && (
-            <div className="absolute right-0 top-11 z-50 w-48 overflow-hidden rounded-xl border border-neutral-200 bg-white p-1 shadow-lg dark:border-dark-border dark:bg-dark">
+            <FloatingMenu
+              open={languageOpen}
+              anchorRef={languageRef}
+              className="w-48 overflow-hidden rounded-xl border border-neutral-200 bg-white p-1 shadow-lg dark:border-dark-border dark:bg-dark"
+            >
               <p className="px-3 py-2 text-xs font-semibold text-neutral-500 dark:text-neutral-400">
                 Language
               </p>
@@ -618,7 +627,7 @@ export default function Topbar({
                   )}
                 </button>
               ))}
-            </div>
+            </FloatingMenu>
           )}
         </div>
         <div className="relative" ref={accountRef}>
@@ -644,7 +653,11 @@ export default function Topbar({
             <span className="hidden text-neutral-400 sm:block">⌄</span>
           </button>
           {accountOpen && (
-            <div className="absolute right-0 top-12 z-50 w-64 overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-lg dark:border-dark-border dark:bg-dark">
+            <FloatingMenu
+              open={accountOpen}
+              anchorRef={accountRef}
+              className="w-64 overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-lg dark:border-dark-border dark:bg-dark"
+            >
               <div className="px-4 py-4">
                 <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
                   {username}
@@ -712,7 +725,7 @@ export default function Topbar({
                   Sign out
                 </button>
               </div>
-            </div>
+            </FloatingMenu>
           )}
         </div>
       </div>

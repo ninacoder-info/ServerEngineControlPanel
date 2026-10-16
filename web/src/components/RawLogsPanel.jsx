@@ -15,6 +15,7 @@ import {
 import { apiRequest } from "../lib/api";
 import { formatPanelDate } from "../lib/panelPreferences";
 import ActionDialog from "./ActionDialog";
+import FloatingTooltip from "./FloatingTooltip";
 
 export const logCategories = [
   "All",
@@ -229,7 +230,7 @@ export default function RawLogsPanel({
     active = false,
     compact = false,
   ) => (
-    <span className="group/log-tooltip relative inline-flex">
+    <FloatingTooltip content={label} placement="bottom-end">
       <button
         type="button"
         aria-label={label}
@@ -243,14 +244,14 @@ export default function RawLogsPanel({
           <Icon size={compact ? 11 : 14} />
         )}
       </button>
-      <span className="pointer-events-none absolute right-0 top-full z-30 mt-1 whitespace-nowrap rounded bg-neutral-900 px-2 py-1 text-[10px] font-medium text-white opacity-0 shadow-lg transition-opacity group-hover/log-tooltip:opacity-100 dark:bg-white dark:text-neutral-900">
-        {label}
-      </span>
-    </span>
+    </FloatingTooltip>
   );
 
   const tailToggle = (
-    <span className="group/log-tooltip relative inline-flex">
+    <FloatingTooltip
+      content={tailing ? "Tail mode on" : "Tail mode off"}
+      placement="bottom-end"
+    >
       <button
         type="button"
         role="switch"
@@ -267,13 +268,10 @@ export default function RawLogsPanel({
           className={`absolute h-3 w-3 rounded-full bg-white shadow-sm transition-transform ${tailing ? "translate-x-3.5" : "translate-x-0.5"}`}
         />
       </button>
-      <span className="pointer-events-none absolute right-0 top-full z-30 mt-1 whitespace-nowrap rounded bg-neutral-900 px-2 py-1 text-[10px] font-medium text-white opacity-0 shadow-lg transition-opacity group-hover/log-tooltip:opacity-100 dark:bg-white dark:text-neutral-900">
-        {tailing ? "Tail mode on" : "Tail mode off"}
-      </span>
-    </span>
+    </FloatingTooltip>
   );
   const lineLimitSelect = (
-    <span className="group/log-tooltip relative inline-flex">
+    <FloatingTooltip content="Lines to show" placement="bottom-end">
       <select
         aria-label="Log line limit"
         value={lineLimit}
@@ -290,10 +288,7 @@ export default function RawLogsPanel({
           </option>
         ))}
       </select>
-      <span className="pointer-events-none absolute right-0 top-full z-30 mt-1 whitespace-nowrap rounded bg-neutral-900 px-2 py-1 text-[10px] font-medium text-white opacity-0 shadow-lg transition-opacity group-hover/log-tooltip:opacity-100 dark:bg-white dark:text-neutral-900">
-        Lines to show
-      </span>
-    </span>
+    </FloatingTooltip>
   );
 
   const visibleSources = sources.filter((item) => {
@@ -380,14 +375,15 @@ export default function RawLogsPanel({
               <option value="modified-desc">Newest first</option>
               <option value="modified-asc">Oldest first</option>
             </select>
-            <button
-              type="button"
-              title="Refresh logs"
-              className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
-              onClick={loadSources}
-            >
-              <RefreshCw size={13} />
-            </button>
+            <FloatingTooltip content="Refresh logs" placement="bottom-end">
+              <button
+                type="button"
+                className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
+                onClick={loadSources}
+              >
+                <RefreshCw size={13} />
+              </button>
+            </FloatingTooltip>
           </div>
           {loading ? (
             <p className="px-2 py-4 text-xs text-neutral-500">Loading logs…</p>
@@ -399,20 +395,25 @@ export default function RawLogsPanel({
                 key={item.id}
                 className={`group relative flex w-full items-center px-2 py-1.5 text-xs ${selected === item.id ? "bg-neutral-100 font-semibold text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100" : "text-neutral-600 dark:text-neutral-400"}`}
               >
-                <button
-                  type="button"
-                  title={item.path}
-                  className="flex min-w-0 w-full cursor-pointer items-center gap-2 text-left hover:text-neutral-900 dark:hover:text-neutral-100"
-                  onClick={() => setSelected(item.id)}
+                <FloatingTooltip
+                  content={item.path}
+                  placement="right-start"
+                  className="min-w-0 flex-1"
                 >
-                  <FileText size={13} className="shrink-0" />
-                  <span className="min-w-0 flex-1 truncate">
-                    {item.label || item.name}
-                  </span>
-                  <span className="shrink-0 text-[10px] font-normal text-neutral-400 dark:text-neutral-500">
-                    {formatBytes(item.size || 0)}
-                  </span>
-                </button>
+                  <button
+                    type="button"
+                    className="flex min-w-0 w-full cursor-pointer items-center gap-2 text-left hover:text-neutral-900 dark:hover:text-neutral-100"
+                    onClick={() => setSelected(item.id)}
+                  >
+                    <FileText size={13} className="shrink-0" />
+                    <span className="min-w-0 flex-1 truncate">
+                      {item.label || item.name}
+                    </span>
+                    <span className="shrink-0 text-[10px] font-normal text-neutral-400 dark:text-neutral-500">
+                      {formatBytes(item.size || 0)}
+                    </span>
+                  </button>
+                </FloatingTooltip>
                 <span className="absolute right-1 flex items-center gap-0.5 rounded bg-white/75 px-0.5 backdrop-blur-sm opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 dark:bg-neutral-900/75">
                   {toolButton(
                     "Clear log",
@@ -440,43 +441,49 @@ export default function RawLogsPanel({
                 <p className="truncate text-xs font-semibold text-neutral-800 dark:text-neutral-200">
                   {selectedItem?.label || selectedItem?.name || "Log output"}
                 </p>
-                <p
-                  className="truncate text-[10px] text-neutral-500"
-                  title={selectedItem?.path || ""}
+                <FloatingTooltip
+                  content={selectedItem?.path || ""}
+                  placement="bottom-start"
                 >
-                  {selectedItem?.path ||
-                    "Select a log file to view its contents."}
-                </p>
+                  <p className="truncate text-[10px] text-neutral-500">
+                    {selectedItem?.path ||
+                      "Select a log file to view its contents."}
+                  </p>
+                </FloatingTooltip>
               </div>
               <div className="flex shrink-0 items-center gap-3 text-right text-[10px] text-neutral-500 dark:text-neutral-400">
-                <span
-                  className="css-tooltip relative inline-flex cursor-help flex-col items-end"
-                  data-tooltip={
+                <FloatingTooltip
+                  content={
                     latestFirst
                       ? "Log output is currently ordered newest to oldest."
                       : "Log output is currently ordered oldest to newest."
                   }
+                  placement="bottom-end"
                 >
-                  <strong className="block font-semibold text-neutral-700 dark:text-neutral-300">
-                    {latestFirst ? "Latest first" : "Oldest first"}
-                  </strong>
-                  Order
-                </span>
+                  <span className="inline-flex cursor-help flex-col items-end">
+                    <strong className="block font-semibold text-neutral-700 dark:text-neutral-300">
+                      {latestFirst ? "Latest first" : "Oldest first"}
+                    </strong>
+                    Order
+                  </span>
+                </FloatingTooltip>
                 <span>
                   <strong className="block font-semibold text-neutral-700 dark:text-neutral-300">
                     {formatBytes(selectedItem?.size || 0)}
                   </strong>
                   Size
                 </span>
-                <span
-                  className="css-tooltip relative inline-flex cursor-help flex-col items-end"
-                  data-tooltip={formatModified(selectedItem?.modified)}
+                <FloatingTooltip
+                  content={formatModified(selectedItem?.modified)}
+                  placement="bottom-end"
                 >
-                  <strong className="block font-semibold text-neutral-700 dark:text-neutral-300">
-                    {formatModifiedRelative(selectedItem?.modified)}
-                  </strong>
-                  Last modified
-                </span>
+                  <span className="inline-flex cursor-help flex-col items-end">
+                    <strong className="block font-semibold text-neutral-700 dark:text-neutral-300">
+                      {formatModifiedRelative(selectedItem?.modified)}
+                    </strong>
+                    Last modified
+                  </span>
+                </FloatingTooltip>
                 <span>
                   <strong className="block font-semibold text-neutral-700 dark:text-neutral-300">
                     {displayedContent ? displayedContent.split("\n").length : 0}

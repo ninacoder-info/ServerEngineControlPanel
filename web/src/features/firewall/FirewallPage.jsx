@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import ServiceStoppedState from "../../components/ServiceStoppedState";
 import ActionDialog from "../../components/ActionDialog";
+import FloatingTooltip from "../../components/FloatingTooltip";
 import { apiRequest, readApiError } from "../../lib/api";
 import NftablesConfigModal from "./NftablesConfigModal";
 
@@ -80,15 +81,16 @@ const panel =
 function DismissibleNotice({ children, onDismiss, className = "" }) {
   return (
     <div className={`relative pr-12 ${className}`}>
-      <button
-        type="button"
-        aria-label="Dismiss notice"
-        title="Dismiss notice"
-        onClick={onDismiss}
-        className="absolute right-2 top-2 inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-current opacity-70 hover:bg-black/5 hover:opacity-100 dark:hover:bg-white/10"
-      >
-        <X size={15} />
-      </button>
+      <FloatingTooltip content="Dismiss notice" className="absolute right-2 top-2">
+        <button
+          type="button"
+          aria-label="Dismiss notice"
+          onClick={onDismiss}
+          className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-current opacity-70 hover:bg-black/5 hover:opacity-100 dark:hover:bg-white/10"
+        >
+          <X size={15} />
+        </button>
+      </FloatingTooltip>
       {children}
     </div>
   );
@@ -2656,50 +2658,53 @@ export default function FirewallPage() {
                           </td>
                           <td className="px-3 py-4 text-right">
                             <div className="flex justify-end gap-1">
-                              <button
-                                type="button"
-                                aria-label="Edit rule"
-                                data-tooltip="Edit rule"
-                                className="css-tooltip cursor-pointer rounded-md p-2 text-neutral-500 hover:bg-neutral-100 hover:text-blue-600 dark:hover:bg-neutral-800 dark:hover:text-blue-400"
-                                onClick={() => {
+                              <FloatingTooltip content="Edit rule">
+                                <button
+                                  type="button"
+                                  aria-label="Edit rule"
+                                  className="cursor-pointer rounded-md p-2 text-neutral-500 hover:bg-neutral-100 hover:text-blue-600 dark:hover:bg-neutral-800 dark:hover:text-blue-400"
+                                  onClick={() => {
                                   setRuleDirection(
                                     tab === "outbound" ? "outbound" : "inbound",
                                   );
                                   setModal(rule);
-                                }}
+                                  }}
+                                >
+                                  <Edit3 size={16} />
+                                </button>
+                              </FloatingTooltip>
+                              <FloatingTooltip
+                                content={rule.enabled ? "Disable rule" : "Enable rule"}
                               >
-                                <Edit3 size={16} />
-                              </button>
-                              <button
-                                type="button"
-                                aria-label={
-                                  rule.enabled ? "Disable rule" : "Enable rule"
-                                }
-                                data-tooltip={
-                                  rule.enabled ? "Disable rule" : "Enable rule"
-                                }
-                                className="css-tooltip cursor-pointer rounded-md p-2 text-neutral-500 hover:bg-neutral-100 hover:text-amber-600 dark:hover:bg-neutral-800 dark:hover:text-amber-400"
-                                onClick={() =>
-                                  tab === "outbound"
-                                    ? toggleOutboundRule(rule)
-                                    : toggleRule(rule)
-                                }
-                              >
-                                <CheckCircle2 size={16} />
-                              </button>
-                              <button
-                                type="button"
-                                aria-label="Delete rule"
-                                data-tooltip="Delete rule"
-                                className="css-tooltip cursor-pointer rounded-md p-2 text-neutral-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/30 dark:hover:text-red-400"
-                                onClick={() =>
-                                  tab === "outbound"
-                                    ? deleteOutboundRule(rule)
-                                    : deleteRule(rule)
-                                }
-                              >
-                                <Trash2 size={16} />
-                              </button>
+                                <button
+                                  type="button"
+                                  aria-label={
+                                    rule.enabled ? "Disable rule" : "Enable rule"
+                                  }
+                                  className="cursor-pointer rounded-md p-2 text-neutral-500 hover:bg-neutral-100 hover:text-amber-600 dark:hover:bg-neutral-800 dark:hover:text-amber-400"
+                                  onClick={() =>
+                                    tab === "outbound"
+                                      ? toggleOutboundRule(rule)
+                                      : toggleRule(rule)
+                                  }
+                                >
+                                  <CheckCircle2 size={16} />
+                                </button>
+                              </FloatingTooltip>
+                              <FloatingTooltip content="Delete rule">
+                                <button
+                                  type="button"
+                                  aria-label="Delete rule"
+                                  className="cursor-pointer rounded-md p-2 text-neutral-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/30 dark:hover:text-red-400"
+                                  onClick={() =>
+                                    tab === "outbound"
+                                      ? deleteOutboundRule(rule)
+                                      : deleteRule(rule)
+                                  }
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </FloatingTooltip>
                             </div>
                           </td>
                         </tr>

@@ -33,6 +33,7 @@ import { Tree } from "react-arborist";
 import { flip, offset, shift, useFloating } from "@floating-ui/react";
 import SimpleBar from "simplebar-react";
 import ActionDialog from "../../components/ActionDialog";
+import FloatingTooltip from "../../components/FloatingTooltip";
 import Toast from "../../components/Toast";
 import ConfigEditor from "../services/ConfigEditor";
 import { apiRequest as requestApi, readApiError } from "../../lib/api";
@@ -985,31 +986,33 @@ export function FileManagerWorkspace({
               Files
             </strong>
             <div className="flex items-center gap-1">
-              <button
-                type="button"
-                className="file-toolbar-button inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
-                disabled={treeRootPath === "/"}
-                onClick={() => {
+              <FloatingTooltip content="Up one folder">
+                <button
+                  type="button"
+                  className="file-toolbar-button inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+                  disabled={treeRootPath === "/"}
+                  onClick={() => {
                   const parent =
                     treeRootPath.split("/").slice(0, -1).join("/") || "/";
                   setTreeRootPath(parent);
                   loadTreeRoot(parent);
                   loadEntries(parent);
-                }}
-                data-tooltip="Up one folder"
-                aria-label="Go up one level"
-              >
-                <CornerLeftUp size={15} />
-              </button>
-              <button
-                type="button"
-                className="file-toolbar-button inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
-                onClick={() => loadTreeRoot(treeRootPath)}
-                data-tooltip="Refresh folders"
-                aria-label="Refresh folders"
-              >
-                <RefreshCw size={15} />
-              </button>
+                  }}
+                  aria-label="Go up one level"
+                >
+                  <CornerLeftUp size={15} />
+                </button>
+              </FloatingTooltip>
+              <FloatingTooltip content="Refresh folders">
+                <button
+                  type="button"
+                  className="file-toolbar-button inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+                  onClick={() => loadTreeRoot(treeRootPath)}
+                  aria-label="Refresh folders"
+                >
+                  <RefreshCw size={15} />
+                </button>
+              </FloatingTooltip>
             </div>
           </div>
           <div ref={treeViewport} className="min-h-0 flex-1">
@@ -1142,16 +1145,17 @@ export function FileManagerWorkspace({
               })}
             </div>
             <div className="flex shrink-0 items-center gap-1">
-              <button
-                className="file-toolbar-button inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
-                disabled={currentPath === "/"}
-                onClick={() => loadEntries(parentPath)}
-                data-tooltip="Up one folder"
-                aria-label="Up one folder"
-              >
-                <CornerLeftUp size={16} />
-              </button>
-              <span className="group/file-toolbar-tooltip relative inline-flex">
+              <FloatingTooltip content="Up one folder">
+                <button
+                  className="file-toolbar-button inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+                  disabled={currentPath === "/"}
+                  onClick={() => loadEntries(parentPath)}
+                  aria-label="Up one folder"
+                >
+                  <CornerLeftUp size={16} />
+                </button>
+              </FloatingTooltip>
+              <FloatingTooltip content="New file">
                 <button
                   type="button"
                   className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-blue-500 hover:bg-neutral-100 hover:text-blue-700 dark:text-blue-300 dark:hover:bg-neutral-800 dark:hover:text-blue-200"
@@ -1160,11 +1164,8 @@ export function FileManagerWorkspace({
                 >
                   <FilePlus size={15} />
                 </button>
-                <span className="pointer-events-none absolute right-0 top-full z-30 mt-2 whitespace-nowrap rounded-md bg-neutral-900 px-2 py-1.5 text-[10px] font-medium text-white opacity-0 shadow-lg transition-opacity group-hover/file-toolbar-tooltip:opacity-100 dark:bg-white dark:text-neutral-900">
-                  New file
-                </span>
-              </span>
-              <span className="group/file-toolbar-tooltip relative inline-flex">
+              </FloatingTooltip>
+              <FloatingTooltip content="New folder">
                 <button
                   type="button"
                   className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-yellow-500 hover:bg-neutral-100 hover:text-yellow-600 dark:text-yellow-300 dark:hover:bg-neutral-800 dark:hover:text-yellow-200"
@@ -1173,11 +1174,8 @@ export function FileManagerWorkspace({
                 >
                   <FolderPlus size={15} />
                 </button>
-                <span className="pointer-events-none absolute right-0 top-full z-30 mt-2 whitespace-nowrap rounded-md bg-neutral-900 px-2 py-1.5 text-[10px] font-medium text-white opacity-0 shadow-lg transition-opacity group-hover/file-toolbar-tooltip:opacity-100 dark:bg-white dark:text-neutral-900">
-                  New folder
-                </span>
-              </span>
-              <span className="group/file-toolbar-tooltip relative inline-flex">
+              </FloatingTooltip>
+              <FloatingTooltip content="Upload">
                 <button
                   type="button"
                   className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-sky-500 hover:bg-neutral-100 hover:text-sky-700 dark:text-sky-300 dark:hover:bg-neutral-800 dark:hover:text-sky-200"
@@ -1189,9 +1187,6 @@ export function FileManagerWorkspace({
                 >
                   <Upload size={15} />
                 </button>
-                <span className="pointer-events-none absolute right-0 top-full z-30 mt-2 whitespace-nowrap rounded-md bg-neutral-900 px-2 py-1.5 text-[10px] font-medium text-white opacity-0 shadow-lg transition-opacity group-hover/file-toolbar-tooltip:opacity-100 dark:bg-white dark:text-neutral-900">
-                  Upload
-                </span>
                 {uploadMenuOpen && (
                   <div className="absolute right-0 top-full z-40 mt-2 w-44 rounded-md border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
                     <button
@@ -1218,7 +1213,7 @@ export function FileManagerWorkspace({
                     </button>
                   </div>
                 )}
-              </span>
+              </FloatingTooltip>
               <input
                 ref={uploadInput}
                 hidden
@@ -1235,11 +1230,8 @@ export function FileManagerWorkspace({
                 type="file"
                 onChange={uploadSelection}
               />
-              <button
-                className="file-toolbar-button inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-amber-500 hover:bg-neutral-100 hover:text-amber-700 disabled:cursor-not-allowed disabled:opacity-40 dark:text-amber-300 dark:hover:bg-neutral-800 dark:hover:text-amber-200"
-                disabled={!selected || selected.kind !== "file"}
-                onClick={() => editFile()}
-                data-tooltip={
+              <FloatingTooltip
+                content={
                   selected &&
                   selected.kind === "file" &&
                   !isEditableFile(selected.name)
@@ -1247,88 +1239,103 @@ export function FileManagerWorkspace({
                     : "Edit"
                 }
               >
-                <Edit3 size={15} />
-              </button>
-              <button
+                <button
+                  className="file-toolbar-button inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-amber-500 hover:bg-neutral-100 hover:text-amber-700 disabled:cursor-not-allowed disabled:opacity-40 dark:text-amber-300 dark:hover:bg-neutral-800 dark:hover:text-amber-200"
+                  disabled={!selected || selected.kind !== "file"}
+                  onClick={() => editFile()}
+                >
+                  <Edit3 size={15} />
+                </button>
+              </FloatingTooltip>
+              <FloatingTooltip content="Rename">
+                <button
                 className="file-toolbar-button inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-violet-500 hover:bg-neutral-100 hover:text-violet-700 disabled:cursor-not-allowed disabled:opacity-40 dark:text-violet-300 dark:hover:bg-neutral-800 dark:hover:text-violet-200"
                 disabled={!selected}
                 onClick={renameItem}
-                data-tooltip="Rename"
-              >
-                <Pencil size={15} />
-              </button>
-              <button
+                >
+                  <Pencil size={15} />
+                </button>
+              </FloatingTooltip>
+              <FloatingTooltip content="Delete">
+                <button
                 className="file-toolbar-button inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-rose-500 hover:bg-neutral-100 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-40 dark:text-rose-300 dark:hover:bg-neutral-800 dark:hover:text-rose-200"
                 disabled={!selectedPaths.length}
                 onClick={deleteItems}
-                data-tooltip="Delete"
-              >
-                <Trash2 size={15} />
-              </button>
-              {downloadUrl && (
-                <a
-                  className="file-toolbar-button inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-emerald-500 hover:bg-neutral-100 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-40 dark:text-emerald-300 dark:hover:bg-neutral-800 dark:hover:text-emerald-200"
-                  href={downloadUrl}
-                  data-tooltip="Download"
                 >
-                  <Download size={15} />
-                </a>
+                  <Trash2 size={15} />
+                </button>
+              </FloatingTooltip>
+              {downloadUrl && (
+                <FloatingTooltip content="Download">
+                  <a
+                    className="file-toolbar-button inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-emerald-500 hover:bg-neutral-100 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-40 dark:text-emerald-300 dark:hover:bg-neutral-800 dark:hover:text-emerald-200"
+                    href={downloadUrl}
+                  >
+                    <Download size={15} />
+                  </a>
+                </FloatingTooltip>
               )}
-              <button
+              <FloatingTooltip content="Create ZIP">
+                <button
                 className="file-toolbar-button inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-purple-500 hover:bg-neutral-100 hover:text-purple-700 disabled:cursor-not-allowed disabled:opacity-40 dark:text-purple-300 dark:hover:bg-neutral-800 dark:hover:text-purple-200"
                 disabled={!selectedPaths.length}
                 onClick={makeArchive}
-                data-tooltip="Create ZIP"
-              >
-                <Archive size={15} />
-              </button>
-              <button
+                >
+                  <Archive size={15} />
+                </button>
+              </FloatingTooltip>
+              <FloatingTooltip content="Extract ZIP">
+                <button
                 className="file-toolbar-button inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-orange-500 hover:bg-neutral-100 hover:text-orange-700 disabled:cursor-not-allowed disabled:opacity-40 dark:text-orange-300 dark:hover:bg-neutral-800 dark:hover:text-orange-200"
                 disabled={
                   !selected || !selected.name.toLowerCase().endsWith(".zip")
                 }
                 onClick={extractArchive}
-                data-tooltip="Extract ZIP"
-              >
-                <ArchiveRestore size={15} />
-              </button>
-              {selectedPaths.length > 0 && (
-                <button
-                  className="file-toolbar-button inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-blue-500 hover:bg-neutral-100 hover:text-blue-700 dark:text-blue-300 dark:hover:bg-neutral-800 dark:hover:text-blue-200"
-                  onClick={copyItems}
-                  data-tooltip="Copy selected"
-                  aria-label="Copy selected"
                 >
-                  <Copy size={15} />
+                  <ArchiveRestore size={15} />
                 </button>
+              </FloatingTooltip>
+              {selectedPaths.length > 0 && (
+                <FloatingTooltip content="Copy selected">
+                  <button
+                    className="file-toolbar-button inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-blue-500 hover:bg-neutral-100 hover:text-blue-700 dark:text-blue-300 dark:hover:bg-neutral-800 dark:hover:text-blue-200"
+                    onClick={copyItems}
+                    aria-label="Copy selected"
+                  >
+                    <Copy size={15} />
+                  </button>
+                </FloatingTooltip>
               )}
               {selectedPaths.length > 0 && (
-                <button
-                  className="file-toolbar-button inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-indigo-500 hover:bg-neutral-100 hover:text-indigo-700 dark:text-indigo-300 dark:hover:bg-neutral-800 dark:hover:text-indigo-200"
-                  onClick={cutItems}
-                  data-tooltip="Cut selected"
-                  aria-label="Cut selected"
-                >
-                  <Scissors size={15} />
-                </button>
+                <FloatingTooltip content="Cut selected">
+                  <button
+                    className="file-toolbar-button inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-indigo-500 hover:bg-neutral-100 hover:text-indigo-700 dark:text-indigo-300 dark:hover:bg-neutral-800 dark:hover:text-indigo-200"
+                    onClick={cutItems}
+                    aria-label="Cut selected"
+                  >
+                    <Scissors size={15} />
+                  </button>
+                </FloatingTooltip>
               )}
               {clipboard.length > 0 && (
-                <button
-                  className="file-toolbar-button inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-emerald-500 hover:bg-neutral-100 hover:text-emerald-700 dark:text-emerald-300 dark:hover:bg-neutral-800 dark:hover:text-emerald-200"
-                  onClick={pasteItems}
-                  data-tooltip="Paste"
-                  aria-label="Paste"
-                >
-                  <ClipboardPaste size={15} />
-                </button>
+                <FloatingTooltip content="Paste">
+                  <button
+                    className="file-toolbar-button inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-emerald-500 hover:bg-neutral-100 hover:text-emerald-700 dark:text-emerald-300 dark:hover:bg-neutral-800 dark:hover:text-emerald-200"
+                    onClick={pasteItems}
+                    aria-label="Paste"
+                  >
+                    <ClipboardPaste size={15} />
+                  </button>
+                </FloatingTooltip>
               )}
-              <button
-                className="file-toolbar-button inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
-                onClick={() => loadEntries(currentPath)}
-                data-tooltip="Refresh files"
-              >
-                <RefreshCw size={15} />
-              </button>
+              <FloatingTooltip content="Refresh files">
+                <button
+                  className="file-toolbar-button inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+                  onClick={() => loadEntries(currentPath)}
+                >
+                  <RefreshCw size={15} />
+                </button>
+              </FloatingTooltip>
             </div>
           </div>
           <div className="grid shrink-0 grid-cols-[1.5rem_minmax(12rem,1.6fr)_4rem_7rem_5rem_5rem_8rem_1.5rem] items-center gap-2 px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
@@ -1437,20 +1444,20 @@ export function FileManagerWorkspace({
                     <code className="text-[11px] text-neutral-500 dark:text-neutral-400">
                       {entry.permissions}
                     </code>
-                    <span
-                      className="css-tooltip relative inline-flex min-w-0 justify-self-start"
-                      data-tooltip={formatFullTime(entry.modified_at)}
+                    <FloatingTooltip
+                      content={formatFullTime(entry.modified_at)}
+                      className="inline-flex min-w-0 justify-self-start"
                     >
                       <span className="truncate">
                         {formatRelativeTime(entry.modified_at)}
                       </span>
-                    </span>
-                    <button
-                      type="button"
-                      className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-neutral-400 hover:bg-neutral-100 hover:text-neutral-800 dark:text-neutral-500 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
-                      title={`More actions for ${entry.name}`}
-                      aria-label={`More actions for ${entry.name}`}
-                      onClick={(event) => {
+                    </FloatingTooltip>
+                    <FloatingTooltip content={`More actions for ${entry.name}`}>
+                      <button
+                        type="button"
+                        className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-neutral-400 hover:bg-neutral-100 hover:text-neutral-800 dark:text-neutral-500 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+                        aria-label={`More actions for ${entry.name}`}
+                        onClick={(event) => {
                         event.stopPropagation();
                         if (!selectedPaths.includes(entry.path))
                           setSelectedPaths([entry.path]);
@@ -1459,10 +1466,11 @@ export function FileManagerWorkspace({
                           y: event.clientY,
                           empty: false,
                         });
-                      }}
-                    >
-                      <MoreVertical size={15} />
-                    </button>
+                        }}
+                      >
+                        <MoreVertical size={15} />
+                      </button>
+                    </FloatingTooltip>
                   </div>
                 ))
               ) : (
@@ -1675,27 +1683,26 @@ export function FileManagerWorkspace({
                 </h2>
               </div>
               <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
-                  title={editorExpanded ? "Exit full view" : "Full view"}
-                  aria-label={editorExpanded ? "Exit full view" : "Full view"}
-                  onClick={() => setEditorExpanded((expanded) => !expanded)}
-                >
-                  {editorExpanded ? (
-                    <Minimize2 size={18} />
-                  ) : (
-                    <Maximize2 size={18} />
-                  )}
-                </button>
-                <button
-                  type="button"
-                  className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
-                  title="Close editor"
-                  onClick={requestCloseEditor}
-                >
-                  <X size={18} />
-                </button>
+                <FloatingTooltip content={editorExpanded ? "Exit full view" : "Full view"}>
+                  <button
+                    type="button"
+                    className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+                    aria-label={editorExpanded ? "Exit full view" : "Full view"}
+                    onClick={() => setEditorExpanded((expanded) => !expanded)}
+                  >
+                    {editorExpanded ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+                  </button>
+                </FloatingTooltip>
+                <FloatingTooltip content="Close editor">
+                  <button
+                    type="button"
+                    className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+                    aria-label="Close editor"
+                    onClick={requestCloseEditor}
+                  >
+                    <X size={18} />
+                  </button>
+                </FloatingTooltip>
               </div>
             </div>
             <div

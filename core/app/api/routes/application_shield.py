@@ -39,10 +39,17 @@ def logs(lines: int = 120, user=Depends(require_user)):
 
 
 @router.get("/traffic")
-def traffic(page: int = 1, page_size: int = 50, limit: int | None = None, user=Depends(require_user)):
+def traffic(page: int = 1, page_size: int = 50, limit: int | None = None, time: str = "all", host: str = "", status: str = "", outcome: str = "", user=Depends(require_user)):
     if limit is not None:
         page_size = limit
-    return application_shield_service.traffic(page=page, page_size=page_size)
+    return application_shield_service.traffic(
+        page=page,
+        page_size=page_size,
+        time_filter=time,
+        host=host,
+        status=status,
+        outcome=outcome,
+    )
 
 
 @router.get("/report")

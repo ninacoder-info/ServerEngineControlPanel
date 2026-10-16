@@ -1,6 +1,7 @@
 import React from "react";
 import { Info } from "lucide-react";
 import { formControlClass } from "./ui/form";
+import FloatingTooltip from "./FloatingTooltip";
 
 export { formControlClass };
 
@@ -29,16 +30,11 @@ export default function FormField({
       >
         {label}
         {tooltip && (
-          <span className="group/form-field-tooltip relative inline-flex cursor-help items-center text-neutral-400 dark:text-neutral-500">
-            <Info
-              size={14}
-              aria-label={`${label} information`}
-              title={tooltip}
-            />
-            <span className="pointer-events-none absolute left-0 top-full z-30 mt-1 w-64 rounded-md bg-neutral-900 px-2.5 py-2 text-xs font-normal leading-5 text-white opacity-0 shadow-lg transition-opacity group-hover/form-field-tooltip:opacity-100 dark:bg-white dark:text-neutral-900">
-              {tooltip}
+          <FloatingTooltip content={tooltip} placement="bottom-start">
+            <span className="cursor-help items-center text-neutral-400 dark:text-neutral-500">
+              <Info size={14} aria-label={`${label} information`} />
             </span>
-          </span>
+          </FloatingTooltip>
         )}
       </span>
       {control}

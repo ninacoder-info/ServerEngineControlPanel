@@ -16,6 +16,7 @@ import {
   Zap,
 } from "lucide-react";
 import { apiRequest } from "../lib/api";
+import FloatingTooltip from "./FloatingTooltip";
 
 function statusIcon(status) {
   if (status === "idle")
@@ -951,12 +952,9 @@ export default function GlobalJobStatusBar({
     );
   };
   const StatusTooltip = ({ label, children }) => (
-    <span className="group/status-tooltip relative inline-flex">
-      <span className="pointer-events-none absolute bottom-full left-1/2 z-40 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-neutral-900 px-2.5 py-1.5 text-[11px] font-medium text-white opacity-0 shadow-lg transition-opacity group-hover/status-tooltip:opacity-100 dark:bg-white dark:text-neutral-900">
-        {label}
-      </span>
+    <FloatingTooltip content={label} placement="top">
       {children}
-    </span>
+    </FloatingTooltip>
   );
   const serviceButton = (item, Icon) => {
     if (!item) return null;

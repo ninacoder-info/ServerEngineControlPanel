@@ -1,4 +1,5 @@
 import React from "react";
+import FloatingTooltip from "./FloatingTooltip";
 
 const variants = {
   primary:
@@ -35,14 +36,11 @@ export default function Button({
       {children}
     </button>
   );
-  if (!iconOnly || !title)
-    return title ? React.cloneElement(button, { title }) : button;
-  return (
-    <span className="group/button-tooltip relative inline-flex">
+  return title ? (
+    <FloatingTooltip content={title} placement="bottom-end">
       {button}
-      <span className="pointer-events-none absolute right-0 top-full z-40 mt-1 whitespace-nowrap rounded bg-neutral-900 px-2 py-1 text-[10px] font-medium text-white opacity-0 shadow-lg transition-opacity group-hover/button-tooltip:opacity-100 dark:bg-white dark:text-neutral-900">
-        {title}
-      </span>
-    </span>
+    </FloatingTooltip>
+  ) : (
+    button
   );
 }

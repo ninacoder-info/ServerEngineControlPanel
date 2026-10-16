@@ -18,6 +18,7 @@ import {
 import { useLocation, useNavigate } from "react-router-dom";
 import ActionDialog from "../../components/ActionDialog";
 import Button from "../../components/Button";
+import FloatingTooltip from "../../components/FloatingTooltip";
 import Toast from "../../components/Toast";
 import { apiRequest, readApiError } from "../../lib/api";
 import WebsiteFormModal from "./WebsiteFormModal";
@@ -618,24 +619,33 @@ export default function WebsitesPage({ onOpenTerminal }) {
                       {site.php_version ? `PHP ${site.php_version}` : "Static"}
                     </span>
                     <span className="inline-flex items-center gap-1.5">
-                      <span className="group/certificate-tooltip relative inline-flex items-center gap-1.5">
-                        <ShieldCheck size={14} className={tlsTone} />
-                        <span className={tlsTone}>{tlsLabel}</span>
-                        {site.ssl_enabled && (!certificateIssued || expiry) && (
-                          <span className="pointer-events-none absolute left-0 top-full z-30 mt-1 w-max max-w-xs rounded-md bg-neutral-900 px-2.5 py-2 text-xs font-normal text-white opacity-0 shadow-lg transition-opacity group-hover/certificate-tooltip:opacity-100 dark:bg-white dark:text-neutral-900">
-                            {!certificateIssued
+                      {site.ssl_enabled && (!certificateIssued || expiry) ? (
+                        <FloatingTooltip
+                          content={`${
+                            !certificateIssued
                               ? "Certificate not issued"
                               : expiry.expired
                                 ? "Certificate expired"
                                 : expiry.warning
                                   ? "Certificate expires soon"
-                                  : "Certificate expires"}
-                            {expiry
+                                  : "Certificate expires"
+                          }${
+                            expiry
                               ? `: ${new Date(expiry.raw).toLocaleString()}`
-                              : ""}
+                              : ""
+                          }`}
+                        >
+                          <span className="inline-flex items-center gap-1.5">
+                            <ShieldCheck size={14} className={tlsTone} />
+                            <span className={tlsTone}>{tlsLabel}</span>
                           </span>
-                        )}
-                      </span>
+                        </FloatingTooltip>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5">
+                          <ShieldCheck size={14} className={tlsTone} />
+                          <span className={tlsTone}>{tlsLabel}</span>
+                        </span>
+                      )}
                     </span>
                     {site.maintenance_enabled && (
                       <span className="inline-flex items-center gap-1.5 font-semibold text-amber-600 dark:text-amber-400">

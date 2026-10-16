@@ -1,5 +1,13 @@
 import React from "react";
 import { createPortal } from "react-dom";
+import { useSearchParams } from "react-router-dom";
+import {
+  autoUpdate,
+  flip,
+  offset,
+  shift,
+  useFloating,
+} from "@floating-ui/react";
 import Chart from "react-apexcharts";
 import {
   Activity,
@@ -27,6 +35,7 @@ import {
 import { apiRequest, readApiError } from "../../lib/api";
 import Toast, { showToast } from "../../components/Toast";
 import ActionDialog from "../../components/ActionDialog";
+import FloatingTooltip from "../../components/FloatingTooltip";
 import { formatPanelDate } from "../../lib/panelPreferences";
 import WebsiteFormModal from "../websites/WebsiteFormModal";
 import countries from "../../data/countries.json";
@@ -192,62 +201,15 @@ function validateIpNetwork(value) {
 }
 
 function TrafficTime({ value }) {
-  const triggerRef = React.useRef(null);
-  const [tooltip, setTooltip] = React.useState(null);
   const absoluteTime = trafficTime(value);
   const relativeTime = value ? formatPanelDate(value, { relative: true }) : "—";
 
-  const updateTooltipPosition = React.useCallback(() => {
-    const trigger = triggerRef.current;
-    if (!trigger) return;
-    const rect = trigger.getBoundingClientRect();
-    setTooltip({
-      left: rect.left + rect.width / 2,
-      top: rect.top - 8,
-    });
-  }, []);
-
-  const showTooltip = () => {
-    updateTooltipPosition();
-  };
-
-  React.useEffect(() => {
-    if (!tooltip) return undefined;
-    window.addEventListener("resize", updateTooltipPosition);
-    window.addEventListener("scroll", updateTooltipPosition, true);
-    return () => {
-      window.removeEventListener("resize", updateTooltipPosition);
-      window.removeEventListener("scroll", updateTooltipPosition, true);
-    };
-  }, [tooltip, updateTooltipPosition]);
-
   return (
-    <>
-      <span
-        ref={triggerRef}
-        className="css-tooltip traffic-time-tooltip-trigger relative inline-flex cursor-help"
-        data-tooltip={absoluteTime}
-        aria-label={absoluteTime}
-        onMouseEnter={showTooltip}
-        onMouseLeave={() => setTooltip(null)}
-        onFocus={showTooltip}
-        onBlur={() => setTooltip(null)}
-        tabIndex={0}
-      >
+    <FloatingTooltip content={absoluteTime} className="inline-flex">
+      <span className="inline-flex cursor-help" aria-label={absoluteTime}>
         {relativeTime}
       </span>
-      {tooltip &&
-        createPortal(
-          <span
-            className="traffic-time-tooltip-portal"
-            style={{ left: tooltip.left, top: tooltip.top }}
-            role="tooltip"
-          >
-            {absoluteTime}
-          </span>,
-          document.body,
-        )}
-    </>
+    </FloatingTooltip>
   );
 }
 
@@ -3216,24 +3178,26 @@ function ListsTab() {
                   </td>
                   <td className="px-3 py-4 text-right">
                     <div className="flex justify-end gap-3">
-                      <button
-                        type="button"
-                        onClick={() => setModal(entry)}
-                        className="css-tooltip inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/40"
-                        data-tooltip="Edit IP entry"
-                        aria-label="Edit IP entry"
-                      >
-                        <Pencil size={15} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => remove(entry)}
-                        className="css-tooltip inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40"
-                        data-tooltip="Delete IP entry"
-                        aria-label="Delete IP entry"
-                      >
-                        <Trash2 size={15} />
-                      </button>
+                      <FloatingTooltip content="Edit IP entry">
+                        <button
+                          type="button"
+                          onClick={() => setModal(entry)}
+                          className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/40"
+                          aria-label="Edit IP entry"
+                        >
+                          <Pencil size={15} />
+                        </button>
+                      </FloatingTooltip>
+                      <FloatingTooltip content="Delete IP entry">
+                        <button
+                          type="button"
+                          onClick={() => remove(entry)}
+                          className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40"
+                          aria-label="Delete IP entry"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </FloatingTooltip>
                     </div>
                   </td>
                 </tr>
@@ -3666,24 +3630,26 @@ function RegionsTabV2() {
                       {entry.enabled ? "Active" : "Disabled"}
                     </td>
                     <td className="px-3 py-4 text-right">
-                      <button
-                        type="button"
-                        onClick={() => setForm(entry)}
-                        className="css-tooltip mr-2 inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/40"
-                        data-tooltip="Edit country policy"
-                        aria-label="Edit country policy"
-                      >
-                        <Pencil size={15} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => remove(entry)}
-                        className="css-tooltip inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40"
-                        data-tooltip="Delete country policy"
-                        aria-label="Delete country policy"
-                      >
-                        <Trash2 size={15} />
-                      </button>
+                      <FloatingTooltip content="Edit country policy">
+                        <button
+                          type="button"
+                          onClick={() => setForm(entry)}
+                          className="mr-2 inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/40"
+                          aria-label="Edit country policy"
+                        >
+                          <Pencil size={15} />
+                        </button>
+                      </FloatingTooltip>
+                      <FloatingTooltip content="Delete country policy">
+                        <button
+                          type="button"
+                          onClick={() => remove(entry)}
+                          className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40"
+                          aria-label="Delete country policy"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </FloatingTooltip>
                     </td>
                   </tr>
                 ))}
@@ -3973,24 +3939,26 @@ function RegionsTab() {
                       {entry.enabled ? "Active" : "Disabled"}
                     </td>
                     <td className="px-3 py-4 text-right">
-                      <button
-                        type="button"
-                        onClick={() => setForm(entry)}
-                        className="css-tooltip mr-2 inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/40"
-                        data-tooltip="Edit country policy"
-                        aria-label="Edit country policy"
-                      >
-                        <Pencil size={15} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => remove(entry)}
-                        className="css-tooltip inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40"
-                        data-tooltip="Delete country policy"
-                        aria-label="Delete country policy"
-                      >
-                        <Trash2 size={15} />
-                      </button>
+                      <FloatingTooltip content="Edit country policy">
+                        <button
+                          type="button"
+                          onClick={() => setForm(entry)}
+                          className="mr-2 inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/40"
+                          aria-label="Edit country policy"
+                        >
+                          <Pencil size={15} />
+                        </button>
+                      </FloatingTooltip>
+                      <FloatingTooltip content="Delete country policy">
+                        <button
+                          type="button"
+                          onClick={() => remove(entry)}
+                          className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40"
+                          aria-label="Delete country policy"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </FloatingTooltip>
                     </td>
                   </tr>
                 ))}
@@ -4118,6 +4086,88 @@ function RegionsTab() {
   );
 }
 
+function TrafficFilterHeader({
+  label,
+  value,
+  options,
+  open,
+  onToggle,
+  onChange,
+}) {
+  const [tooltipOpen, setTooltipOpen] = React.useState(false);
+  const { refs, floatingStyles } = useFloating({
+    open: tooltipOpen,
+    onOpenChange: setTooltipOpen,
+    placement: "top",
+    strategy: "fixed",
+    middleware: [offset(8), flip(), shift({ padding: 8 })],
+    whileElementsMounted: autoUpdate,
+  });
+  const { refs: menuRefs, floatingStyles: menuFloatingStyles } = useFloating({
+    open,
+    placement: "bottom-start",
+    strategy: "fixed",
+    middleware: [offset(4), flip(), shift({ padding: 8 })],
+    whileElementsMounted: autoUpdate,
+  });
+  const activeLabel =
+    options.find(([optionValue]) => optionValue === value)?.[1] || value;
+  const tooltipLabel =
+    value !== "all" ? `${label} filter: ${activeLabel}` : `Filter ${label}`;
+  return (
+    <th className="relative px-3 py-3">
+      <button
+        type="button"
+        ref={(node) => {
+          refs.setReference(node);
+          menuRefs.setReference(node);
+        }}
+        className={`inline-flex cursor-pointer items-center gap-1 uppercase tracking-wide ${value !== "all" ? "text-blue-600 dark:text-blue-400" : ""}`}
+        aria-expanded={open}
+        onMouseEnter={() => setTooltipOpen(true)}
+        onMouseLeave={() => setTooltipOpen(false)}
+        onFocus={() => setTooltipOpen(true)}
+        onBlur={() => setTooltipOpen(false)}
+        onClick={onToggle}
+      >
+        {label}
+        <ChevronDown size={13} className={open ? "rotate-180" : ""} />
+      </button>
+      {tooltipOpen &&
+        createPortal(
+          <span
+            ref={refs.setFloating}
+            style={{ ...floatingStyles, zIndex: 10000 }}
+            className="pointer-events-none max-w-72 whitespace-nowrap rounded-md bg-neutral-900 px-2.5 py-1.5 text-[11px] font-medium normal-case tracking-normal text-white shadow-lg dark:bg-white dark:text-neutral-900"
+          >
+            {tooltipLabel}
+          </span>,
+          document.body,
+        )}
+      {open &&
+        createPortal(
+          <div
+            ref={menuRefs.setFloating}
+            style={{ ...menuFloatingStyles, zIndex: 10001 }}
+            className="isolate min-w-40 overflow-hidden rounded-md border border-neutral-200 bg-white p-1 text-left normal-case tracking-normal opacity-100 shadow-2xl ring-1 ring-neutral-200 dark:border-neutral-700 dark:bg-neutral-900 dark:ring-neutral-700"
+          >
+            {options.map(([optionValue, optionLabel]) => (
+              <button
+                type="button"
+                key={optionValue}
+                className={`block w-full cursor-pointer rounded px-2.5 py-2 text-left text-xs ${value === optionValue ? "bg-blue-50 font-semibold text-blue-700 dark:bg-blue-950/40 dark:text-blue-300" : "text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800"}`}
+                onClick={() => onChange(optionValue)}
+              >
+                {optionLabel}
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
+    </th>
+  );
+}
+
 function TrafficTabPaginated() {
   const pageSize = 50;
   const [data, setData] = React.useState(null);
@@ -4126,14 +4176,29 @@ function TrafficTabPaginated() {
   const [error, setError] = React.useState("");
   const [ipModal, setIpModal] = React.useState(null);
   const [toast, setToast] = React.useState(null);
-  const initialLoadStarted = React.useRef(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [openFilter, setOpenFilter] = React.useState(null);
+  const filters = {
+    time: searchParams.get("time") || "all",
+    host: searchParams.get("host") || "all",
+    status: searchParams.get("status") || "all",
+    outcome: searchParams.get("outcome") || "all",
+  };
+  const trafficFilterQuery = React.useMemo(() => {
+    const params = new URLSearchParams();
+    if (filters.time !== "all") params.set("time", filters.time);
+    if (filters.host !== "all") params.set("host", filters.host);
+    if (filters.status !== "all") params.set("status", filters.status);
+    if (filters.outcome !== "all") params.set("outcome", filters.outcome);
+    return params.toString();
+  }, [filters.host, filters.outcome, filters.status, filters.time]);
 
   const load = React.useCallback(async (requestedPage = page) => {
     setLoading(true);
     setError("");
     try {
       const response = await apiRequest(
-        `/api/v1/application-shield/traffic?page=${requestedPage}&page_size=${pageSize}`,
+        `/api/v1/application-shield/traffic?page=${requestedPage}&page_size=${pageSize}${trafficFilterQuery ? `&${trafficFilterQuery}` : ""}`,
       );
       if (!response.ok)
         throw new Error(
@@ -4146,11 +4211,9 @@ function TrafficTabPaginated() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [trafficFilterQuery]);
 
   React.useEffect(() => {
-    if (initialLoadStarted.current) return;
-    initialLoadStarted.current = true;
     load(1);
   }, [load]);
 
@@ -4158,17 +4221,33 @@ function TrafficTabPaginated() {
   const pagination = data?.pagination || {};
   const total = Number(pagination.total || 0);
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
-  const hostOptions = [
-    ...new Set(
-      events
-        .map((event) =>
-          String(event.host || "")
-            .trim()
-            .toLowerCase(),
-        )
-        .filter((host) => host && host !== "unknown"),
-    ),
-  ];
+  const hostOptions = data?.filter_options?.hosts || [];
+  const statusOptions = (data?.filter_options?.statuses || []).map(String);
+  const outcomeOptions = data?.filter_options?.outcomes || [];
+  const updateFilter = (key, value) => {
+    setSearchParams((current) => {
+      current.set("tab", "traffic");
+      if (!value || value === "all") current.delete(key);
+      else current.set(key, value);
+      return current;
+    });
+    setPage(1);
+    setOpenFilter(null);
+  };
+  const filteredEvents = events;
+  const pageNumbers =
+    pageCount <= 7
+      ? Array.from({ length: pageCount }, (_, index) => index + 1)
+      : [
+          1,
+          ...(page > 4 ? ["…"] : []),
+          ...Array.from(
+            { length: 5 },
+            (_, index) => Math.max(2, Math.min(pageCount - 1, page - 2)) + index,
+          ).filter((number) => number < pageCount),
+          ...(page < pageCount - 3 ? ["…"] : []),
+          pageCount,
+        ].filter((value, index, values) => values.indexOf(value) === index);
   return (
     <div className="space-y-5">
       {error && (
@@ -4227,16 +4306,49 @@ function TrafficTabPaginated() {
           <table className="w-full min-w-[860px] text-left">
             <thead>
               <tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
-                <th className="px-3 py-3">Time</th>
-                <th className="px-3 py-3">Host</th>
+                <TrafficFilterHeader
+                  label="Time"
+                  value={filters.time}
+                  open={openFilter === "time"}
+                  onToggle={() => setOpenFilter(openFilter === "time" ? null : "time")}
+                  onChange={(value) => updateFilter("time", value)}
+                  options={[
+                    ["all", "Any time"],
+                    ["1h", "Last hour"],
+                    ["24h", "Last 24 hours"],
+                    ["7d", "Last 7 days"],
+                  ]}
+                />
+                <TrafficFilterHeader
+                  label="Host"
+                  value={filters.host}
+                  open={openFilter === "host"}
+                  onToggle={() => setOpenFilter(openFilter === "host" ? null : "host")}
+                  onChange={(value) => updateFilter("host", value)}
+                  options={[["all", "All hosts"], ...hostOptions.map((host) => [host, host])]}
+                />
                 <th className="px-3 py-3">Request</th>
                 <th className="px-3 py-3">Source</th>
-                <th className="px-3 py-3">Status</th>
-                <th className="px-3 py-3">Outcome</th>
+                <TrafficFilterHeader
+                  label="Status"
+                  value={filters.status}
+                  open={openFilter === "status"}
+                  onToggle={() => setOpenFilter(openFilter === "status" ? null : "status")}
+                  onChange={(value) => updateFilter("status", value)}
+                  options={[["all", "All statuses"], ...statusOptions.map((status) => [status, status])]}
+                />
+                <TrafficFilterHeader
+                  label="Outcome"
+                  value={filters.outcome}
+                  open={openFilter === "outcome"}
+                  onToggle={() => setOpenFilter(openFilter === "outcome" ? null : "outcome")}
+                  onChange={(value) => updateFilter("outcome", value)}
+                  options={[["all", "All outcomes"], ...outcomeOptions.map((outcome) => [outcome, outcome])]}
+                />
               </tr>
             </thead>
             <tbody>
-              {events.map((event) => (
+              {filteredEvents.map((event) => (
                 <tr
                   key={event.id}
                   className="border-b border-neutral-100 dark:border-neutral-800"
@@ -4273,7 +4385,7 @@ function TrafficTabPaginated() {
                   </td>
                 </tr>
               ))}
-              {data && events.length === 0 && (
+              {data && filteredEvents.length === 0 && (
                 <tr>
                   <td colSpan="6" className="px-3 py-12">
                     <div className="grid min-h-48 place-items-center text-center text-sm text-neutral-500 dark:text-neutral-400">
@@ -4283,7 +4395,9 @@ function TrafficTabPaginated() {
                           size={28}
                         />
                         <p className="mt-3">
-                          No audited traffic has been recorded yet.
+                          {events.length === 0
+                            ? "No audited traffic has been recorded yet."
+                            : "No traffic matches the selected filters."}
                         </p>
                       </div>
                     </div>
@@ -4308,9 +4422,26 @@ function TrafficTabPaginated() {
             >
               Previous
             </button>
-            <span className="px-2 text-neutral-500 dark:text-neutral-400">
-              Page {page} of {pageCount}
-            </span>
+            {pageNumbers.map((number, index) =>
+              number === "…" ? (
+                <span
+                  key={`ellipsis-${index}`}
+                  className="px-1 text-neutral-400 dark:text-neutral-500"
+                >
+                  …
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  key={number}
+                  onClick={() => load(number)}
+                  disabled={loading || number === page}
+                  className={`min-w-9 cursor-pointer rounded-md border px-3 py-2 font-medium disabled:cursor-default dark:border-neutral-700 ${number === page ? "border-blue-600 bg-blue-600 text-white" : "border-neutral-300 text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800"}`}
+                >
+                  {number}
+                </button>
+              ),
+            )}
             <button
               type="button"
               onClick={() => load(page + 1)}
@@ -5858,7 +5989,17 @@ function ReportsTab() {
 }
 
 export default function WebProtectionPage() {
-  const [tab, setTab] = React.useState("overview");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedTab = searchParams.get("tab");
+  const tab = tabs.some(([id]) => id === requestedTab)
+    ? requestedTab
+    : "overview";
+  const setTab = (nextTab) => {
+    setSearchParams((current) => {
+      current.set("tab", nextTab);
+      return current;
+    });
+  };
   const [rules, setRules] = React.useState([]);
   const [query, setQuery] = React.useState("");
   const [modal, setModal] = React.useState(null);

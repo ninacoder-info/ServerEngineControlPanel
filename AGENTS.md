@@ -56,12 +56,22 @@ frontend files.
 
 ## CSS tooltips
 
-- Use the shared CSS tooltip pattern for hover information: a `css-tooltip`
-  element with its message in `data-tooltip`.
+- Whenever a task requests a tooltip, use `@floating-ui/react` with portal or
+  fixed-position rendering, collision handling (`flip`/`shift`), and a high
+  stacking layer. Do not use the fragile pseudo-element tooltip for new work.
+- Existing `css-tooltip` elements may remain until they are touched, but new
+  tooltip work must use Floating UI.
 - Do not use native `title` attributes for interactive or informational UI
-  tooltips when a CSS tooltip can provide the same information.
+  tooltips.
 - Keep tooltip content concise, accessible, and positioned without changing
   the layout of the surrounding control or row.
+
+## Dropdowns and menus
+
+- Custom dropdowns and action menus must use the shared Floating UI pattern
+  with portal rendering, fixed positioning, `flip`/`shift` collision handling,
+  an opaque surface, and a high stacking layer. Do not place new custom menus
+  inside cards or overflow containers with absolute positioning.
 
 ## Frontend forms and validation
 

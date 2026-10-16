@@ -23,6 +23,7 @@ import {
   WrapText,
 } from "lucide-react";
 import React from "react";
+import FloatingTooltip from "../../components/FloatingTooltip";
 
 function languageFor(path = "") {
   if (/\.json$/i.test(path)) return json();
@@ -65,16 +66,17 @@ export default function ConfigEditor({
   }, []);
 
   const toggleButton = (label, icon, pressed, onClick) => (
-    <button
-      type="button"
-      className={`file-toolbar-button inline-flex h-7 w-7 items-center justify-center rounded transition-colors ${pressed ? "text-blue-600 dark:text-blue-400" : "text-neutral-600 hover:bg-neutral-200 dark:text-neutral-300 dark:hover:bg-neutral-800"}`}
-      data-tooltip={label}
-      aria-label={label}
-      aria-pressed={pressed}
-      onClick={onClick}
-    >
-      {icon}
-    </button>
+    <FloatingTooltip content={label}>
+      <button
+        type="button"
+        className={`file-toolbar-button inline-flex h-7 w-7 items-center justify-center rounded transition-colors ${pressed ? "text-blue-600 dark:text-blue-400" : "text-neutral-600 hover:bg-neutral-200 dark:text-neutral-300 dark:hover:bg-neutral-800"}`}
+        aria-label={label}
+        aria-pressed={pressed}
+        onClick={onClick}
+      >
+        {icon}
+      </button>
+    </FloatingTooltip>
   );
 
   return (
@@ -121,48 +123,52 @@ export default function ConfigEditor({
           () => setEnableAutocomplete((enabled) => !enabled),
         )}
         <span className="mx-1 h-5 w-px bg-neutral-200 dark:bg-neutral-800" />
-        <button
-          type="button"
-          className="file-toolbar-button inline-flex h-7 w-7 items-center justify-center rounded text-neutral-600 hover:bg-neutral-200 dark:text-neutral-300 dark:hover:bg-neutral-800"
-          data-tooltip="Find and replace"
-          aria-label="Find and replace"
-          onClick={() =>
-            editorView.current && openSearchPanel(editorView.current)
-          }
-        >
-          <Search size={14} />
-        </button>
-        <button
-          type="button"
-          className="file-toolbar-button inline-flex h-7 w-7 items-center justify-center rounded text-neutral-600 hover:bg-neutral-200 dark:text-neutral-300 dark:hover:bg-neutral-800"
-          data-tooltip="Decrease font size"
-          aria-label="Decrease font size"
-          disabled={fontSize <= 10}
-          onClick={() => setFontSize((size) => Math.max(10, size - 1))}
-        >
-          <Minus size={14} />
-        </button>
-        <button
-          type="button"
-          className="file-toolbar-button inline-flex h-7 w-7 items-center justify-center rounded text-neutral-600 hover:bg-neutral-200 disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-300 dark:hover:bg-neutral-800"
-          data-tooltip="Increase font size"
-          aria-label="Increase font size"
-          disabled={fontSize >= 24}
-          onClick={() => setFontSize((size) => Math.min(24, size + 1))}
-        >
-          <Plus size={14} />
-        </button>
-        <button
-          type="button"
-          className="file-toolbar-button inline-flex h-7 w-7 items-center justify-center rounded text-neutral-600 hover:bg-neutral-200 dark:text-neutral-300 dark:hover:bg-neutral-800"
-          data-tooltip={`Indent size: ${tabSize} spaces`}
-          aria-label={`Indent size: ${tabSize} spaces`}
-          onClick={() =>
-            setTabSize((size) => (size === 2 ? 4 : size === 4 ? 8 : 2))
-          }
-        >
-          <IndentIncrease size={14} />
-        </button>
+        <FloatingTooltip content="Find and replace">
+          <button
+            type="button"
+            className="file-toolbar-button inline-flex h-7 w-7 items-center justify-center rounded text-neutral-600 hover:bg-neutral-200 dark:text-neutral-300 dark:hover:bg-neutral-800"
+            aria-label="Find and replace"
+            onClick={() =>
+              editorView.current && openSearchPanel(editorView.current)
+            }
+          >
+            <Search size={14} />
+          </button>
+        </FloatingTooltip>
+        <FloatingTooltip content="Decrease font size">
+          <button
+            type="button"
+            className="file-toolbar-button inline-flex h-7 w-7 items-center justify-center rounded text-neutral-600 hover:bg-neutral-200 dark:text-neutral-300 dark:hover:bg-neutral-800"
+            aria-label="Decrease font size"
+            disabled={fontSize <= 10}
+            onClick={() => setFontSize((size) => Math.max(10, size - 1))}
+          >
+            <Minus size={14} />
+          </button>
+        </FloatingTooltip>
+        <FloatingTooltip content="Increase font size">
+          <button
+            type="button"
+            className="file-toolbar-button inline-flex h-7 w-7 items-center justify-center rounded text-neutral-600 hover:bg-neutral-200 disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-300 dark:hover:bg-neutral-800"
+            aria-label="Increase font size"
+            disabled={fontSize >= 24}
+            onClick={() => setFontSize((size) => Math.min(24, size + 1))}
+          >
+            <Plus size={14} />
+          </button>
+        </FloatingTooltip>
+        <FloatingTooltip content={`Indent size: ${tabSize} spaces`}>
+          <button
+            type="button"
+            className="file-toolbar-button inline-flex h-7 w-7 items-center justify-center rounded text-neutral-600 hover:bg-neutral-200 dark:text-neutral-300 dark:hover:bg-neutral-800"
+            aria-label={`Indent size: ${tabSize} spaces`}
+            onClick={() =>
+              setTabSize((size) => (size === 2 ? 4 : size === 4 ? 8 : 2))
+            }
+          >
+            <IndentIncrease size={14} />
+          </button>
+        </FloatingTooltip>
       </div>
       <div style={{ fontSize: `${fontSize}px` }}>
         <CodeMirror

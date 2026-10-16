@@ -3,6 +3,8 @@ import { Minus, Plus, X } from "lucide-react";
 import { TerminalSession } from "../features/terminal/TerminalPage";
 import RawLogsPanel, { logCategories } from "./RawLogsPanel";
 import { apiRequest } from "../lib/api";
+import FloatingMenu from "./FloatingMenu";
+import FloatingTooltip from "./FloatingTooltip";
 
 export default function GlobalTerminalPane({
   session,
@@ -242,7 +244,12 @@ export default function GlobalTerminalPane({
                   <Plus size={16} />
                 </button>
                 {phpMenuOpen && (
-                  <div className="absolute left-0 top-9 z-40 w-40 rounded-lg border border-neutral-200 bg-white p-2 text-left shadow-xl dark:border-neutral-700 dark:bg-neutral-900">
+                  <FloatingMenu
+                    open={phpMenuOpen}
+                    anchorRef={phpMenuRef}
+                    placement="bottom-start"
+                    className="w-40 rounded-lg border border-neutral-200 bg-white p-2 text-left shadow-xl dark:border-neutral-700 dark:bg-neutral-900"
+                  >
                     <button
                       type="button"
                       disabled={addButtonDisabled}
@@ -279,7 +286,7 @@ export default function GlobalTerminalPane({
                         No installed PHP runtimes.
                       </p>
                     )}
-                  </div>
+                  </FloatingMenu>
                 )}
               </span>
             </>
@@ -287,7 +294,7 @@ export default function GlobalTerminalPane({
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <span ref={logToolbarRef} className="flex items-center gap-0.5" />
-          <span className="group/minimize-tooltip relative inline-flex">
+          <FloatingTooltip content="Minimize">
             <button
               type="button"
               aria-label="Minimize console"
@@ -296,10 +303,7 @@ export default function GlobalTerminalPane({
             >
               <Minus size={18} />
             </button>
-            <span className="pointer-events-none absolute right-0 top-full z-30 mt-1 whitespace-nowrap rounded bg-neutral-900 px-2 py-1 text-[10px] font-medium text-white opacity-0 shadow-lg transition-opacity group-hover/minimize-tooltip:opacity-100 dark:bg-white dark:text-neutral-900">
-              Minimize
-            </span>
-          </span>
+          </FloatingTooltip>
         </div>
       </div>
       <div

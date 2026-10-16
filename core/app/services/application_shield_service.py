@@ -12,7 +12,7 @@ import re
 import time
 import uuid
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import RLock, Thread
 from urllib.parse import urlsplit
@@ -1043,7 +1043,16 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
                     pass
         return {"path": str(candidates[0]), "lines": [], "available": False, "message": "No Application Shield audit events have been recorded yet."}
 
-    def traffic(self, page: int = 1, page_size: int = 50, limit: int | None = None) -> dict:
+    def traffic(
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        limit: int | None = None,
+        time_filter: str = "all",
+        host: str = "",
+        status: str = "",
+        outcome: str = "",
+    ) -> dict:
         """Return one page of ModSecurity traffic, reparsing only changed audit logs."""
         if limit is not None:
             page_size = limit
@@ -1106,25 +1115,57 @@ SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1\"
         blocked = sum(1 for event in all_events if event["outcome"] == "Blocked")
         return {"events": ordered, "summary": {"requests_inspected": self.metrics().requests_observed, "blocked": blocked, "unique_sources": len({event["source_ip"] for event in all_events})}, "pagination": {"page": page, "page_size": page_size, "total": total, "has_next": page * page_size < total, "has_previous": page > 1}}
 
-    def traffic(self, page: int = 1, page_size: int = 50, limit: int | None = None) -> dict:
-        """Return traffic from the indexed event store without rescanning the raw log."""
+    def traffic(
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        limit: int | None = None,
+        time_filter: str = "all",
+        host: str = "",
+        status: str = "",
+        outcome: str = "",
+    ) -> dict:
+        """Return filtered traffic from the indexed event store."""
         if limit is not None:
             page_size = limit
         page = max(1, page)
         page_size = max(1, min(page_size, 100))
         self._sync_audit_events()
+        conditions = []
+        query_params = []
+        if time_filter in {"1h", "24h", "7d"}:
+            seconds = {"1h": 3600, "24h": 86400, "7d": 604800}[time_filter]
+            cutoff = (datetime.now(timezone.utc) - timedelta(seconds=seconds)).isoformat()
+            conditions.append("occurred_at >= ?")
+            query_params.append(cutoff)
+        if host:
+            conditions.append("LOWER(host) = ?")
+            query_params.append(host.strip().lower())
+        if status:
+            conditions.append("status = ?")
+            query_params.append(int(status))
+        if outcome:
+            conditions.append("outcome = ?")
+            query_params.append(outcome)
+        where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
         with self._events_connection() as db:
-            total = int(db.execute("SELECT COUNT(*) FROM audit_events").fetchone()[0])
-            blocked = int(db.execute("SELECT COUNT(*) FROM audit_events WHERE outcome = 'Blocked'").fetchone()[0])
-            unique_sources = int(db.execute("SELECT COUNT(DISTINCT source_ip) FROM audit_events").fetchone()[0])
+            total = int(db.execute("SELECT COUNT(*) FROM audit_events" + where, query_params).fetchone()[0])
+            blocked = int(db.execute("SELECT COUNT(*) FROM audit_events" + where + " AND outcome = 'Blocked'" if where else "SELECT COUNT(*) FROM audit_events WHERE outcome = 'Blocked'", query_params).fetchone()[0])
+            unique_sources = int(db.execute("SELECT COUNT(DISTINCT source_ip) FROM audit_events" + where, query_params).fetchone()[0])
             rows = db.execute(
-                "SELECT * FROM audit_events ORDER BY occurred_at DESC, id DESC LIMIT ? OFFSET ?",
-                (page_size, (page - 1) * page_size),
+                "SELECT * FROM audit_events" + where + " ORDER BY occurred_at DESC, id DESC LIMIT ? OFFSET ?",
+                (*query_params, page_size, (page - 1) * page_size),
             ).fetchall()
+            filter_options = {
+                "hosts": [row[0] for row in db.execute("SELECT DISTINCT host FROM audit_events WHERE host != '' ORDER BY LOWER(host)").fetchall()],
+                "statuses": [int(row[0]) for row in db.execute("SELECT DISTINCT status FROM audit_events WHERE status IS NOT NULL ORDER BY status").fetchall()],
+                "outcomes": [row[0] for row in db.execute("SELECT DISTINCT outcome FROM audit_events WHERE outcome != '' ORDER BY outcome").fetchall()],
+            }
         return {
             "events": [self._event_public(row) for row in rows],
             "summary": {"requests_inspected": self.metrics().requests_observed, "blocked": blocked, "unique_sources": unique_sources},
             "pagination": {"page": page, "page_size": page_size, "total": total, "has_next": page * page_size < total, "has_previous": page > 1},
+            "filter_options": filter_options,
         }
 
     def attack_map(self, limit: int = 1000) -> dict:
