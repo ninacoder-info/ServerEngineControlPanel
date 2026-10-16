@@ -7,9 +7,11 @@ VERSION=""
 REPO="${SE_GITHUB_REPO:-}"
 OUTPUT="${SE_RELEASE_OUTPUT:-$ROOT/server-engine-release.tar.gz}"
 NOTES_FILE=""
+ALIAS_DIR=""
 
 cleanup() {
   [[ -z "$NOTES_FILE" ]] || rm -f "$NOTES_FILE"
+  [[ -z "$ALIAS_DIR" ]] || rm -rf "$ALIAS_DIR"
 }
 trap cleanup EXIT
 
@@ -134,6 +136,12 @@ else
 fi
 
 echo "Uploading ${OUTPUT}..."
-gh release upload "$TAG" "$OUTPUT" --repo "$REPO" --clobber
+ASSETS=("$OUTPUT")
+if [[ "$(basename "$OUTPUT")" != "server-engine-release.tar.gz" ]]; then
+  ALIAS_DIR="$(mktemp -d "${TMPDIR:-/tmp}/server-engine-release-alias.XXXXXX")"
+  cp "$OUTPUT" "$ALIAS_DIR/server-engine-release.tar.gz"
+  ASSETS+=("$ALIAS_DIR/server-engine-release.tar.gz")
+fi
+gh release upload "$TAG" "${ASSETS[@]}" --repo "$REPO" --clobber
 
 echo "Published: https://github.com/${REPO}/releases/tag/${TAG}"

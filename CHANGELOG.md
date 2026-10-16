@@ -4,6 +4,24 @@ Release notes for the Server Engine control panel and control-plane runtime.
 
 ## Unreleased
 
+- Fixed custom Application Shield HTML pages being intercepted again by
+  ModSecurity during Nginx's internal error-page redirect.
+
+## v0.1.67
+
+- Fixed Application Shield custom blocked pages with ModSecurity v3 by preserving
+  CRS 403 responses and routing blocked responses through generated Nginx rules.
+- Added useful GitHub update-check diagnostics to the API and a `se panel
+  check-update` support command; removed private-release token handling now that
+  releases are public.
+
+## v0.1.66
+
+- Improved live system resource inspectors and global job/status updates.
+- Expanded Application Shield traffic, audit, policy, and configuration flows.
+- Improved firewall and nftables rule management and operational feedback.
+- Improved terminal sessions, file management, and shared navigation/tooltips.
+
 ## v0.1.65
 
 - Updated the open CPU inspector’s top-process list from the shared live

@@ -26,17 +26,20 @@ export default function FloatingTooltip({
 
   if (!content) return children;
 
-  const child = React.Children.only(children);
-  const trigger = React.isValidElement(child)
-    ? React.cloneElement(child, {
-        "aria-describedby": tooltipId,
-      })
-    : child;
+  const hasSingleChild = React.Children.count(children) === 1;
+  const child = hasSingleChild ? React.Children.only(children) : null;
+  const trigger =
+    hasSingleChild && React.isValidElement(child)
+      ? React.cloneElement(child, {
+          "aria-describedby": tooltipId,
+        })
+      : children;
 
   return (
     <span
       ref={refs.setReference}
       className={className || "inline-flex"}
+      aria-describedby={!hasSingleChild && open ? tooltipId : undefined}
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => setOpen(false)}
       onFocus={() => setOpen(true)}

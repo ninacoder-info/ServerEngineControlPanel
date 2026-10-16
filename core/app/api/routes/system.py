@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 import platform
 import re
 import socket
@@ -10,18 +11,19 @@ import urllib.error
 import urllib.request
 import uuid
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 from pathlib import Path
 from threading import Event, Lock, Thread
-from urllib.parse import quote
+from urllib.parse import quote, unquote, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.dependencies import require_user
 from app.services.job_service import job_store
-from app.services.settings_service import settings_service
 from app.version import APP_VERSION
 
 router = APIRouter(prefix="/api/v1", tags=["system"])
+_LOGGER = logging.getLogger(__name__)
 
 _previous_network = None
 _previous_metrics_at = None
@@ -45,31 +47,52 @@ _update_cache_lock = Lock()
 
 
 def _github_release() -> dict:
+    release_page = f"https://github.com/{UPDATE_REPOSITORY}/releases/latest"
     request = urllib.request.Request(
-        f"https://api.github.com/repos/{UPDATE_REPOSITORY}/releases/latest",
+        release_page,
         headers={
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
+            "Accept": "text/html",
+            "User-Agent": "ServerEngine-update-check",
         },
     )
-    token = os.getenv("SE_GITHUB_TOKEN", "").strip() or settings_service.github_token()
-    if token:
-        request.add_header("Authorization", f"Bearer {token}")
     with urllib.request.urlopen(request, timeout=10) as response:
-        return json.loads(response.read().decode("utf-8"))
+        final_url = response.geturl()
+        page = response.read().decode("utf-8", errors="replace")
+
+    tag_match = re.search(r"/releases/tag/([^/]+)$", urlparse(final_url).path)
+    if not tag_match:
+        raise urllib.error.URLError("GitHub did not redirect to a latest release tag")
+
+    class ReleaseDescriptionParser(HTMLParser):
+        description = ""
+
+        def handle_starttag(self, tag, attrs):
+            if tag != "meta":
+                return
+            metadata = dict(attrs)
+            if metadata.get("property") == "og:description" or metadata.get("name") == "twitter:description":
+                self.description = metadata.get("content", "")
+
+    parser = ReleaseDescriptionParser()
+    parser.feed(page)
+    tag = unquote(tag_match.group(1))
+    return {
+        "tag_name": tag,
+        "html_url": final_url,
+        "published_at": None,
+        "name": f"Server Engine {tag}",
+        "body": parser.description,
+    }
 
 
 def _github_changelog(tag: str) -> str:
     request = urllib.request.Request(
-        f"https://api.github.com/repos/{UPDATE_REPOSITORY}/contents/CHANGELOG.md?ref={quote(tag)}",
+        f"https://raw.githubusercontent.com/{UPDATE_REPOSITORY}/{quote(tag, safe='')}/CHANGELOG.md",
         headers={
-            "Accept": "application/vnd.github.raw+json",
-            "X-GitHub-Api-Version": "2022-11-28",
+            "Accept": "text/plain",
+            "User-Agent": "ServerEngine-update-check",
         },
     )
-    token = os.getenv("SE_GITHUB_TOKEN", "").strip() or settings_service.github_token()
-    if token:
-        request.add_header("Authorization", f"Bearer {token}")
     with urllib.request.urlopen(request, timeout=10) as response:
         return response.read().decode("utf-8")
 
@@ -95,6 +118,27 @@ def _version_tuple(value: str) -> tuple[int, int, int]:
     return tuple((numbers + [0, 0, 0])[:3])
 
 
+def _update_error_diagnostic(error: Exception) -> str:
+    if isinstance(error, urllib.error.HTTPError):
+        diagnostic = f"GitHub returned HTTP {error.code} ({error.reason})"
+        request_id = error.headers.get("X-GitHub-Request-Id") if error.headers else None
+        remaining = error.headers.get("X-RateLimit-Remaining") if error.headers else None
+        reset = error.headers.get("X-RateLimit-Reset") if error.headers else None
+        if remaining is not None:
+            diagnostic += f"; rate-limit remaining: {remaining}"
+        if reset is not None:
+            diagnostic += f"; rate-limit reset: {reset}"
+        if request_id:
+            diagnostic += f"; GitHub request ID: {request_id}"
+        return diagnostic
+    if isinstance(error, urllib.error.URLError):
+        reason = error.reason
+        return f"Network/TLS error ({type(reason).__name__}): {reason}"
+    if isinstance(error, TimeoutError):
+        return "GitHub request timed out after 10 seconds"
+    return f"{type(error).__name__}: {error}"
+
+
 @router.get("/system/update")
 def check_for_panel_update(refresh: bool = Query(default=False), user=Depends(require_user)):
     global _update_cache
@@ -104,12 +148,24 @@ def check_for_panel_update(refresh: bool = Query(default=False), user=Depends(re
             return _update_cache["data"]
     try:
         release = _github_release()
-    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
+    except Exception as error:
+        diagnostic = _update_error_diagnostic(error)
+        _LOGGER.exception(
+            "GitHub release check failed for %s: %s",
+            UPDATE_REPOSITORY,
+            diagnostic,
+        )
         status = getattr(error, "code", None)
         detail = "GitHub release check failed"
         if status == 404:
-            detail = "The configured GitHub release is unavailable or requires a server-side token."
-        result = {"current_version": current, "available": False, "checked": False, "message": detail}
+            detail = "The configured GitHub release was not found."
+        result = {
+            "current_version": current,
+            "available": False,
+            "checked": False,
+            "message": detail,
+            "diagnostic": diagnostic,
+        }
         with _update_cache_lock:
             _update_cache = {"checked_at": time.time(), "data": result}
         return result
@@ -239,6 +295,47 @@ def _cpu_breakdown() -> tuple[int, int, int, int]:
     total = sum(values)
     idle = max(total - user - system, 0)
     return total, user, system, idle
+
+
+def _processor_details() -> dict:
+    """Read CPU identity and core topology exposed by the Linux host."""
+    try:
+        cpuinfo = Path("/proc/cpuinfo").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        cpuinfo = ""
+
+    records = []
+    for block in re.split(r"\n\s*\n", cpuinfo.strip()):
+        fields = {}
+        for line in block.splitlines():
+            key, separator, value = line.partition(":")
+            if separator:
+                fields[key.strip()] = value.strip()
+        if fields:
+            records.append(fields)
+
+    model = next(
+        (
+            record.get("model name") or record.get("Hardware") or record.get("Processor")
+            for record in records
+            if record.get("model name") or record.get("Hardware") or record.get("Processor")
+        ),
+        None,
+    )
+    socket_ids = {record["physical id"] for record in records if "physical id" in record}
+    physical_core_ids = {
+        (record.get("physical id", "0"), record["core id"])
+        for record in records
+        if "core id" in record
+    }
+    logical_cores = len(records) or os.cpu_count()
+
+    return {
+        "model": model,
+        "sockets": len(socket_ids) or None,
+        "physical_cores": len(physical_core_ids) or None,
+        "logical_cores": logical_cores,
+    }
 
 
 def _top_processes(limit: int = 8) -> list[dict]:
@@ -461,7 +558,7 @@ def cpu_details(user=Depends(require_user)):
     return {
         "cpu": cpu,
         "processes": _top_processes(),
-        "processor": {"cores": os.cpu_count() or 1},
+        "processor": _processor_details(),
         "memory": {
             "used": max(total_memory - available_memory, 0),
             "total": total_memory,

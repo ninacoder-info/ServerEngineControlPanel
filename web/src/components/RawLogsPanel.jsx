@@ -31,6 +31,35 @@ export const logCategories = [
   "General",
 ];
 
+const SOURCE_SORT_STORAGE_KEY = "server-engine-logs-source-sort";
+const SOURCE_SORT_OPTIONS = new Set([
+  "name-asc",
+  "name-desc",
+  "size-desc",
+  "size-asc",
+  "modified-desc",
+  "modified-asc",
+]);
+
+function readSourceSort() {
+  try {
+    const saved = localStorage.getItem(SOURCE_SORT_STORAGE_KEY);
+    return SOURCE_SORT_OPTIONS.has(saved) ? saved : "name-asc";
+  } catch {
+    return "name-asc";
+  }
+}
+
+function saveSourceSort(value) {
+  try {
+    if (SOURCE_SORT_OPTIONS.has(value)) {
+      localStorage.setItem(SOURCE_SORT_STORAGE_KEY, value);
+    }
+  } catch {
+    // Keep sorting usable when browser storage is unavailable.
+  }
+}
+
 function formatBytes(value) {
   if (!Number.isFinite(value) || value <= 0) return "0 B";
   const units = ["B", "KB", "MB", "GB"];
@@ -69,7 +98,7 @@ export default function RawLogsPanel({
   const [confirmDialog, setConfirmDialog] = React.useState(null);
   const [toolbarReady, setToolbarReady] = React.useState(false);
   const [sourceQuery, setSourceQuery] = React.useState("");
-  const [sourceSort, setSourceSort] = React.useState("name-asc");
+  const [sourceSort, setSourceSort] = React.useState(readSourceSort);
 
   React.useLayoutEffect(() => {
     setToolbarReady(Boolean(toolbarHostRef?.current));
@@ -365,7 +394,11 @@ export default function RawLogsPanel({
             <select
               aria-label="Sort log files"
               value={sourceSort}
-              onChange={(event) => setSourceSort(event.target.value)}
+              onChange={(event) => {
+                const value = event.target.value;
+                setSourceSort(value);
+                saveSourceSort(value);
+              }}
               className="h-7 max-w-[98px] cursor-pointer rounded border border-neutral-200 bg-transparent px-1 text-[10px] text-neutral-600 outline-none dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300"
             >
               <option value="name-asc">Name A–Z</option>

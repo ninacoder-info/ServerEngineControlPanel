@@ -29,6 +29,7 @@ class _MaintenanceHtmlParser(HTMLParser):
     """Keep custom error pages formatted without allowing active content."""
 
     allowed_tags = {
+        "main",
         "p",
         "br",
         "strong",
@@ -612,7 +613,7 @@ class WebsiteService:
             ]
             if block_page:
                 lines.extend([
-                    "    error_page 418 =403 @server_engine_application_shield_blocked;",
+                    "    error_page 403 418 =403 @server_engine_application_shield_blocked;",
                     "",
                 ])
             redirect_hosts = [host for host in all_names if canonical_host and host != canonical_host]
@@ -674,6 +675,11 @@ class WebsiteService:
                 lines.extend([
                     "",
                     "    location @server_engine_application_shield_blocked {",
+                    # ModSecurity is enabled from the shared http context.
+                    # Disable it for the internal error-page redirect so the
+                    # blocked response is not denied again before its body is
+                    # sent to the client.
+                    "        modsecurity off;",
                     "        default_type text/html;",
                     "        charset utf-8;",
                     f'        return 403 "{self._config_text(block_page)}\\n";',

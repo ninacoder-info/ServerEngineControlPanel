@@ -10,7 +10,7 @@ if [ "$(id -u)" -ne 0 ]; then
     echo "Server Engine installation requires root privileges, but sudo is not installed." >&2
     exit 1
   fi
-  exec sudo --preserve-env=SE_GITHUB_TOKEN bash "$0" "$@"
+  exec sudo bash "$0" "$@"
 fi
 
 # Server Engine native customer-server installer.
@@ -20,7 +20,6 @@ readonly INSTALLER_VERSION="0.1.0"
 SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly DEFAULT_RELEASE_URL="https://github.com/ninacoder-info/ServerEngineControlPanel/releases/latest/download/server-engine-release.tar.gz"
 RELEASE_URL="${SE_RELEASE_URL:-$DEFAULT_RELEASE_URL}"
-GITHUB_TOKEN="${SE_GITHUB_TOKEN:-}"
 ARTIFACT_DIR=""
 ARTIFACT_ARCHIVE=""
 PREFIX="/opt/server-engine"
@@ -40,7 +39,6 @@ LOCK_FILE="/run/lock/server-engine-install.lock"
 LOG_FILE="/server-engine/logs/installer.log"
 BACKUP_ROOT="/server-engine/backups"
 ADMIN_CREDENTIALS_FILE=""
-GITHUB_TOKEN_FILE=""
 ADMIN_USER=""
 ADMIN_PASSWORD=""
 NEW_ADMIN_CREDENTIALS="false"
@@ -69,7 +67,6 @@ Options:
   --api-port PORT         Loopback API port (default: 2510)
   --api-host HOST         API bind address (default: 127.0.0.1)
   --release-url URL       Prebuilt release bundle URL
-  SE_GITHUB_TOKEN=TOKEN   Temporary token for a private GitHub release
   --install-system-deps  Install panel and provider build dependencies using apt/dnf/yum
   --no-service            Install and verify files without enabling systemd
   -y, --yes               Do not ask before replacing an existing release
@@ -187,44 +184,11 @@ download_release_bundle() {
   ARTIFACT_DIR="$(mktemp -d /tmp/server-engine-release.XXXXXX)"
   ARTIFACT_ARCHIVE="$ARTIFACT_DIR/release.tar.gz"
   log "Downloading prebuilt Server Engine release from $RELEASE_URL"
-  local github_auth=()
   local download_url="$RELEASE_URL"
-  if [ -n "$GITHUB_TOKEN" ] && [[ "$RELEASE_URL" =~ ^https://github\.com/([^/]+)/([^/]+)/releases/latest/download/([^/?]+)$ ]]; then
-    local release_owner="${BASH_REMATCH[1]}"
-    local release_repo="${BASH_REMATCH[2]}"
-    local release_asset="${BASH_REMATCH[3]}"
-    local release_api="https://api.github.com/repos/${release_owner}/${release_repo}/releases/latest"
-    log "Resolving private GitHub release asset through the authenticated API"
-    local resolved_asset_url
-    resolved_asset_url="$(curl --fail --location --silent --show-error \
-      --header "Authorization: Bearer $GITHUB_TOKEN" \
-      --header 'Accept: application/vnd.github+json' \
-      "$release_api" | SE_RELEASE_ASSET="$release_asset" python3 -c 'import json, sys
-import os
-asset_name = os.environ["SE_RELEASE_ASSET"]
-release = json.load(sys.stdin)
-for asset in release.get("assets", []):
-    if asset.get("name", "").strip() == asset_name:
-        print(asset.get("url", "") or asset.get("browser_download_url", ""))
-        break
-    ' )" || die "unable to resolve the private GitHub release metadata"
-    if [ -n "$resolved_asset_url" ]; then
-      download_url="$resolved_asset_url"
-    else
-      log "Authenticated release metadata did not expose ${release_asset}; falling back to the direct release URL"
-    fi
-  fi
-  if [ -n "$GITHUB_TOKEN" ] && [[ "$RELEASE_URL" == https://github.com/* || "$RELEASE_URL" == https://api.github.com/* ]]; then
-    github_auth=(--header "Authorization: Bearer $GITHUB_TOKEN" --header "Accept: application/octet-stream")
-  fi
   if has curl; then
-    curl --fail --location --silent --show-error --retry 3 "${github_auth[@]}" "$download_url" -o "$ARTIFACT_ARCHIVE" || die "unable to download the release bundle"
+    curl --fail --location --silent --show-error --retry 3 "$download_url" -o "$ARTIFACT_ARCHIVE" || die "unable to download the release bundle"
   else
-    if [ "${#github_auth[@]}" -gt 0 ]; then
-      wget --no-verbose --tries=3 --header="Authorization: Bearer $GITHUB_TOKEN" --header="Accept: application/octet-stream" -O "$ARTIFACT_ARCHIVE" "$download_url" || die "unable to download the release bundle"
-    else
-      wget --no-verbose --tries=3 -O "$ARTIFACT_ARCHIVE" "$download_url" || die "unable to download the release bundle"
-    fi
+    wget --no-verbose --tries=3 -O "$ARTIFACT_ARCHIVE" "$download_url" || die "unable to download the release bundle"
   fi
   tar -xzf "$ARTIFACT_ARCHIVE" -C "$ARTIFACT_DIR" || die "unable to extract the release bundle"
   local extracted
@@ -459,16 +423,6 @@ create_runtime_user() {
     chown root:root "$STATE_DIR/control.db" 2>/dev/null || true
     chmod 0600 "$STATE_DIR/control.db" 2>/dev/null || true
   fi
-  GITHUB_TOKEN_FILE="$STATE_DIR/github-token"
-  if [ -n "$GITHUB_TOKEN" ]; then
-    umask 077
-    printf '%s\n' "$GITHUB_TOKEN" > "$GITHUB_TOKEN_FILE"
-    chown root:root "$GITHUB_TOKEN_FILE"
-    chmod 0600 "$GITHUB_TOKEN_FILE"
-  elif [ -f "$GITHUB_TOKEN_FILE" ]; then
-    chown root:root "$GITHUB_TOKEN_FILE" 2>/dev/null || true
-    chmod 0600 "$GITHUB_TOKEN_FILE"
-  fi
   # Migrate data created by older releases without deleting the old location.
   if [ -d /var/lib/server-engine/backups ] && [ "$BACKUP_ROOT" != "/var/lib/server-engine/backups" ]; then
     cp -a /var/lib/server-engine/backups/. "$BACKUP_ROOT/" 2>/dev/null || true
@@ -486,7 +440,7 @@ create_runtime_user() {
   for state_file in \
     control.db backups.json backup-config.json websites.json domains.json \
     ftp.json node-projects.json proxy-routes.json cloudflare.json \
-    admin-credentials github-token config; do
+    admin-credentials config; do
     if [ -e "$STATE_DIR/$state_file" ]; then
       chown root:root "$STATE_DIR/$state_file" 2>/dev/null || true
       chmod 0600 "$STATE_DIR/$state_file" 2>/dev/null || true
@@ -506,7 +460,6 @@ configure_panel_updater() {
 #!/usr/bin/env bash
 set -Eeuo pipefail
 readonly INSTALLER_URL="https://secp.ninacoder.top/install.sh"
-readonly TOKEN_FILE="$STATE_DIR/github-token"
 readonly LOG_FILE="$LOG_DIR/panel-update.log"
 script_file="\$(mktemp /tmp/server-engine-update.XXXXXX.sh)"
 cleanup() { rm -f "\$script_file"; }
@@ -514,9 +467,6 @@ trap cleanup EXIT
 mkdir -p "\$(dirname "\$LOG_FILE")"
 exec >>"\$LOG_FILE" 2>&1
 echo "[\$(date -u +%Y-%m-%dT%H:%M:%SZ)] Panel update started"
-if [ -s "\$TOKEN_FILE" ]; then
-  export SE_GITHUB_TOKEN="\$(cat "\$TOKEN_FILE")"
-fi
 /usr/bin/curl --fail --location --silent --show-error "\$INSTALLER_URL" -o "\$script_file"
 /bin/bash "\$script_file" --yes
 echo "[\$(date -u +%Y-%m-%dT%H:%M:%SZ)] Panel update completed"
@@ -639,9 +589,6 @@ export SE_STATE_DIR="$STATE_DIR"
 export SE_LOG_ROOT="$LOG_DIR"
 export SE_BACKUP_ROOT="$BACKUP_ROOT"
 export SE_WEB_DIST="$RELEASE_DIR/web/dist"
-if [ -s "$STATE_DIR/github-token" ]; then
-  export SE_GITHUB_TOKEN="$(cat "$STATE_DIR/github-token")"
-fi
 if [ -s "$STATE_DIR/admin-credentials" ]; then
   export SE_ADMIN_USER="\$(awk -F= '\$1 == "username" {print substr(\$0, index(\$0, "=") + 1)}' "$STATE_DIR/admin-credentials")"
   export SE_ADMIN_PASSWORD="\$(awk -F= '\$1 == "password" {print substr(\$0, index(\$0, "=") + 1)}' "$STATE_DIR/admin-credentials")"

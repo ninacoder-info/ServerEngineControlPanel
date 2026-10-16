@@ -2,6 +2,7 @@
 
 import argparse
 import getpass
+import json
 import os
 import subprocess
 import sys
@@ -21,6 +22,12 @@ def _systemctl(*args: str) -> int:
 
 def _panel(args: argparse.Namespace) -> int:
     units = ("server-engine-core.service", "server-engine-web.service")
+    if args.action == "check-update":
+        from app.api.routes.system import check_for_panel_update
+
+        result = check_for_panel_update(refresh=True, user={})
+        print(json.dumps(result, indent=2))
+        return 0 if result.get("checked") else 1
     if args.action == "users":
         if os.geteuid() != 0:
             print("Listing panel users must be run as root (use sudo).", file=sys.stderr)
@@ -176,7 +183,20 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     panel = subparsers.add_parser("panel", help="Control the Server Engine panel")
-    panel.add_argument("action", choices=("start", "stop", "restart", "status", "logs", "users", "unlock-login", "reset-password"))
+    panel.add_argument(
+        "action",
+        choices=(
+            "start",
+            "stop",
+            "restart",
+            "status",
+            "logs",
+            "check-update",
+            "users",
+            "unlock-login",
+            "reset-password",
+        ),
+    )
     panel.add_argument("--lines", type=int, default=80)
     panel.add_argument("--user", help="Panel username for reset-password")
     panel.add_argument("--ip", help="Source IP for unlock-login")

@@ -376,6 +376,7 @@ function DiskPopover({ details, loading, onClose }) {
 function CpuPopover({ metrics, details, history, loading, onClose }) {
   const cpu = metrics?.cpu;
   const detailCpu = details?.cpu || {};
+  const processor = details?.processor || {};
   const memory = details?.memory || metrics?.memory;
   const processes = Array.isArray(details?.processes) ? details.processes : [];
   const processorPercent = detailCpu.percent ?? cpu?.percent ?? 0;
@@ -455,9 +456,28 @@ function CpuPopover({ metrics, details, history, loading, onClose }) {
               <DetailBar value={processorPercent} tone="bg-sky-400" />
               <strong className="w-12 text-right tabular-nums">{Number(processorPercent).toFixed(1)}%</strong>
             </div>
-            <p className="text-right text-xs text-neutral-500 dark:text-neutral-400">
-              {details?.processor?.cores || "—"} logical cores · {formatDetailBytes(memory?.used)} used
-            </p>
+            <div className="space-y-1 text-xs text-neutral-500 dark:text-neutral-400">
+              <p className="break-words text-right">
+                {processor.model || "CPU model unavailable"}
+                {processor.sockets ? ` × ${processor.sockets}` : ""}
+              </p>
+              <p className="text-right">
+                {[
+                  processor.sockets
+                    ? `${processor.sockets} CPU${processor.sockets === 1 ? "" : "s"}`
+                    : null,
+                  processor.physical_cores
+                    ? `${processor.physical_cores} physical core${processor.physical_cores === 1 ? "" : "s"}`
+                    : null,
+                  (processor.logical_cores ?? processor.cores)
+                    ? `${processor.logical_cores ?? processor.cores} logical core${(processor.logical_cores ?? processor.cores) === 1 ? "" : "s"}`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || "CPU topology unavailable"}
+              </p>
+              <p className="text-right">{formatDetailBytes(memory?.used)} memory used</p>
+            </div>
           </div>
         </section>
 

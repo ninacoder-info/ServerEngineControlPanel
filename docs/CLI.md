@@ -31,7 +31,12 @@ se panel restart
 se panel status
 se panel logs
 se panel logs --lines 200
+se panel check-update
 ```
+
+`check-update` is read-only. It contacts the configured public GitHub release
+page, prints the current/latest versions and a diagnostic on failure, and exits
+nonzero if the check could not complete. It does not install an update.
 
 Reset a panel user's password from an SSH root session:
 
