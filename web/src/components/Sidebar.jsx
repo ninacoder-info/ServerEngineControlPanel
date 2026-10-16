@@ -1,5 +1,4 @@
 import React from "react";
-import { createPortal } from "react-dom";
 import SimpleBar from "simplebar-react";
 import "simplebar-react/dist/simplebar.min.css";
 import {
@@ -28,6 +27,7 @@ import {
   Shield,
 } from "lucide-react";
 import Brand from "./Brand";
+import FloatingTooltip from "./FloatingTooltip";
 
 const sections = [
   ["Workspace", [["Overview", "/", LayoutDashboard]]],
@@ -92,8 +92,6 @@ export default function Sidebar({
   onSelect,
   collapsed,
 }) {
-  const [tooltip, setTooltip] = React.useState(null);
-
   return (
     <>
       <aside
@@ -118,31 +116,26 @@ export default function Sidebar({
                 )}
                 <div className="space-y-1">
                   {items.map(([label, path, Icon]) => (
-                    <a
+                    <FloatingTooltip
                       key={path}
-                      href={path}
-                      aria-label={label}
-                      className={`flex w-full items-center rounded-lg py-2.5 text-sm font-medium no-underline transition-colors ${collapsed ? "justify-center px-0" : "gap-3 px-3"} ${active === label ? "bg-neutral-100 text-neutral-700 dark:bg-dark-hover dark:text-neutral-100" : "text-neutral-700 hover:bg-neutral-100 hover:text-neutral-700 dark:text-neutral-300 dark:hover:bg-dark-hover dark:hover:text-white"}`}
-                      onClick={(event) => {
-                        event.preventDefault();
-                        onSelect(path);
-                        onClose();
-                      }}
-                      onMouseEnter={(event) => {
-                        if (!collapsed) return;
-                        const rect =
-                          event.currentTarget.getBoundingClientRect();
-                        setTooltip({
-                          label,
-                          left: rect.right + 8,
-                          top: rect.top + rect.height / 2,
-                        });
-                      }}
-                      onMouseLeave={() => setTooltip(null)}
+                      content={collapsed ? label : ""}
+                      placement="right"
+                      className="block"
                     >
-                      <Icon size={collapsed ? 20 : 16} className="shrink-0" />
-                      {!collapsed && label}
-                    </a>
+                      <a
+                        href={path}
+                        aria-label={label}
+                        className={`flex w-full items-center rounded-lg py-2.5 text-sm font-medium no-underline transition-colors ${collapsed ? "justify-center px-0" : "gap-3 px-3"} ${active === label ? "bg-neutral-100 text-neutral-700 dark:bg-dark-hover dark:text-neutral-100" : "text-neutral-700 hover:bg-neutral-100 hover:text-neutral-700 dark:text-neutral-300 dark:hover:bg-dark-hover dark:hover:text-white"}`}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          onSelect(path);
+                          onClose();
+                        }}
+                      >
+                        <Icon size={collapsed ? 20 : 16} className="shrink-0" />
+                        {!collapsed && label}
+                      </a>
+                    </FloatingTooltip>
                   ))}
                 </div>
               </div>
@@ -150,16 +143,6 @@ export default function Sidebar({
           </nav>
         </SimpleBar>
       </aside>
-      {tooltip &&
-        createPortal(
-          <div
-            className="sidebar-portal-tooltip"
-            style={{ left: tooltip.left, top: tooltip.top }}
-          >
-            {tooltip.label}
-          </div>,
-          document.body,
-        )}
     </>
   );
 }

@@ -21,6 +21,7 @@ import {
 import { apiRequest } from "../lib/api";
 import Toast from "./Toast";
 import FloatingMenu from "./FloatingMenu";
+import FloatingTooltip from "./FloatingTooltip";
 import { formatPanelDate } from "../lib/panelPreferences";
 import { setJobFavicon } from "../lib/jobFavicon";
 import englishFlag from "../assets/flags/en.svg";
@@ -409,24 +410,26 @@ export default function Topbar({
   };
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-neutral-200 bg-white px-5 dark:border-dark-border dark:bg-dark">
-      <button
-        type="button"
-        className="file-toolbar-button hidden h-9 w-9 cursor-pointer items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 md:inline-flex dark:text-neutral-400 dark:hover:bg-dark-hover dark:hover:text-neutral-100"
-        data-tooltip={
-          sidebarCollapsed ? "Expand navigation" : "Collapse navigation"
-        }
-        aria-label={
-          sidebarCollapsed ? "Expand navigation" : "Collapse navigation"
-        }
-        aria-pressed={sidebarCollapsed}
-        onClick={onSidebarToggle}
+      <FloatingTooltip
+        content={sidebarCollapsed ? "Expand navigation" : "Collapse navigation"}
+        className="hidden md:inline-flex"
       >
-        {sidebarCollapsed ? (
-          <PanelLeftOpen size={18} />
-        ) : (
-          <PanelLeftClose size={18} />
-        )}
-      </button>
+        <button
+          type="button"
+          className="file-toolbar-button inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 dark:text-neutral-400 dark:hover:bg-dark-hover dark:hover:text-neutral-100"
+          aria-label={
+            sidebarCollapsed ? "Expand navigation" : "Collapse navigation"
+          }
+          aria-pressed={sidebarCollapsed}
+          onClick={onSidebarToggle}
+        >
+          {sidebarCollapsed ? (
+            <PanelLeftOpen size={18} />
+          ) : (
+            <PanelLeftClose size={18} />
+          )}
+        </button>
+      </FloatingTooltip>
       <button
         className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 dark:text-neutral-400 dark:hover:bg-dark-hover dark:hover:text-neutral-100 md:hidden"
         onClick={onMenu}
