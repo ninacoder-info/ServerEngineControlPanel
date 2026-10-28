@@ -9,6 +9,19 @@ import { z } from "zod";
 const input =
   "mt-1.5 w-full rounded-md border border-neutral-300 bg-transparent px-3 py-2 text-sm text-neutral-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-neutral-700 dark:text-neutral-100";
 const providers = ["nginx", "apache", "openlitespeed", "caddy"];
+const domainPattern =
+  /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
+
+function projectPathError(value, root) {
+  const projectPath = String(value || "").replace(/\/+$/, "");
+  const websiteRoot = String(root || "/server-engine/www").replace(/\/+$/, "");
+  if (!projectPath) return "Choose a project folder.";
+  if (projectPath === websiteRoot)
+    return `Choose a subfolder inside ${websiteRoot}; the website root itself cannot be used.`;
+  if (!projectPath.startsWith(`${websiteRoot}/`))
+    return `Project folder must be inside ${websiteRoot}.`;
+  return "";
+}
 function Field({ label, value, onChange, children, hint, error, tooltip }) {
   if (label === "Web server provider") return null;
   const inferredError =
@@ -40,10 +53,7 @@ const projectSchema = z.object({
     .string()
     .trim()
     .min(1, "Domain is required.")
-    .regex(
-      /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i,
-      "Enter a valid domain.",
-    ),
+    .regex(domainPattern, "Enter a valid domain."),
   project_path: z.string().trim().optional(),
   target: z.string().trim().optional(),
   node_version: z.string().trim().optional(),
@@ -163,6 +173,10 @@ export default function ProjectCreateModal({
         path: ["node_version"],
         message: "Install a Node.js runtime first.",
       });
+    if (isNode) {
+      const pathError = projectPathError(form.project_path, root);
+      if (pathError) issues.push({ path: ["project_path"], message: pathError });
+    }
     if (issues.length) {
       setErrors(
         Object.fromEntries(
@@ -173,6 +187,36 @@ export default function ProjectCreateModal({
     }
     setErrors({});
     setBusy(true);
+    if (!editing) {
+      const domainResponse = await apiRequest("/api/v1/websites/check-domain", {
+        method: "POST",
+        body: JSON.stringify({ domain: form.domain.trim(), aliases: [] }),
+      });
+      if (!domainResponse.ok) {
+        setErrors({ domain: await readApiError(domainResponse) });
+        setBusy(false);
+        return;
+      }
+
+      if (isNode) {
+        const directoryResponse = await apiRequest(
+          `/api/v1/websites/directories/status?path=${encodeURIComponent(form.project_path)}`,
+        );
+        const status = directoryResponse.ok ? await directoryResponse.json() : null;
+        if (
+          !directoryResponse.ok ||
+          (status?.exists && (!status.is_directory || !status.is_empty))
+        ) {
+          setErrors({
+            project_path: status?.exists
+              ? "Project folder is not empty. Choose a different folder."
+              : "The project folder could not be verified.",
+          });
+          setBusy(false);
+          return;
+        }
+      }
+    }
     const payload = isNode
       ? {
           ...form,

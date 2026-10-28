@@ -666,6 +666,13 @@ export default function ProxyEditModal({
   async function submit(event) {
     event.preventDefault();
     const result = schema.safeParse(form);
+    const aliases = (Array.isArray(form.aliases) ? form.aliases : parseLines(form.aliases))
+      .map((value) => String(value).trim().toLowerCase())
+      .filter(Boolean);
+    const invalidAlias = aliases.find((alias) => !domainPattern.test(alias));
+    const duplicatePrimary = aliases.some(
+      (alias) => alias === form.domain.trim().toLowerCase(),
+    );
     if (!result.success) {
       setErrors(
         Object.fromEntries(
@@ -674,15 +681,36 @@ export default function ProxyEditModal({
       );
       return;
     }
+    if (invalidAlias || duplicatePrimary) {
+      setErrors({
+        domain: invalidAlias
+          ? `Invalid domain: ${invalidAlias}`
+          : "An additional domain cannot duplicate the primary domain.",
+      });
+      setTab("domain");
+      return;
+    }
     setBusy(true);
     setErrors({});
+    if (!editing) {
+      const domainResponse = await apiRequest("/api/v1/websites/check-domain", {
+        method: "POST",
+        body: JSON.stringify({ domain: form.domain.trim(), aliases }),
+      });
+      if (!domainResponse.ok) {
+        setErrors({ domain: await readApiError(domainResponse) });
+        setTab("domain");
+        setBusy(false);
+        return;
+      }
+    }
     const payload = {
       ...form,
       name: form.name.trim() || form.domain,
       ssl_enforce_tls: form.ssl_enabled && form.ssl_enforce_tls,
       timeout: Number(form.timeout),
       cache_ttl: Number(form.cache_ttl),
-      aliases: form.aliases,
+      aliases,
       access_allowed_ips: form.access_allowed_ips,
       maintenance_bypass: form.maintenance_bypass,
       redirects:

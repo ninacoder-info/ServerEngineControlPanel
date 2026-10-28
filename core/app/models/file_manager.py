@@ -34,6 +34,7 @@ class FileEntry(BaseModel):
     path: str
     kind: Literal["folder", "file", "link"]
     size: int
+    created_at: float
     modified_at: float
     owner: str
     group: str

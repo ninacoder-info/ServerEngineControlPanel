@@ -992,11 +992,11 @@ export function FileManagerWorkspace({
                   className="file-toolbar-button inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
                   disabled={treeRootPath === "/"}
                   onClick={() => {
-                  const parent =
-                    treeRootPath.split("/").slice(0, -1).join("/") || "/";
-                  setTreeRootPath(parent);
-                  loadTreeRoot(parent);
-                  loadEntries(parent);
+                    const parent =
+                      treeRootPath.split("/").slice(0, -1).join("/") || "/";
+                    setTreeRootPath(parent);
+                    loadTreeRoot(parent);
+                    loadEntries(parent);
                   }}
                   aria-label="Go up one level"
                 >
@@ -1249,18 +1249,18 @@ export function FileManagerWorkspace({
               </FloatingTooltip>
               <FloatingTooltip content="Rename">
                 <button
-                className="file-toolbar-button inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-violet-500 hover:bg-neutral-100 hover:text-violet-700 disabled:cursor-not-allowed disabled:opacity-40 dark:text-violet-300 dark:hover:bg-neutral-800 dark:hover:text-violet-200"
-                disabled={!selected}
-                onClick={renameItem}
+                  className="file-toolbar-button inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-violet-500 hover:bg-neutral-100 hover:text-violet-700 disabled:cursor-not-allowed disabled:opacity-40 dark:text-violet-300 dark:hover:bg-neutral-800 dark:hover:text-violet-200"
+                  disabled={!selected}
+                  onClick={renameItem}
                 >
                   <Pencil size={15} />
                 </button>
               </FloatingTooltip>
               <FloatingTooltip content="Delete">
                 <button
-                className="file-toolbar-button inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-rose-500 hover:bg-neutral-100 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-40 dark:text-rose-300 dark:hover:bg-neutral-800 dark:hover:text-rose-200"
-                disabled={!selectedPaths.length}
-                onClick={deleteItems}
+                  className="file-toolbar-button inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-rose-500 hover:bg-neutral-100 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-40 dark:text-rose-300 dark:hover:bg-neutral-800 dark:hover:text-rose-200"
+                  disabled={!selectedPaths.length}
+                  onClick={deleteItems}
                 >
                   <Trash2 size={15} />
                 </button>
@@ -1277,20 +1277,20 @@ export function FileManagerWorkspace({
               )}
               <FloatingTooltip content="Create ZIP">
                 <button
-                className="file-toolbar-button inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-purple-500 hover:bg-neutral-100 hover:text-purple-700 disabled:cursor-not-allowed disabled:opacity-40 dark:text-purple-300 dark:hover:bg-neutral-800 dark:hover:text-purple-200"
-                disabled={!selectedPaths.length}
-                onClick={makeArchive}
+                  className="file-toolbar-button inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-purple-500 hover:bg-neutral-100 hover:text-purple-700 disabled:cursor-not-allowed disabled:opacity-40 dark:text-purple-300 dark:hover:bg-neutral-800 dark:hover:text-purple-200"
+                  disabled={!selectedPaths.length}
+                  onClick={makeArchive}
                 >
                   <Archive size={15} />
                 </button>
               </FloatingTooltip>
               <FloatingTooltip content="Extract ZIP">
                 <button
-                className="file-toolbar-button inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-orange-500 hover:bg-neutral-100 hover:text-orange-700 disabled:cursor-not-allowed disabled:opacity-40 dark:text-orange-300 dark:hover:bg-neutral-800 dark:hover:text-orange-200"
-                disabled={
-                  !selected || !selected.name.toLowerCase().endsWith(".zip")
-                }
-                onClick={extractArchive}
+                  className="file-toolbar-button inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-orange-500 hover:bg-neutral-100 hover:text-orange-700 disabled:cursor-not-allowed disabled:opacity-40 dark:text-orange-300 dark:hover:bg-neutral-800 dark:hover:text-orange-200"
+                  disabled={
+                    !selected || !selected.name.toLowerCase().endsWith(".zip")
+                  }
+                  onClick={extractArchive}
                 >
                   <ArchiveRestore size={15} />
                 </button>
@@ -1445,7 +1445,7 @@ export function FileManagerWorkspace({
                       {entry.permissions}
                     </code>
                     <FloatingTooltip
-                      content={formatFullTime(entry.modified_at)}
+                      content={`Created ${formatFullTime(entry.created_at)} · Modified ${formatFullTime(entry.modified_at)}`}
                       className="inline-flex min-w-0 justify-self-start"
                     >
                       <span className="truncate">
@@ -1458,14 +1458,14 @@ export function FileManagerWorkspace({
                         className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-neutral-400 hover:bg-neutral-100 hover:text-neutral-800 dark:text-neutral-500 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
                         aria-label={`More actions for ${entry.name}`}
                         onClick={(event) => {
-                        event.stopPropagation();
-                        if (!selectedPaths.includes(entry.path))
-                          setSelectedPaths([entry.path]);
-                        setContextMenu({
-                          x: event.clientX,
-                          y: event.clientY,
-                          empty: false,
-                        });
+                          event.stopPropagation();
+                          if (!selectedPaths.includes(entry.path))
+                            setSelectedPaths([entry.path]);
+                          setContextMenu({
+                            x: event.clientX,
+                            y: event.clientY,
+                            empty: false,
+                          });
                         }}
                       >
                         <MoreVertical size={15} />
@@ -1683,14 +1683,20 @@ export function FileManagerWorkspace({
                 </h2>
               </div>
               <div className="flex items-center gap-1">
-                <FloatingTooltip content={editorExpanded ? "Exit full view" : "Full view"}>
+                <FloatingTooltip
+                  content={editorExpanded ? "Exit full view" : "Full view"}
+                >
                   <button
                     type="button"
                     className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
                     aria-label={editorExpanded ? "Exit full view" : "Full view"}
                     onClick={() => setEditorExpanded((expanded) => !expanded)}
                   >
-                    {editorExpanded ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+                    {editorExpanded ? (
+                      <Minimize2 size={18} />
+                    ) : (
+                      <Maximize2 size={18} />
+                    )}
                   </button>
                 </FloatingTooltip>
                 <FloatingTooltip content="Close editor">

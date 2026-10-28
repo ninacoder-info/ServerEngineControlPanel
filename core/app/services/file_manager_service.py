@@ -82,6 +82,11 @@ class FileManagerService:
     def default_directory(self) -> Path:
         return self.web_root if self.web_root.is_dir() else self.root
 
+    @staticmethod
+    def _created_at(file_stat: os.stat_result) -> float:
+        """Return creation time where available, with a Linux ctime fallback."""
+        return float(getattr(file_stat, "st_birthtime", file_stat.st_ctime))
+
     def list_directory(self, relative: str = "") -> list[FileEntry]:
         directory = self.safe_path(relative)
         if not directory.exists() or not directory.is_dir():
@@ -91,7 +96,19 @@ class FileManagerService:
             try:
                 stat = item.stat()
                 kind = "folder" if item.is_dir() else "link" if item.is_symlink() else "file"
-                entries.append(FileEntry(name=item.name, path=self.relative(item), kind=kind, size=stat.st_size, modified_at=stat.st_mtime, owner=self._owner(stat.st_uid), group=self._group(stat.st_gid), permissions=f"{stat_module.S_IMODE(stat.st_mode):04o}"))
+                entries.append(
+                    FileEntry(
+                        name=item.name,
+                        path=self.relative(item),
+                        kind=kind,
+                        size=stat.st_size,
+                        created_at=self._created_at(stat),
+                        modified_at=stat.st_mtime,
+                        owner=self._owner(stat.st_uid),
+                        group=self._group(stat.st_gid),
+                        permissions=f"{stat_module.S_IMODE(stat.st_mode):04o}",
+                    )
+                )
             except OSError:
                 continue
         return sorted(entries, key=lambda item: (item.kind != "folder", item.name.lower()))
@@ -342,7 +359,17 @@ class FileManagerService:
 
     def _entry(self, item: Path) -> FileEntry:
         stat = item.stat()
-        return FileEntry(name=item.name, path=self.relative(item), kind="folder" if item.is_dir() else "file", size=stat.st_size, modified_at=stat.st_mtime, owner=self._owner(stat.st_uid), group=self._group(stat.st_gid), permissions=f"{stat_module.S_IMODE(stat.st_mode):04o}")
+        return FileEntry(
+            name=item.name,
+            path=self.relative(item),
+            kind="folder" if item.is_dir() else "file",
+            size=stat.st_size,
+            created_at=self._created_at(stat),
+            modified_at=stat.st_mtime,
+            owner=self._owner(stat.st_uid),
+            group=self._group(stat.st_gid),
+            permissions=f"{stat_module.S_IMODE(stat.st_mode):04o}",
+        )
 
     @staticmethod
     def _owner(uid: int) -> str:
